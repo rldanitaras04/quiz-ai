@@ -1,0 +1,185 @@
+'use client';
+
+import { useState, useRef, useCallback, type JSX } from 'react';
+import Button from '@/components/ui/Button';
+import Modal from '@/components/ui/Modal';
+import { SUPPORTED_SOURCE_EXTENSIONS, MAX_FILE_SIZE_MB } from '@/lib/constants';
+
+interface SourceUploadProps {
+  offeringId: string;
+}
+
+export default function SourceUpload({ offeringId }: SourceUploadProps): JSX.Element {
+  const [open, setOpen] = useState(false);
+  const [dragActive, setDragActive] = useState(false);
+  const [file, setFile] = useState<File | null>(null);
+  const [title, setTitle] = useState('');
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const acceptedTypes = SUPPORTED_SOURCE_EXTENSIONS.join(',');
+
+  const validateFile = (f: File): string | null => {
+    const ext = '.' + f.name.split('.').pop()?.toLowerCase();
+    if (!SUPPORTED_SOURCE_EXTENSIONS.includes(ext as any)) {
+      return `Unsupported file type. Accepted: ${SUPPORTED_SOURCE_EXTENSIONS.join(', ')}`;
+    }
+    if (f.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
+      return `File too large. Maximum size: ${MAX_FILE_SIZE_MB}MB`;
+    }
+    return null;
+  };
+
+  const handleFile = (f: File) => {
+    const err = validateFile(f);
+    if (err) {
+      setError(err);
+      return;
+    }
+    setError(null);
+    setFile(f);
+    if (!title) {
+      setTitle(f.name.replace(/\.[^/.]+$/, ''));
+    }
+  };
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setDragActive(false);
+    const f = e.dataTransfer.files[0];
+    if (f) handleFile(f);
+  }, [title]);
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setDragActive(true);
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setDragActive(false);
+  }, []);
+
+  const handleUpload = async () => {
+    if (!file) return;
+    setUploading(true);
+    setError(null);
+
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('title', title || file.name);
+      formData.append('subject_offering_id', offeringId);
+
+      const res = await fetch('/api/sources/upload', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || 'Upload failed');
+      }
+
+      setSuccess(true);
+      setTimeout(() => {
+        setOpen(false);
+        setFile(null);
+        setTitle('');
+        setSuccess(false);
+        window.location.reload();
+      }, 1000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Upload failed');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleClose = () => {
+    setOpen(false);
+    setFile(null);
+    setTitle('');
+    setError(null);
+    setSuccess(false);
+  };
+
+  return (
+    <>
+      <Button onClick={() => setOpen(true)}>Upload Material</Button>
+      <Modal
+        open={open}
+        onClose={handleClose}
+        title="Upload Source Material"
+        actions={
+          <>
+            <Button variant="ghost" onClick={handleClose}>Cancel</Button>
+            <Button onClick={handleUpload} loading={uploading} disabled={!file || success}>
+              {success ? 'Uploaded!' : 'Upload'}
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <div
+            onDrop={handleDrop}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onClick={() => inputRef.current?.click()}
+            className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors ${
+              dragActive
+                ? 'border-[var(--color-primary)] bg-[var(--color-primary-light)]'
+                : file
+                ? 'border-[var(--color-success)] bg-[var(--color-success-light)]'
+                : 'border-[var(--color-border)] hover:border-[var(--color-primary)]'
+            }`}
+          >
+            <input
+              ref={inputRef}
+              type="file"
+              accept={acceptedTypes}
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) handleFile(f);
+              }}
+              className="hidden"
+            />
+            {file ? (
+              <div>
+                <p className="font-medium text-[var(--color-foreground)]">{file.name}</p>
+                <p className="text-sm text-[var(--color-muted)]">
+                  {(file.size / 1024).toFixed(1)} KB
+                </p>
+              </div>
+            ) : (
+              <div>
+                <p className="text-[var(--color-muted)]">
+                  Drag and drop a file here, or click to browse
+                </p>
+                <p className="text-xs text-[var(--color-muted-light)] mt-1">
+                  Supported: {SUPPORTED_SOURCE_EXTENSIONS.join(', ')} (max {MAX_FILE_SIZE_MB}MB)
+                </p>
+              </div>
+            )}
+          </div>
+
+          <div>
+            <label className="text-sm font-medium text-[var(--color-foreground)]">Title</label>
+            <input
+              type="text"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="Material title"
+              className="mt-1 w-full rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-foreground)] focus:border-[var(--color-primary)] focus:ring-2 focus:ring-[var(--color-focus-ring)] focus:outline-none"
+            />
+          </div>
+
+          {error && <p className="text-sm text-[var(--color-danger)]">{error}</p>}
+          {success && <p className="text-sm text-[var(--color-success)]">Upload successful!</p>}
+        </div>
+      </Modal>
+    </>
+  );
+}
