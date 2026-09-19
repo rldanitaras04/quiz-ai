@@ -1,13 +1,29 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { createAdminClient } from '@/lib/supabase/admin';
 import { generateEmbedding } from '@/lib/ai';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+const MAX_EMBEDDING_CHARS = 24_000; // ~6k tokens of input per request
+const RATE_LIMIT_REQUESTS = 30;
+const RATE_LIMIT_WINDOW_MS = 60_000;
+
+const rateBuckets = new Map<string, { count: number; resetAt: number }>();
+
+function checkRateLimit(key: string): boolean {
+  const now = Date.now();
+  const bucket = rateBuckets.get(key);
+  if (!bucket || now > bucket.resetAt) {
+    rateBuckets.set(key, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
+    return true;
+  }
+  bucket.count += 1;
+  return bucket.count <= RATE_LIMIT_REQUESTS;
+}
 
 export async function POST(request: NextRequest) {
+  // Service-role client is created per-request (never at module scope) so
+  // page-data collection during `next build` succeeds without env vars.
+  const supabase = createAdminClient();
+
   try {
     // Authenticate user
     const authHeader = request.headers.get('Authorization');
@@ -22,6 +38,21 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    if (!checkRateLimit(user.id)) {
+      return NextResponse.json({ error: 'Too many requests. Try again shortly.' }, { status: 429 });
+    }
+
+    // Only faculty (or admins) may generate embeddings.
+    const { data: roles } = await supabase
+      .from('user_roles')
+      .select('role')
+      .eq('user_id', user.id);
+
+    const isFaculty = roles?.some((r) => r.role === 'faculty' || r.role === 'super_admin');
+    if (!isFaculty) {
+      return NextResponse.json({ error: 'Forbidden: Faculty access required' }, { status: 403 });
+    }
+
     const body = await request.json();
     const { text, sourceMaterialId, chunkIndex, contentType } = body;
 
@@ -32,13 +63,20 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    if (typeof text === 'string' && text.length > MAX_EMBEDDING_CHARS) {
+      return NextResponse.json(
+        { error: `Text too large. Maximum ${MAX_EMBEDDING_CHARS} characters per request.` },
+        { status: 413 }
+      );
+    }
+
     let inputText = text;
 
     // If sourceMaterialId provided, fetch raw_text
     if (sourceMaterialId && !text) {
       const { data: source, error: sourceError } = await supabase
         .from('source_materials')
-        .select('raw_text')
+        .select('raw_text, subject_offering_id')
         .eq('id', sourceMaterialId)
         .single();
 
@@ -48,6 +86,22 @@ export async function POST(request: NextRequest) {
           { status: 404 }
         );
       }
+
+      // Faculty may only embed materials from offerings they are assigned to.
+      const { data: assignment } = await supabase
+        .from('faculty_assignments')
+        .select('id')
+        .eq('subject_offering_id', source.subject_offering_id)
+        .eq('faculty_id', user.id)
+        .maybeSingle();
+
+      if (!assignment) {
+        return NextResponse.json(
+          { error: 'Forbidden: not assigned to this subject offering' },
+          { status: 403 }
+        );
+      }
+
       inputText = source.raw_text;
     }
 

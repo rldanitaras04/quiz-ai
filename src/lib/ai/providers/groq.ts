@@ -6,10 +6,19 @@ import type {
   EmbeddingResult,
 } from '@/lib/ai/types';
 
-const groq = new OpenAI({
-  apiKey: process.env.GROQ_API_KEY,
-  baseURL: 'https://api.groq.com/openai/v1',
-});
+// Lazily constructed: avoids build-time crashes when GROQ_API_KEY is absent
+// and matches the lazy-init pattern used by the OpenAI provider.
+let groqInstance: OpenAI | null = null;
+
+function getGroq(): OpenAI {
+  if (!groqInstance) {
+    groqInstance = new OpenAI({
+      apiKey: process.env.GROQ_API_KEY,
+      baseURL: 'https://api.groq.com/openai/v1',
+    });
+  }
+  return groqInstance;
+}
 
 const GROQ_MODEL = 'llama-3.3-70b-versatile';
 
@@ -91,7 +100,7 @@ export async function generateQuestions(
   const startTime = Date.now();
   const prompt = buildQuestionPrompt(params);
 
-  const response = await groq.chat.completions.create({
+  const response = await getGroq().chat.completions.create({
     model: GROQ_MODEL,
     messages: [{ role: 'user', content: prompt }],
     temperature: 0.7,

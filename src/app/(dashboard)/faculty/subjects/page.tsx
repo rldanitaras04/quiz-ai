@@ -6,6 +6,24 @@ import Badge from '@/components/ui/Badge';
 import EmptyState from '@/components/ui/EmptyState';
 import Link from 'next/link';
 
+interface SubjectOfferingSummary {
+  id: string;
+  status: string;
+  subject: { id: string; code: string; title: string } | null;
+  semester: { id: string; name: string; academic_year: { id: string; name: string } | null } | null;
+  section: {
+    id: string;
+    name: string;
+    program: { id: string; code: string; name: string } | null;
+    year_level: { id: string; name: string } | null;
+  } | null;
+}
+
+interface AssignmentRow {
+  id: string;
+  subject_offering: SubjectOfferingSummary | null;
+}
+
 export default async function FacultySubjectsPage() {
   const supabase = await createClient();
 
@@ -26,9 +44,13 @@ export default async function FacultySubjectsPage() {
     `)
     .eq('faculty_id', user.id);
 
-  const offeringIds = (assignments ?? []).map((a: any) => a.subject_offering?.id).filter(Boolean);
+  const assignmentRows = (assignments ?? []) as unknown as AssignmentRow[];
 
-  let enrollmentCounts: Record<string, number> = {};
+  const offeringIds = assignmentRows
+    .map((a) => a.subject_offering?.id)
+    .filter((id): id is string => Boolean(id));
+
+  const enrollmentCounts: Record<string, number> = {};
   if (offeringIds.length > 0) {
     const { data: enrollments } = await supabase
       .from('enrollments')
@@ -36,7 +58,7 @@ export default async function FacultySubjectsPage() {
       .in('subject_offering_id', offeringIds)
       .eq('status', 'enrolled');
 
-    (enrollments ?? []).forEach((e: any) => {
+    (enrollments ?? []).forEach((e: { subject_offering_id: string }) => {
       enrollmentCounts[e.subject_offering_id] = (enrollmentCounts[e.subject_offering_id] ?? 0) + 1;
     });
   }
@@ -54,14 +76,14 @@ export default async function FacultySubjectsPage() {
         description="Subject offerings you are assigned to"
       />
 
-      {assignments && assignments.length > 0 ? (
+      {assignmentRows.length > 0 ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {assignments.map((a: any) => {
+          {assignmentRows.map((a) => {
             const offering = a.subject_offering;
             const subject = offering?.subject;
             const section = offering?.section;
             const semester = offering?.semester;
-            const studentCount = enrollmentCounts[offering?.id] ?? 0;
+            const studentCount = offering ? enrollmentCounts[offering.id] ?? 0 : 0;
 
             return (
               <Link key={a.id} href={`/faculty/subjects/${offering?.id}`}>

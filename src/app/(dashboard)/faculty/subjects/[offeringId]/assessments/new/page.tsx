@@ -1,7 +1,6 @@
 'use client';
 
-import { useState, useCallback, type JSX } from 'react';
-import { useRouter } from 'next/navigation';
+import { use, useState, useCallback, type JSX } from 'react';
 import PageHeader from '@/components/ui/PageHeader';
 import Button from '@/components/ui/Button';
 import StepBasicInfo from '@/components/assessment/StepBasicInfo';
@@ -15,7 +14,7 @@ import type {
   QuestionType,
   Difficulty,
   BloomLevel,
-  QuestionWithChoices,
+  DraftQuestion,
   SourceMaterial,
 } from '@/lib/types';
 
@@ -41,7 +40,7 @@ export interface WizardState {
   difficultyDistribution: Record<Difficulty, number>;
   bloomDistribution: Record<BloomLevel, number>;
   customInstructions: string;
-  generatedQuestions: QuestionWithChoices[];
+  generatedQuestions: DraftQuestion[];
   generationStats: {
     totalGenerated: number;
     duplicatesRemoved: number;
@@ -86,14 +85,14 @@ interface StepProps {
 export default function NewAssessmentPage({
   params,
 }: {
-  params: { offeringId: string };
+  params: Promise<{ offeringId: string }>;
 }): JSX.Element {
-  const router = useRouter();
   const [currentStep, setCurrentStep] = useState(0);
   const [state, setState] = useState<WizardState>(INITIAL_STATE);
   const [stepErrors, setStepErrors] = useState<Record<string, string>>({});
 
-  const { offeringId } = params;
+  // Next 16 delivers params as a Promise; unwrap synchronously with use().
+  const { offeringId } = use(params);
 
   const updateState = useCallback((updates: Partial<WizardState>) => {
     setState((prev) => ({ ...prev, ...updates }));

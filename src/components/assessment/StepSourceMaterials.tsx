@@ -29,26 +29,36 @@ export default function StepSourceMaterials({
   offeringId,
   errors,
 }: StepSourceMaterialsProps): JSX.Element {
-  const [loading, setLoading] = useState(true);
+  // Only fetch when the wizard has no materials yet; otherwise this step is
+  // already satisfied and nothing has to load. (Loading state is initialised
+  // from that condition instead of being set inside the effect, which caused a
+  // cascading re-render.)
+  const [loading, setLoading] = useState(state.sourceMaterials.length === 0);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (state.sourceMaterials.length > 0) return;
+
+    let cancelled = false;
+
     async function load() {
       try {
-        setLoading(true);
         const materials = await getSourceMaterials(offeringId);
-        onUpdate({ sourceMaterials: materials });
+        if (!cancelled) onUpdate({ sourceMaterials: materials });
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load materials');
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : 'Failed to load materials');
+        }
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     }
-    if (state.sourceMaterials.length === 0) {
-      load();
-    } else {
-      setLoading(false);
-    }
+
+    load();
+
+    return () => {
+      cancelled = true;
+    };
   }, [offeringId, state.sourceMaterials.length, onUpdate]);
 
   const toggleSource = (id: string) => {

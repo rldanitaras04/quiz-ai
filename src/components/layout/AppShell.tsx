@@ -11,6 +11,7 @@ interface AppShellProps {
   role: UserRole;
   userName: string;
   userEmail: string;
+  avatarUrl: string | null;
 }
 
 export default function AppShell({
@@ -19,6 +20,7 @@ export default function AppShell({
   role,
   userName,
   userEmail,
+  avatarUrl,
 }: AppShellProps): JSX.Element {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
@@ -68,6 +70,7 @@ export default function AppShell({
           title={title}
           userName={userName}
           role={role}
+          avatarUrl={avatarUrl}
           onMenuToggle={toggleMobileMenu}
         />
 

@@ -530,6 +530,20 @@ export interface QuestionWithAnswer extends QuestionWithChoices {
   answer_key: AnswerKey | null;
 }
 
+/**
+ * Authoring-wizard question. While an assessment is being drafted the wizard
+ * carries answer information that the persisted `questions` row does not own:
+ * correctness lives in `answer_keys` and per-choice flags in `question_choices`.
+ */
+export interface DraftQuestionChoice extends QuestionChoice {
+  is_correct?: boolean;
+}
+
+export interface DraftQuestion extends QuestionWithChoices {
+  question_choices: DraftQuestionChoice[];
+  canonical_answer?: string;
+}
+
 export interface DeploymentWithDetails extends AssessmentDeployment {
   assessment_version: AssessmentVersion & { assessment: Assessment };
   subject_offering: SubjectOfferingWithDetails;

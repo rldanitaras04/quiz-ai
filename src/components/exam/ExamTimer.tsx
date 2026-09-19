@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
 interface ExamTimerProps {
   expiresAt: string;
@@ -27,9 +27,18 @@ export default function ExamTimer({ expiresAt, onTimeUp }: ExamTimerProps) {
   }, [onTimeUp]);
 
   useEffect(() => {
-    if (remaining <= 0 && !hasCalledTimeUp.current) {
-      hasCalledTimeUp.current = true;
-      onTimeUpRef.current();
+    // Read the clock again rather than closing over `remaining`, so the effect
+    // only depends on the authoritative expiry timestamp.
+    const initiallyRemaining = Math.max(
+      0,
+      Math.floor((new Date(expiresAt).getTime() - Date.now()) / 1000)
+    );
+
+    if (initiallyRemaining <= 0) {
+      if (!hasCalledTimeUp.current) {
+        hasCalledTimeUp.current = true;
+        onTimeUpRef.current();
+      }
       return;
     }
 

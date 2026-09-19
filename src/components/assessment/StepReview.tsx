@@ -5,21 +5,15 @@ import Button from '@/components/ui/Button';
 import Badge from '@/components/ui/Badge';
 import QuestionNavigator from './QuestionNavigator';
 import QuestionEditor from './QuestionEditor';
-import type {
-  QuestionWithChoices,
-  QuestionType,
-  Difficulty,
-  BloomLevel,
-  QuestionChoice,
-} from '@/lib/types';
+import type { DraftQuestion } from '@/lib/types';
 
 interface StepReviewProps {
   state: {
-    generatedQuestions: QuestionWithChoices[];
+    generatedQuestions: DraftQuestion[];
     assessmentId: string | null;
   };
   onUpdate: (updates: {
-    generatedQuestions?: QuestionWithChoices[];
+    generatedQuestions?: DraftQuestion[];
   }) => void;
   offeringId: string;
   errors: Record<string, string>;
@@ -31,14 +25,13 @@ export default function StepReview({
   errors,
 }: StepReviewProps): JSX.Element {
   const [selectedIndex, setSelectedIndex] = useState(0);
-  const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   const questions = state.generatedQuestions;
   const currentQuestion = questions[selectedIndex];
 
   const handleUpdateQuestion = useCallback(
-    (index: number, updates: Partial<QuestionWithChoices>) => {
+    (index: number, updates: Partial<DraftQuestion>) => {
       const next = questions.map((q, i) =>
         i === index ? { ...q, ...updates } : q
       );
@@ -59,7 +52,7 @@ export default function StepReview({
   );
 
   const handleAddQuestion = useCallback(() => {
-    const newQuestion: QuestionWithChoices = {
+    const newQuestion: DraftQuestion = {
       id: `manual-${Date.now()}`,
       assessment_version_id: '',
       question_type: 'multiple_choice',
@@ -85,7 +78,7 @@ export default function StepReview({
     setSelectedIndex(questions.length);
   }, [questions, onUpdate]);
 
-  const getQuestionStatus = (q: QuestionWithChoices): 'complete' | 'incomplete' => {
+  const getQuestionStatus = (q: DraftQuestion): 'complete' | 'incomplete' => {
     if (!q.question_text.trim()) return 'incomplete';
     if (q.question_type === 'multiple_choice') {
       const filledChoices = q.question_choices.filter((c) => c.choice_text.trim());

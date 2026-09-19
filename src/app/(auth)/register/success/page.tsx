@@ -1,6 +1,15 @@
 import Link from "next/link";
 
-export default function RegisterSuccessPage() {
+export const dynamic = "force-dynamic";
+
+export default async function RegisterSuccessPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ email?: string }>;
+}) {
+  const { email } = await searchParams;
+  const emailFailed = email === "failed";
+
   return (
     <div className="rounded-xl bg-[var(--color-surface)] p-8 text-center shadow-lg">
       <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-[var(--color-success-light)]">
@@ -21,11 +30,23 @@ export default function RegisterSuccessPage() {
       </div>
 
       <h2 className="text-xl font-semibold text-[var(--color-foreground)]">
-        Check your email
+        {emailFailed ? "Account created — email issue" : "Check your email"}
       </h2>
       <p className="mt-2 text-sm text-[var(--color-muted)]">
-        We&apos;ve sent a verification link to your email address. Please check
-        your inbox and click the link to activate your account.
+        {emailFailed ? (
+          <>
+            Your account was created, but the verification email could not be
+            sent (the built-in mailer is rate-limited to ~2 emails/hour).
+            Please try registering again in a little while or contact an
+            administrator to resend the verification link.
+          </>
+        ) : (
+          <>
+            We&apos;ve sent a verification link to your email address. Please
+            check your inbox and click the link to activate your account —
+            you&apos;ll then sign in with the password you chose.
+          </>
+        )}
       </p>
 
       <div className="mt-6 space-y-3">

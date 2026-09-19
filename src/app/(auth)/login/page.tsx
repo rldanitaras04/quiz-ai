@@ -1,12 +1,14 @@
 'use client';
 
 import { useState, type FormEvent, type JSX } from 'react';
+import { useRouter } from 'next/navigation';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import { useSupabase } from '@/lib/hooks';
 import { APP_NAME, APP_DESCRIPTION } from '@/lib/constants';
 
 export default function LoginPage(): JSX.Element {
+  const router = useRouter();
   const supabase = useSupabase();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -30,7 +32,11 @@ export default function LoginPage(): JSX.Element {
       return;
     }
 
-    window.location.href = '/dashboard';
+    // Client-side navigation: the browser Supabase client has already written
+    // the auth cookies, so the next server render (router.refresh) sees the
+    // session and resolves the role dashboard.
+    router.push('/');
+    router.refresh();
   };
 
   return (

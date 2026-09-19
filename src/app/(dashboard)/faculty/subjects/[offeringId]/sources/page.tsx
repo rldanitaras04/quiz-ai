@@ -5,9 +5,27 @@ import { Card, CardContent } from '@/components/ui/Card';
 import Badge from '@/components/ui/Badge';
 import EmptyState from '@/components/ui/EmptyState';
 import SourceUpload from '@/components/sources/SourceUpload';
+import DeleteSourceButton from './DeleteSourceButton';
 
 interface Props {
   params: Promise<{ offeringId: string }>;
+}
+
+interface OfferingHeading {
+  id: string;
+  subject: { id: string; code: string; title: string } | null;
+  section: { id: string; name: string } | null;
+}
+
+interface SourceMaterialRow {
+  id: string;
+  title: string;
+  source_type: string;
+  processing_status: string;
+  file_size: number | null;
+  original_filename: string | null;
+  mime_type: string | null;
+  created_at: string;
 }
 
 function formatFileSize(bytes: number | null): string {
@@ -32,7 +50,7 @@ export default async function SourcesPage({ params }: Props) {
 
   if (!offering) redirect('/faculty/subjects');
 
-  const o = offering as any;
+  const o = offering as unknown as OfferingHeading;
 
   const { data: sources } = await supabase
     .from('source_materials')
@@ -75,7 +93,7 @@ export default async function SourcesPage({ params }: Props) {
 
       {sources && sources.length > 0 ? (
         <div className="space-y-3">
-          {sources.map((s: any) => (
+          {(sources as unknown as SourceMaterialRow[]).map((s) => (
             <Card key={s.id}>
               <CardContent className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div className="flex items-center gap-3 min-w-0">
@@ -90,9 +108,16 @@ export default async function SourcesPage({ params }: Props) {
                     </p>
                   </div>
                 </div>
-                <Badge variant={statusVariant(s.processing_status)}>
-                  {s.processing_status}
-                </Badge>
+                <div className="flex items-center gap-2">
+                  <Badge variant={statusVariant(s.processing_status)}>
+                    {s.processing_status}
+                  </Badge>
+                  <DeleteSourceButton
+                    sourceMaterialId={s.id}
+                    offeringId={offeringId}
+                    title={s.title}
+                  />
+                </div>
               </CardContent>
             </Card>
           ))}

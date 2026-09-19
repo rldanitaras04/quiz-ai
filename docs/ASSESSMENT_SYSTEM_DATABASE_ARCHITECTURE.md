@@ -2,8 +2,8 @@
 
 ## Database Architecture and Supabase Security Specification
 
-**Purpose:** Authoritative database blueprint for MiMo.\
-**Database:** Supabase PostgreSQL\
+**Purpose:** Authoritative database blueprint for implementation
+**Database:** Supabase PostgreSQL
 **Security:** Supabase Auth + PostgreSQL Row Level Security (RLS) +
 least privilege
 

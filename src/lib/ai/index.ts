@@ -1,4 +1,4 @@
-import { createClient } from '@supabase/supabase-js';
+import { createAdminClient } from '@/lib/supabase/admin';
 import type {
   GenerateQuestionsParams,
   GenerationResult,
@@ -84,10 +84,7 @@ export async function extractAndStoreSource(
   buffer: Buffer,
   mimeType: string
 ): Promise<{ chunkCount: number; embeddingsGenerated: number }> {
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-  );
+  const supabase = createAdminClient();
 
   // Update status to processing
   await supabase

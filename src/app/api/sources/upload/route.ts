@@ -1,17 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { createAdminClient } from '@/lib/supabase/admin';
 import { extractAndStoreSource } from '@/lib/ai';
 import {
   MAX_FILE_SIZE_MB,
   SUPPORTED_SOURCE_FILE_TYPES,
 } from '@/lib/constants';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
-
 export async function POST(request: NextRequest) {
+  // Service-role client is created per-request (never at module scope) so
+  // page-data collection during `next build` succeeds without env vars.
+  const supabase = createAdminClient();
   try {
     // Authenticate user
     const authHeader = request.headers.get('Authorization');
@@ -37,7 +35,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Forbidden: Faculty access required' }, { status: 403 });
     }
 
-    // Parse form data
+    // Parse form data (subjectOfferingId must be read before ownership check)
     const formData = await request.formData();
     const file = formData.get('file') as File;
     const subjectOfferingId = formData.get('subjectOfferingId') as string;
@@ -51,8 +49,26 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Validate file type
-    if (!SUPPORTED_SOURCE_FILE_TYPES.includes(file.type as any)) {
+    // Faculty may only upload to offerings they are assigned to.
+    if (isFaculty && !roles?.some((r) => r.role === 'super_admin')) {
+      const { data: assignment } = await supabase
+        .from('faculty_assignments')
+        .select('id')
+        .eq('subject_offering_id', subjectOfferingId)
+        .eq('faculty_id', user.id)
+        .maybeSingle();
+
+      if (!assignment) {
+        return NextResponse.json(
+          { error: 'Forbidden: not assigned to this subject offering' },
+          { status: 403 }
+        );
+      }
+    }
+
+    // Validate file type (server-side; the browser's accept= list is a hint only)
+    const supportedTypes: readonly string[] = SUPPORTED_SOURCE_FILE_TYPES;
+    if (!supportedTypes.includes(file.type)) {
       return NextResponse.json(
         { error: `Unsupported file type: ${file.type}. Supported: PDF, DOCX, TXT, MD` },
         { status: 400 }

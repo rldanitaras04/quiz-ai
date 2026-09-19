@@ -3,7 +3,24 @@
 import { useState, useRef, useCallback, type JSX } from 'react';
 import Button from '@/components/ui/Button';
 import Modal from '@/components/ui/Modal';
+import { useSupabase } from '@/lib/hooks';
 import { SUPPORTED_SOURCE_EXTENSIONS, MAX_FILE_SIZE_MB } from '@/lib/constants';
+
+function isSupportedExtension(ext: string): boolean {
+  return (SUPPORTED_SOURCE_EXTENSIONS as readonly string[]).includes(ext);
+}
+
+/** Client-side pre-check; the upload route validates type and size again. */
+function validateFile(f: File): string | null {
+  const ext = '.' + f.name.split('.').pop()?.toLowerCase();
+  if (!isSupportedExtension(ext)) {
+    return `Unsupported file type. Accepted: ${SUPPORTED_SOURCE_EXTENSIONS.join(', ')}`;
+  }
+  if (f.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
+    return `File too large. Maximum size: ${MAX_FILE_SIZE_MB}MB`;
+  }
+  return null;
+}
 
 interface SourceUploadProps {
   offeringId: string;
@@ -18,39 +35,35 @@ export default function SourceUpload({ offeringId }: SourceUploadProps): JSX.Ele
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const supabase = useSupabase();
 
   const acceptedTypes = SUPPORTED_SOURCE_EXTENSIONS.join(',');
 
-  const validateFile = (f: File): string | null => {
-    const ext = '.' + f.name.split('.').pop()?.toLowerCase();
-    if (!SUPPORTED_SOURCE_EXTENSIONS.includes(ext as any)) {
-      return `Unsupported file type. Accepted: ${SUPPORTED_SOURCE_EXTENSIONS.join(', ')}`;
-    }
-    if (f.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
-      return `File too large. Maximum size: ${MAX_FILE_SIZE_MB}MB`;
-    }
-    return null;
-  };
+  const handleFile = useCallback(
+    (f: File) => {
+      const err = validateFile(f);
+      if (err) {
+        setError(err);
+        return;
+      }
+      setError(null);
+      setFile(f);
+      if (!title) {
+        setTitle(f.name.replace(/\.[^/.]+$/, ''));
+      }
+    },
+    [title]
+  );
 
-  const handleFile = (f: File) => {
-    const err = validateFile(f);
-    if (err) {
-      setError(err);
-      return;
-    }
-    setError(null);
-    setFile(f);
-    if (!title) {
-      setTitle(f.name.replace(/\.[^/.]+$/, ''));
-    }
-  };
-
-  const handleDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    setDragActive(false);
-    const f = e.dataTransfer.files[0];
-    if (f) handleFile(f);
-  }, [title]);
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      setDragActive(false);
+      const f = e.dataTransfer.files[0];
+      if (f) handleFile(f);
+    },
+    [handleFile]
+  );
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -71,10 +84,19 @@ export default function SourceUpload({ offeringId }: SourceUploadProps): JSX.Ele
       const formData = new FormData();
       formData.append('file', file);
       formData.append('title', title || file.name);
-      formData.append('subject_offering_id', offeringId);
+      // The route reads camelCase `subjectOfferingId`; sending
+      // `subject_offering_id` made every upload fail validation.
+      formData.append('subjectOfferingId', offeringId);
+
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData.session?.access_token;
+      if (!accessToken) {
+        throw new Error('Your session has expired. Please sign in again.');
+      }
 
       const res = await fetch('/api/sources/upload', {
         method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}` },
         body: formData,
       });
 

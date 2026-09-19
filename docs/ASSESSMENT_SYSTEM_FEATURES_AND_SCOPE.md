@@ -2,11 +2,11 @@
 
 ## Features and Scope of Work
 
-**Document status:** Authoritative functional scope for MiMo
-implementation\
+**Document status:** Authoritative functional scope for 
+implementation
 **Target stack:** Next.js, TypeScript, Tailwind CSS, Supabase
 PostgreSQL/Auth/Storage, OpenAI API, optional Grok adapter, pgvector,
-Chart.js, Vercel, GitHub\
+Chart.js, Vercel, GitHub
 **Delivery model:** Mobile-first Progressive Web Application (PWA)
 
 ------------------------------------------------------------------------

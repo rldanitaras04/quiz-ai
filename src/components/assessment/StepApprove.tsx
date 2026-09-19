@@ -3,9 +3,8 @@
 import { useState, type JSX } from 'react';
 import { useRouter } from 'next/navigation';
 import Button from '@/components/ui/Button';
-import Spinner from '@/components/ui/Spinner';
 import Badge from '@/components/ui/Badge';
-import { approveAssessment } from '@/app/(dashboard)/faculty/subjects/[offeringId]/assessments/actions';
+import { approveAssessment, saveGeneratedQuestions } from '@/app/(dashboard)/faculty/subjects/[offeringId]/assessments/actions';
 import type { WizardState } from '@/app/(dashboard)/faculty/subjects/[offeringId]/assessments/new/page';
 
 interface StepApproveProps {
@@ -40,11 +39,38 @@ export default function StepApprove({
       setError('No assessment ID found. Please go back and create the assessment first.');
       return;
     }
+    if (questions.length === 0) {
+      setError('No questions to save. Go back and generate questions first.');
+      return;
+    }
 
     setApproving(true);
     setError(null);
 
     try {
+      // 1. Persist the reviewed questions (questions + choices + answer keys).
+      const saveResult = await saveGeneratedQuestions(state.assessmentId,
+        questions.map((q) => ({
+          question_type: q.question_type,
+          question_text: q.question_text,
+          difficulty: q.difficulty,
+          bloom_level: q.bloom_level,
+          points: q.points,
+          is_ai_generated: q.is_ai_generated ?? false,
+          question_choices: q.question_choices?.map((c) => ({
+            choice_key: c.choice_key,
+            choice_text: c.choice_text,
+            is_correct: c.is_correct ?? false,
+          })),
+          canonical_answer: q.canonical_answer,
+        }))
+      );
+      if (!saveResult.success) {
+        setError(saveResult.error ?? 'Failed to save questions');
+        return;
+      }
+
+      // 2. Approve assessment + version.
       await approveAssessment(state.assessmentId);
       setApproved(true);
       setTimeout(() => {

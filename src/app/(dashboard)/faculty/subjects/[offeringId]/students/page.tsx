@@ -1,13 +1,31 @@
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import PageHeader from '@/components/ui/PageHeader';
-import { Card, CardContent } from '@/components/ui/Card';
+import { Card } from '@/components/ui/Card';
 import Badge from '@/components/ui/Badge';
 import EmptyState from '@/components/ui/EmptyState';
 import AddStudentButton from './AddStudentButton';
 
 interface Props {
   params: Promise<{ offeringId: string }>;
+}
+
+interface OfferingHeading {
+  id: string;
+  subject: { id: string; code: string; title: string } | null;
+  section: { id: string; name: string } | null;
+}
+
+interface EnrollmentRow {
+  id: string;
+  status: string;
+  enrolled_at: string;
+  student: {
+    id: string;
+    full_name: string;
+    email: string | null;
+    student_profiles: { student_number: string } | { student_number: string }[] | null;
+  } | null;
 }
 
 export default async function StudentsPage({ params }: Props) {
@@ -25,7 +43,7 @@ export default async function StudentsPage({ params }: Props) {
 
   if (!offering) redirect('/faculty/subjects');
 
-  const o = offering as any;
+  const o = offering as unknown as OfferingHeading;
 
   const { data: enrollments } = await supabase
     .from('enrollments')
@@ -38,7 +56,9 @@ export default async function StudentsPage({ params }: Props) {
     .eq('subject_offering_id', offeringId)
     .order('enrolled_at', { ascending: true });
 
-  const activeEnrollments = (enrollments ?? []).filter((e: any) => e.status === 'enrolled');
+  const activeEnrollments = ((enrollments ?? []) as unknown as EnrollmentRow[]).filter(
+    (e) => e.status === 'enrolled'
+  );
 
   return (
     <div>
@@ -68,7 +88,7 @@ export default async function StudentsPage({ params }: Props) {
                 </tr>
               </thead>
               <tbody>
-                {activeEnrollments.map((e: any) => {
+                {activeEnrollments.map((e) => {
                   const studentProfile = e.student?.student_profiles;
                   const studentNumber = Array.isArray(studentProfile) && studentProfile.length > 0
                     ? studentProfile[0].student_number

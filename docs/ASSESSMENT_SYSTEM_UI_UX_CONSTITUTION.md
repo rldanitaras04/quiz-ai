@@ -1,11 +1,11 @@
 # AI-Assisted Secure Assessment System
 
-## UI/UX Constitution for MiMo
+## UI/UX Constitution
 
-**Status:** Permanent frontend authority\
-**Framework:** Next.js + TypeScript + Tailwind CSS\
-**Visualization:** Chart.js\
-**Target:** Mobile-first PWA\
+**Status:** Permanent frontend authority
+**Framework:** Next.js + TypeScript + Tailwind CSS
+**Visualization:** Chart.js
+**Target:** Mobile-first PWA
 **Priority:** Clarity, security, accessibility, responsiveness,
 examination reliability
 

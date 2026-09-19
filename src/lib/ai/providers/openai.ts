@@ -6,9 +6,18 @@ import type {
   EmbeddingResult,
 } from '@/lib/ai/types';
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+// Lazily constructed: instantiating at module scope crashes `next build`
+// (page-data collection) whenever the API key is not configured.
+let openaiInstance: OpenAI | null = null;
+
+function getOpenAI(): OpenAI {
+  if (!openaiInstance) {
+    openaiInstance = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
+    });
+  }
+  return openaiInstance;
+}
 
 const OPENAI_MODEL = 'gpt-4o';
 const EMBEDDING_MODEL = 'text-embedding-3-small';
@@ -96,7 +105,7 @@ export async function generateQuestions(
   const startTime = Date.now();
   const prompt = buildQuestionPrompt(params);
 
-  const response = await openai.chat.completions.create({
+  const response = await getOpenAI().chat.completions.create({
     model: OPENAI_MODEL,
     messages: [{ role: 'user', content: prompt }],
     temperature: 0.7,
@@ -124,7 +133,7 @@ export async function generateQuestions(
 }
 
 export async function generateEmbedding(text: string): Promise<EmbeddingResult> {
-  const response = await openai.embeddings.create({
+  const response = await getOpenAI().embeddings.create({
     model: EMBEDDING_MODEL,
     input: buildEmbeddingPrompt(text),
   });

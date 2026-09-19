@@ -7,6 +7,23 @@ import Button from '@/components/ui/Button';
 import EmptyState from '@/components/ui/EmptyState';
 import Link from 'next/link';
 
+interface FacultyOffering {
+  id: string;
+  status: string;
+  subject: { id: string; code: string; title: string } | null;
+  section: { id: string; name: string } | null;
+  semester: {
+    id: string;
+    name: string;
+    academic_year: { id: string; name: string } | null;
+  } | null;
+}
+
+interface FacultyAssignmentRow {
+  id: string;
+  subject_offering: FacultyOffering | null;
+}
+
 export default async function FacultyDashboardPage() {
   const supabase = await createClient();
 
@@ -18,7 +35,11 @@ export default async function FacultyDashboardPage() {
     .select('id, subject_offering:subject_offerings(id, subject:subjects(id, code, title), section:sections(id, name), semester:semesters(id, name, academic_year:academic_years(id, name)), status)')
     .eq('faculty_id', user.id);
 
-  const offeringIds = (assignments ?? []).map((a: any) => a.subject_offering?.id).filter(Boolean);
+  const assignmentRows = (assignments ?? []) as unknown as FacultyAssignmentRow[];
+
+  const offeringIds = assignmentRows
+    .map((a) => a.subject_offering?.id)
+    .filter((id): id is string => Boolean(id));
 
   const [enrollmentsCount, assessmentsCount, deploymentsCount] = await Promise.all([
     offeringIds.length > 0
@@ -28,7 +49,7 @@ export default async function FacultyDashboardPage() {
       : { count: 0 },
     offeringIds.length > 0
       ? supabase.from('assessments').select('id', { count: 'exact', head: true })
-          .in('subject_id', (assignments ?? []).map((a: any) => a.subject_offering?.subject?.id).filter(Boolean))
+          .in('subject_offering_id', offeringIds)
       : { count: 0 },
     offeringIds.length > 0
       ? supabase.from('assessment_deployments').select('id', { count: 'exact', head: true })
@@ -37,7 +58,7 @@ export default async function FacultyDashboardPage() {
       : { count: 0 },
   ]);
 
-  const totalSubjects = assignments?.length ?? 0;
+  const totalSubjects = assignmentRows.length;
   const totalStudents = enrollmentsCount.count ?? 0;
   const totalAssessments = assessmentsCount.count ?? 0;
   const activeDeployments = deploymentsCount.count ?? 0;
@@ -77,9 +98,9 @@ export default async function FacultyDashboardPage() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div>
           <h2 className="text-lg font-semibold text-[var(--color-foreground)] mb-4">My Subjects</h2>
-          {assignments && assignments.length > 0 ? (
+          {assignmentRows.length > 0 ? (
             <div className="space-y-3">
-              {assignments.slice(0, 5).map((a: any) => {
+              {assignmentRows.slice(0, 5).map((a) => {
                 const offering = a.subject_offering;
                 const subject = offering?.subject;
                 return (

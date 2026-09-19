@@ -1,35 +1,15 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
+import { notifyOfferingStudents } from '@/lib/notifications';
 import type {
   Assessment,
-  AssessmentVersion,
   Question,
-  QuestionChoice,
-  AnswerKey,
   QuestionType,
   Difficulty,
   BloomLevel,
 } from '@/lib/types';
-
-function assertFaculty(supabase: Awaited<ReturnType<typeof createClient>>) {
-  return async function check(offeringId: string) {
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-    if (authError || !user) throw new Error('Not authenticated');
-
-    const { data: assignment } = await supabase
-      .from('faculty_assignments')
-      .select('id')
-      .eq('subject_offering_id', offeringId)
-      .eq('faculty_id', user.id)
-      .single();
-
-    if (!assignment) throw new Error('Not authorized for this offering');
-    return user.id;
-  };
-}
 
 export async function getSourceMaterials(offeringId: string) {
   const supabase = await createClient();
@@ -108,9 +88,10 @@ export async function createAssessment(
   const { data: { user }, error: authError } = await supabase.auth.getUser();
   if (authError || !user) throw new Error('Not authenticated');
 
+  // Ownership check (RLS also enforces is_faculty_of_offering).
   const { data: offering } = await supabase
     .from('subject_offerings')
-    .select('subject_id')
+    .select('id')
     .eq('id', offeringId)
     .single();
 
@@ -119,7 +100,7 @@ export async function createAssessment(
   const { data: assessment, error: createErr } = await supabase
     .from('assessments')
     .insert({
-      subject_id: offering.subject_id,
+      subject_offering_id: offeringId,
       created_by: user.id,
       title: data.title,
       assessment_type: 'multiple_choice' as QuestionType,
@@ -420,11 +401,22 @@ export async function deleteQuestion(questionId: string) {
   if (error) throw new Error(error.message);
 
   if (question) {
-    await supabase
+    // Decrement position of all questions after the deleted one
+    const { data: laterQuestions } = await supabase
       .from('questions')
-      .update({ position: supabase.rpc ? 0 : 0 })
+      .select('id, position')
       .eq('assessment_version_id', question.assessment_version_id)
-      .gt('position', question.position);
+      .gt('position', question.position)
+      .order('position', { ascending: true });
+
+    if (laterQuestions) {
+      for (const q of laterQuestions) {
+        await supabase
+          .from('questions')
+          .update({ position: q.position - 1 })
+          .eq('id', q.id);
+      }
+    }
 
     const { count } = await supabase
       .from('questions')
@@ -518,7 +510,7 @@ export async function publishAssessment(assessmentId: string) {
 
   const { data: assessment } = await supabase
     .from('assessments')
-    .select('current_version_id')
+    .select('current_version_id, title, subject_offering_id')
     .eq('id', assessmentId)
     .single();
 
@@ -540,8 +532,143 @@ export async function publishAssessment(assessmentId: string) {
     .eq('id', assessment.current_version_id);
   if (verErr) throw new Error(verErr.message);
 
+  // Tell the class an assessment is coming (notifications are server-written
+  // only; see lib/notifications.ts).
+  await notifyOfferingStudents({
+    offeringId: assessment.subject_offering_id,
+    type: 'assessment_published',
+    title: 'New assessment published',
+    body: `${assessment.title} has been published. Watch for its schedule.`,
+    data: { assessment_id: assessmentId },
+  });
+
   revalidatePath(`/faculty/subjects`);
   return { success: true };
+}
+
+export async function saveGeneratedQuestions(
+  assessmentId: string,
+  questions: {
+    question_type: QuestionType;
+    question_text: string;
+    difficulty: Difficulty;
+    bloom_level: BloomLevel;
+    points: number;
+    is_ai_generated?: boolean;
+    question_choices?: { choice_key: string; choice_text: string; is_correct?: boolean }[];
+    canonical_answer?: string;
+    accepted_answers?: string[];
+  }[]
+): Promise<{ success: boolean; saved?: number; error?: string }> {
+  const supabase = await createClient();
+  const { data: { user }, error: authError } = await supabase.auth.getUser();
+  if (authError || !user) return { success: false, error: 'Not authenticated' };
+
+  if (!assessmentId) return { success: false, error: 'Missing assessment' };
+  if (!questions || questions.length === 0) return { success: false, error: 'No questions to save' };
+
+  // RLS restricts this select to assessments in offerings the faculty owns.
+  const { data: assessment } = await supabase
+    .from('assessments')
+    .select('current_version_id')
+    .eq('id', assessmentId)
+    .single();
+
+  if (!assessment?.current_version_id) return { success: false, error: 'Assessment not found or not authorized' };
+  const versionId = assessment.current_version_id;
+
+  // Idempotent re-save (wizard retry): clear any previous questions first.
+  // Cascades remove choices and answer keys.
+  const { error: delErr } = await supabase
+    .from('questions')
+    .delete()
+    .eq('assessment_version_id', versionId);
+  if (delErr) return { success: false, error: `Failed to reset questions: ${delErr.message}` };
+
+  let saved = 0;
+  for (let i = 0; i < questions.length; i++) {
+    const q = questions[i];
+    if (!q.question_text?.trim()) continue;
+
+    const { data: question, error: qErr } = await supabase
+      .from('questions')
+      .insert({
+        assessment_version_id: versionId,
+        question_type: q.question_type,
+        question_text: q.question_text,
+        difficulty: q.difficulty,
+        bloom_level: q.bloom_level,
+        points: q.points,
+        position: i + 1,
+        status: 'active',
+        is_ai_generated: q.is_ai_generated ?? false,
+        created_by: user.id,
+      })
+      .select('id')
+      .single();
+
+    if (qErr || !question) return { success: false, error: `Failed to save question ${i + 1}: ${qErr?.message ?? 'unknown'}` };
+
+    if (q.question_type === 'multiple_choice' && q.question_choices && q.question_choices.length > 0) {
+      const { data: choices, error: cErr } = await supabase
+        .from('question_choices')
+        .insert(q.question_choices.map((c, ci) => ({
+          question_id: question.id,
+          choice_key: c.choice_key,
+          choice_text: c.choice_text,
+          position: ci,
+        })))
+        .select('id, choice_key');
+
+      if (cErr) return { success: false, error: `Failed to save choices for question ${i + 1}: ${cErr.message}` };
+
+      const correct = q.question_choices.find((c) => c.is_correct);
+      if (correct && choices) {
+        const correctRow = choices.find((c) => c.choice_key === correct.choice_key);
+        if (correctRow) {
+          await supabase.from('answer_keys').insert({
+            question_id: question.id,
+            correct_choice_id: correctRow.id,
+            updated_by: user.id,
+          });
+        }
+      }
+    }
+
+    if (q.question_type === 'identification' && q.canonical_answer?.trim()) {
+      await supabase.from('answer_keys').insert({
+        question_id: question.id,
+        canonical_answer: q.canonical_answer,
+        accepted_answers: q.accepted_answers ?? [],
+        updated_by: user.id,
+      });
+    }
+
+    saved++;
+  }
+
+  // Refresh version totals.
+  const { count } = await supabase
+    .from('questions')
+    .select('id', { count: 'exact', head: true })
+    .eq('assessment_version_id', versionId);
+
+  const { data: pointRows } = await supabase
+    .from('questions')
+    .select('points')
+    .eq('assessment_version_id', versionId);
+
+  await supabase
+    .from('assessment_versions')
+    .update({
+      total_items: count || 0,
+      total_points: pointRows?.reduce((sum, r) => sum + (r.points || 0), 0) || 0,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', versionId);
+
+  revalidatePath(`/faculty/subjects`);
+  return { success: true, saved };
 }
 
 export async function triggerGeneration(

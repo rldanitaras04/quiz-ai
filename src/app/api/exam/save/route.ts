@@ -10,7 +10,21 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { attemptId, answers } = await request.json();
+    const body = await request.json().catch(() => null);
+    const attemptId = body?.attemptId;
+    const answers = body?.answers;
+
+    // Never trust the payload shape: the offline queue can retry with stale or
+    // malformed data after an upgrade.
+    if (typeof attemptId !== 'string' || !attemptId) {
+      return NextResponse.json({ error: 'attemptId is required' }, { status: 400 });
+    }
+    if (!Array.isArray(answers) || answers.length === 0) {
+      return NextResponse.json({ error: 'answers must be a non-empty array' }, { status: 400 });
+    }
+    if (answers.length > 500) {
+      return NextResponse.json({ error: 'Too many answers in one request' }, { status: 413 });
+    }
 
     const { data: attempt, error: attemptError } = await supabase
       .from('exam_attempts')
@@ -47,9 +61,18 @@ export async function POST(request: Request) {
     const serverRevisions: Record<string, number> = {};
 
     for (const answer of answers) {
-      if (!validQuestionIds.has(answer.questionId)) {
+      if (
+        typeof answer?.questionId !== 'string' ||
+        !validQuestionIds.has(answer.questionId) ||
+        (answer.selectedChoiceId !== null && typeof answer.selectedChoiceId !== 'string') ||
+        (answer.textAnswer !== null && typeof answer.textAnswer !== 'string')
+      ) {
         continue;
       }
+
+      const clientRevision = Number.isFinite(Number(answer.clientRevision))
+        ? Number(answer.clientRevision)
+        : 0;
 
       const { data: existing } = await supabase
         .from('student_responses')
@@ -58,7 +81,7 @@ export async function POST(request: Request) {
         .eq('question_id', answer.questionId)
         .single();
 
-      if (existing && answer.clientRevision < existing.server_revision) {
+      if (existing && clientRevision < existing.server_revision) {
         serverRevisions[answer.questionId] = existing.server_revision;
         continue;
       }
@@ -69,7 +92,7 @@ export async function POST(request: Request) {
           .update({
             selected_choice_id: answer.selectedChoiceId,
             text_answer: answer.textAnswer,
-            client_revision: answer.clientRevision,
+            client_revision: clientRevision,
             server_revision: existing.server_revision + 1,
             updated_at: new Date().toISOString(),
           })
@@ -86,7 +109,7 @@ export async function POST(request: Request) {
             question_id: answer.questionId,
             selected_choice_id: answer.selectedChoiceId,
             text_answer: answer.textAnswer,
-            client_revision: answer.clientRevision,
+            client_revision: clientRevision,
             server_revision: 1,
           })
           .select('server_revision')

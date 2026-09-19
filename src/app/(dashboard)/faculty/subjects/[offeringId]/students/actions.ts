@@ -1,6 +1,7 @@
 'use server';
 
 import { createClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/admin';
 
 export async function addStudentToOffering(
   offeringId: string,
@@ -20,7 +21,15 @@ export async function addStudentToOffering(
 
   if (!assignment) return { error: 'Not authorized for this offering' };
 
-  const { data: studentProfile } = await supabase
+  // The lookup runs with the service-role client on purpose. Under RLS a
+  // faculty member may only read student_profiles for students who are
+  // ALREADY enrolled in one of their offerings, so resolving a student to
+  // enroll via the session client always failed — the exact case this action
+  // exists for. Authorization was already established above (the caller must
+  // be assigned to this offering), and the enrollment write itself still goes
+  // through the session client, so RLS keeps enforcing the write.
+  const admin = createAdminClient();
+  const { data: studentProfile } = await admin
     .from('student_profiles')
     .select('user_id')
     .eq('student_number', studentNumber)

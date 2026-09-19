@@ -1,6 +1,8 @@
 import { redirect } from 'next/navigation';
 import type { JSX, ReactNode } from 'react';
 import { createClient } from '@/lib/supabase/server';
+import { getPrimaryRole } from '@/lib/constants';
+import { getAvatarUrl } from '@/lib/avatar';
 import AppShell from '@/components/layout/AppShell';
 
 interface DashboardLayoutProps {
@@ -25,10 +27,9 @@ export default async function DashboardLayout({ children }: DashboardLayoutProps
   const { data: roles } = await supabase
     .from('user_roles')
     .select('*')
-    .eq('user_id', user.id)
-    .order('created_at', { ascending: true });
+    .eq('user_id', user.id);
 
-  const role = roles && roles.length > 0 ? roles[0].role : 'student';
+  const role = getPrimaryRole(roles?.map((r) => r.role) ?? []);
   const userName = profile?.full_name ?? user.email ?? 'User';
   const userEmail = user.email ?? '';
 
@@ -38,6 +39,7 @@ export default async function DashboardLayout({ children }: DashboardLayoutProps
       role={role}
       userName={userName}
       userEmail={userEmail}
+      avatarUrl={getAvatarUrl(profile?.avatar_path)}
     >
       {children}
     </AppShell>

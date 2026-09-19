@@ -4,18 +4,76 @@ import { useState, useCallback, type JSX } from 'react';
 import Button from '@/components/ui/Button';
 import Spinner from '@/components/ui/Spinner';
 import { createAssessment, updateGenerationConfig, triggerGeneration } from '@/app/(dashboard)/faculty/subjects/[offeringId]/assessments/actions';
+import { useSupabase } from '@/lib/hooks';
 import type {
-  WizardState,
   QuestionType,
   Difficulty,
   BloomLevel,
+  DraftQuestion,
 } from '@/lib/types';
+
+/** A choice as returned by /api/ai/generate (accepts either field naming). */
+interface GeneratedChoicePayload {
+  key?: string;
+  choice_key?: string;
+  text?: string;
+  choice_text?: string;
+  isCorrect?: boolean;
+  is_correct?: boolean;
+}
+
+/** A question as returned by /api/ai/generate. */
+interface GeneratedQuestionPayload {
+  questionType?: QuestionType;
+  question_type?: QuestionType;
+  questionText?: string;
+  question_text?: string;
+  difficulty?: Difficulty;
+  bloomLevel?: BloomLevel;
+  bloom_level?: BloomLevel;
+  points?: number;
+  choices?: GeneratedChoicePayload[];
+  canonicalAnswer?: string;
+  canonical_answer?: string;
+}
+
+/** Convert the AI API's GeneratedQuestion shape to the wizard's DraftQuestion shape. */
+function mapGeneratedQuestion(raw: GeneratedQuestionPayload, position: number): DraftQuestion {
+  const id = `gen-${Date.now()}-${position}`;
+  return {
+    id,
+    assessment_version_id: '',
+    question_type: raw.questionType === 'identification' ? 'identification' : 'multiple_choice',
+    question_text: raw.questionText ?? raw.question_text ?? '',
+    difficulty: raw.difficulty ?? 'moderate',
+    bloom_level: raw.bloomLevel ?? raw.bloom_level ?? 'understand',
+    points: raw.points ?? 1,
+    position,
+    status: 'active',
+    created_by: '',
+    is_ai_generated: true,
+    generation_metadata: null,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    question_choices: (raw.choices ?? []).map((c, i) => ({
+      id: `${id}-c${i}`,
+      question_id: id,
+      choice_key: c.key ?? c.choice_key ?? String.fromCharCode(65 + i),
+      choice_text: c.text ?? c.choice_text ?? '',
+      position: i,
+      created_at: '',
+      updated_at: '',
+      is_correct: c.isCorrect ?? c.is_correct ?? false,
+    })),
+    canonical_answer: raw.canonicalAnswer ?? raw.canonical_answer,
+  };
+}
+import type { WizardState } from '@/app/(dashboard)/faculty/subjects/[offeringId]/assessments/new/page';
 
 interface StepGenerateProps {
   state: WizardState;
   onUpdate: (updates: Partial<WizardState>) => void;
   offeringId: string;
-  errors: Record<string, string>;
 }
 
 interface GenerationPhase {
@@ -27,17 +85,15 @@ export default function StepGenerate({
   state,
   onUpdate,
   offeringId,
-  errors,
 }: StepGenerateProps): JSX.Element {
+  const supabase = useSupabase();
   const [phases, setPhases] = useState<GenerationPhase[]>([
     { label: 'Creating assessment record', status: 'pending' },
     { label: 'Saving generation config', status: 'pending' },
-    { label: 'Triggering AI generation', status: 'pending' },
-    { label: 'Validating results', status: 'pending' },
+    { label: 'Generating questions via AI', status: 'pending' },
   ]);
   const [currentPhase, setCurrentPhase] = useState(-1);
   const [generationError, setGenerationError] = useState<string | null>(null);
-  const [jobId, setJobId] = useState<string | null>(null);
 
   const updatePhase = useCallback(
     (index: number, status: GenerationPhase['status']) => {
@@ -59,7 +115,7 @@ export default function StepGenerate({
       const assessment = await createAssessment(offeringId, {
         title: state.title,
         instructions: state.instructions,
-        assessmentCategory: state.assessmentCategory,
+        assessment_category: state.assessmentCategory,
       });
       updatePhase(0, 'done');
       onUpdate({ assessmentId: assessment.id });
@@ -80,75 +136,99 @@ export default function StepGenerate({
       // Phase 3: Trigger generation
       setCurrentPhase(2);
       updatePhase(2, 'active');
-      const job = await triggerGeneration(assessment.id, {
-        source_material_ids: state.selectedSourceIds,
+      await triggerGeneration(assessment.id, {        source_material_ids: state.selectedSourceIds,
         question_types: state.questionTypes,
         count_per_type: state.countPerType,
         difficulty_distribution: state.difficultyDistribution,
         bloom_distribution: state.bloomDistribution,
         custom_instructions: state.customInstructions || undefined,
       });
-      setJobId(job.id);
       updatePhase(2, 'done');
 
-      // Phase 4: Validate
+      // Phase 4: Call AI generation API
       setCurrentPhase(3);
       updatePhase(3, 'active');
 
-      // Simulate validation delay - in production this would poll the job status
-      await new Promise((resolve) => setTimeout(resolve, 1500));
-      updatePhase(3, 'done');
-
-      // Simulate generated questions
       const totalQ = state.questionTypes.reduce(
-        (sum, t) => sum + (state.countPerType[t] || 0),
+        (sum: number, t: QuestionType) => sum + (state.countPerType[t] || 0),
         0
       );
 
-      const mockQuestions = Array.from({ length: totalQ }, (_, i) => {
-        const type = i < (state.countPerType.multiple_choice || 0)
-          ? 'multiple_choice' as QuestionType
-          : 'identification' as QuestionType;
+      // Fetch source chunk IDs for the selected source materials
+      const { data: sourceChunks } = await supabase
+        .from('source_chunks')
+        .select('id')
+        .in('source_material_id', state.selectedSourceIds);
 
+      const sourceChunkIds = sourceChunks?.map((c) => c.id) || [];
+
+      // Generate questions for each type via the AI API
+      const allGeneratedQuestions: DraftQuestion[] = [];
+      const errors: string[] = [];
+
+      for (const questionType of state.questionTypes) {
+        const count = state.countPerType[questionType] || 0;
+        if (count === 0) continue;
+
+        // Determine difficulty and bloom distribution for this batch
         const difficulties: Difficulty[] = ['easy', 'moderate', 'difficult'];
-        const diffIndex = i % 3;
-        const difficulty = difficulties[diffIndex];
-
         const blooms: BloomLevel[] = ['remember', 'understand', 'apply', 'analyze', 'evaluate', 'create'];
-        const bloomIndex = i % 6;
 
-        return {
-          id: `mock-${i}`,
-          assessment_version_id: '',
-          question_type: type,
-          question_text: `Sample question ${i + 1} (${type === 'multiple_choice' ? 'MCQ' : 'ID'} - ${difficulty})`,
-          difficulty,
-          bloom_level: blooms[bloomIndex],
-          points: 1,
-          position: i + 1,
-          status: 'active',
-          created_by: '',
-          is_ai_generated: true,
-          generation_metadata: null,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-          question_choices: type === 'multiple_choice'
-            ? [
-                { id: `c-${i}-a`, question_id: `mock-${i}`, choice_key: 'A', choice_text: 'Option A', position: 0, created_at: '', updated_at: '' },
-                { id: `c-${i}-b`, question_id: `mock-${i}`, choice_key: 'B', choice_text: 'Option B', position: 1, created_at: '', updated_at: '' },
-                { id: `c-${i}-c`, question_id: `mock-${i}`, choice_key: 'C', choice_text: 'Option C', position: 2, created_at: '', updated_at: '' },
-                { id: `c-${i}-d`, question_id: `mock-${i}`, choice_key: 'D', choice_text: 'Option D', position: 3, created_at: '', updated_at: '' },
-              ]
-            : [],
-        };
-      });
+        for (let i = 0; i < count; i++) {
+          const difficulty = difficulties[i % difficulties.length];
+          const bloomLevel = blooms[i % blooms.length];
+
+          try {
+            const response = await fetch('/api/ai/generate', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}`,
+              },
+              body: JSON.stringify({
+                sourceChunkIds,
+                topic: state.title,
+                questionType,
+                count: 1,
+                difficulty,
+                bloomLevel,
+                customInstructions: state.customInstructions,
+                assessmentId: assessment.id,
+                offeringId,
+              }),
+            });
+
+            if (!response.ok) {
+              const errData = await response.json();
+              errors.push(`Failed to generate ${questionType} #${i + 1}: ${errData.error}`);
+              continue;
+            }
+
+            const data = await response.json();
+            if (data.questions && data.questions.length > 0) {
+              allGeneratedQuestions.push(
+                mapGeneratedQuestion(data.questions[0], allGeneratedQuestions.length + 1)
+              );
+            }
+          } catch (err) {
+            errors.push(`Error generating ${questionType} #${i + 1}: ${err instanceof Error ? err.message : 'Unknown error'}`);
+          }
+        }
+      }
+
+      // If no questions were generated, show error
+      if (allGeneratedQuestions.length === 0) {
+        throw new Error(errors.length > 0 ? errors[0] : 'No questions were generated');
+      }
+
+      updatePhase(3, 'done');
 
       onUpdate({
-        generatedQuestions: mockQuestions,
+        generatedQuestions: allGeneratedQuestions,
         generationStats: {
-          totalGenerated: totalQ,
-          duplicatesRemoved: 0,
-          errors: [],
+          totalGenerated: allGeneratedQuestions.length,
+          duplicatesRemoved: totalQ - allGeneratedQuestions.length,
+          errors,
         },
         isGenerating: false,
       });
@@ -166,6 +246,7 @@ export default function StepGenerate({
     onUpdate,
     updatePhase,
     currentPhase,
+    supabase,
   ]);
 
   const retry = () => {
@@ -199,19 +280,19 @@ export default function StepGenerate({
           <dt className="text-[var(--color-muted)]">Question types:</dt>
           <dd className="text-[var(--color-foreground)]">
             {state.questionTypes
-              .filter((t) => (state.countPerType[t] || 0) > 0)
-              .map((t) => `${state.countPerType[t]} ${t === 'multiple_choice' ? 'MCQ' : 'ID'}`)
+              .filter((t: QuestionType) => (state.countPerType[t] || 0) > 0)
+              .map((t: QuestionType) => `${state.countPerType[t]} ${t === 'multiple_choice' ? 'MCQ' : 'ID'}`)
               .join(', ')}
           </dd>
           <dt className="text-[var(--color-muted)]">Total questions:</dt>
           <dd className="text-[var(--color-foreground)] font-semibold">
-            {state.questionTypes.reduce((sum, t) => sum + (state.countPerType[t] || 0), 0)}
+            {state.questionTypes.reduce((sum: number, t: QuestionType) => sum + (state.countPerType[t] || 0), 0)}
           </dd>
         </dl>
       </div>
 
       <div className="space-y-3">
-        {phases.map((phase, i) => (
+        {phases.map((phase) => (
           <div key={phase.label} className="flex items-center gap-3">
             <div className="shrink-0">
               {phase.status === 'done' && (

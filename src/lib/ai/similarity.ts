@@ -1,4 +1,4 @@
-import { createClient } from '@supabase/supabase-js';
+import { createAdminClient } from '@/lib/supabase/admin';
 import { DEFAULT_SIMILARITY_THRESHOLD } from '@/lib/constants';
 
 export function cosineSimilarity(a: number[], b: number[]): number {
@@ -55,10 +55,7 @@ export async function detectDuplicateWithinAssessment(
   newEmbedding: number[],
   threshold: number = DEFAULT_SIMILARITY_THRESHOLD
 ): Promise<{ isDuplicate: boolean; similarQuestion?: SimilarQuestion }> {
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-  );
+  const supabase = createAdminClient();
 
   const { data: questions, error } = await supabase
     .from('questions')
@@ -91,10 +88,7 @@ export async function findSimilarInQuestionBank(
   subjectId: string,
   threshold: number = DEFAULT_SIMILARITY_THRESHOLD
 ): Promise<SimilarQuestion[]> {
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-  );
+  const supabase = createAdminClient();
 
   const { data: questions, error } = await supabase
     .from('questions')

@@ -114,7 +114,6 @@ function NavIcon({ name }: { name?: string }): JSX.Element | null {
 export default function Sidebar({
   role,
   userName,
-  userEmail,
   collapsed = false,
   onToggleCollapse,
 }: SidebarProps): JSX.Element {

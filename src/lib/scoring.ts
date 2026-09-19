@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import type { StudentResponse, AnswerKey } from '@/lib/types';
 
 export function scoreMCQ(selectedChoiceId: string | null, correctChoiceId: string | null): number {
@@ -66,14 +67,22 @@ export function calculateScore(
   return { rawScore, possibleScore, percentage };
 }
 
-export async function scoreAttempt(attemptId: string): Promise<{
+/**
+ * Score an attempt. Pass a service-role client when called from API routes:
+ * answer keys and questions are not readable by students under RLS, so
+ * scoring must run with elevated read access.
+ */
+export async function scoreAttempt(
+  attemptId: string,
+  supabase?: SupabaseClient
+): Promise<{
   rawScore: number;
   possibleScore: number;
   percentage: number;
 }> {
-  const supabase = await createClient();
+  const db = supabase ?? (await createClient());
 
-  const { data: attempt, error: attemptError } = await supabase
+  const { data: attempt, error: attemptError } = await db
     .from('exam_attempts')
     .select('assessment_version_id')
     .eq('id', attemptId)
@@ -83,7 +92,7 @@ export async function scoreAttempt(attemptId: string): Promise<{
     throw new Error('Attempt not found');
   }
 
-  const { data: questions, error: questionsError } = await supabase
+  const { data: questions, error: questionsError } = await db
     .from('questions')
     .select('id, points')
     .eq('assessment_version_id', attempt.assessment_version_id);
@@ -94,7 +103,7 @@ export async function scoreAttempt(attemptId: string): Promise<{
 
   const questionIds = questions.map((q) => q.id);
 
-  const { data: answerKeys, error: keysError } = await supabase
+  const { data: answerKeys, error: keysError } = await db
     .from('answer_keys')
     .select('*')
     .in('question_id', questionIds);
@@ -103,7 +112,7 @@ export async function scoreAttempt(attemptId: string): Promise<{
     throw new Error('Failed to fetch answer keys');
   }
 
-  const { data: responses, error: responsesError } = await supabase
+  const { data: responses, error: responsesError } = await db
     .from('student_responses')
     .select('*')
     .eq('attempt_id', attemptId);
@@ -132,7 +141,7 @@ export async function scoreAttempt(attemptId: string): Promise<{
       earned = scored * question.points;
     }
 
-    await supabase
+    await db
       .from('student_responses')
       .update({
         earned_points: earned,

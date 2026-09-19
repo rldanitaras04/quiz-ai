@@ -7,17 +7,17 @@ import Select from '@/components/ui/Select';
 import Badge from '@/components/ui/Badge';
 import { QUESTION_TYPE_LABELS, DIFFICULTY_LABELS, BLOOM_LABELS } from '@/lib/constants';
 import type {
-  QuestionWithChoices,
+  DraftQuestion,
   QuestionType,
   Difficulty,
   BloomLevel,
 } from '@/lib/types';
 
 interface QuestionEditorProps {
-  question: QuestionWithChoices;
+  question: DraftQuestion;
   index: number;
   total: number;
-  onUpdate: (updates: Partial<QuestionWithChoices>) => void;
+  onUpdate: (updates: Partial<DraftQuestion>) => void;
   onDelete: () => void;
   onNavigate: (direction: -1 | 1) => void;
 }
@@ -38,7 +38,7 @@ export default function QuestionEditor({
   };
 
   const handleTypeChange = (type: QuestionType) => {
-    const updates: Partial<QuestionWithChoices> = { question_type: type };
+    const updates: Partial<DraftQuestion> = { question_type: type };
     if (type === 'identification') {
       updates.question_choices = [];
     } else if (type === 'multiple_choice' && question.question_choices.length === 0) {
@@ -255,9 +255,9 @@ export default function QuestionEditor({
           </label>
           <input
             type="text"
-            value={(question as any).canonical_answer || ''}
+            value={question.canonical_answer || ''}
             onChange={(e) => {
-              onUpdate({ ...question, canonical_answer: e.target.value } as any);
+              onUpdate({ canonical_answer: e.target.value });
               setIsDirty(true);
             }}
             placeholder="Enter the expected answer..."

@@ -1,9 +1,4 @@
-import { createClient } from '@supabase/supabase-js';
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+import { createAdminClient } from '@/lib/supabase/admin';
 
 interface LogAiUsageParams {
   userId: string;
@@ -19,6 +14,10 @@ interface LogAiUsageParams {
 
 export async function logAiUsage(params: LogAiUsageParams): Promise<void> {
   try {
+    // Service-role client is created lazily inside the call (never at module
+    // scope) so builds succeed without configured env vars.
+    const supabase = createAdminClient();
+
     await supabase.from('ai_usage_logs').insert({
       user_id: params.userId,
       assessment_id: params.assessmentId,

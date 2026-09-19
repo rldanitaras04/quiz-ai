@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import type { Profile, UserRoleRow } from '@/lib/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -31,54 +31,65 @@ export function useUser(): UserProfile {
 
   const supabase = useSupabase();
 
-  const fetchUser = useCallback(async () => {
-    try {
-      setState((prev) => ({ ...prev, loading: true, error: null }));
-
-      const { data: { user }, error: authError } = await supabase.auth.getUser();
-      if (authError || !user) {
-        setState({ profile: null, role: null, loading: false, error: 'Not authenticated' });
-        return;
-      }
-
-      const { data: profile, error: profileError } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', user.id)
-        .single();
-
-      if (profileError) {
-        setState({ profile: null, role: null, loading: false, error: profileError.message });
-        return;
-      }
-
-      const { data: roles } = await supabase
-        .from('user_roles')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: true });
-
-      const primaryRole = roles && roles.length > 0 ? roles[0] : null;
-
-      setState({
-        profile,
-        role: primaryRole,
-        loading: false,
-        error: null,
-      });
-    } catch (err) {
-      setState({
-        profile: null,
-        role: null,
-        loading: false,
-        error: err instanceof Error ? err.message : 'Unknown error',
-      });
-    }
-  }, [supabase]);
-
   useEffect(() => {
-    fetchUser();
-  }, [fetchUser]);
+    let cancelled = false;
+
+    // Async IIFE: every setState below happens after an await, so the effect
+    // body never triggers a synchronous cascading render.
+    async function load(): Promise<void> {
+      try {
+        const { data: { user }, error: authError } = await supabase.auth.getUser();
+        if (cancelled) return;
+
+        if (authError || !user) {
+          setState({ profile: null, role: null, loading: false, error: 'Not authenticated' });
+          return;
+        }
+
+        const { data: profile, error: profileError } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', user.id)
+          .single();
+
+        if (cancelled) return;
+
+        if (profileError) {
+          setState({ profile: null, role: null, loading: false, error: profileError.message });
+          return;
+        }
+
+        const { data: roles } = await supabase
+          .from('user_roles')
+          .select('*')
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: true });
+
+        if (cancelled) return;
+
+        setState({
+          profile,
+          role: roles && roles.length > 0 ? roles[0] : null,
+          loading: false,
+          error: null,
+        });
+      } catch (err) {
+        if (cancelled) return;
+        setState({
+          profile: null,
+          role: null,
+          loading: false,
+          error: err instanceof Error ? err.message : 'Unknown error',
+        });
+      }
+    }
+
+    load();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [supabase]);
 
   return state;
 }

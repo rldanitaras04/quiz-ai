@@ -3,7 +3,7 @@
 import type { JSX } from 'react';
 import Button from '@/components/ui/Button';
 import type { QuestionWithChoices } from '@/lib/types';
-import { QUESTION_TYPE_LABELS } from '@/lib/constants';
+
 
 interface QuestionNavigatorProps {
   questions: QuestionWithChoices[];

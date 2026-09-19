@@ -4,7 +4,6 @@ import PageHeader from '@/components/ui/PageHeader';
 import { Card, CardContent } from '@/components/ui/Card';
 import Badge from '@/components/ui/Badge';
 import EmptyState from '@/components/ui/EmptyState';
-import Link from 'next/link';
 
 export default async function StudentDashboardPage() {
   const supabase = await createClient();
@@ -18,11 +17,15 @@ export default async function StudentDashboardPage() {
     .eq('student_id', user.id)
     .eq('status', 'enrolled');
 
+  // Deployments are created as 'scheduled' and nothing ever flips them to
+  // 'active' (the time window is authoritative — see the
+  // deployment_effective_status view), so filtering on status = 'active'
+  // permanently hid every exam from students. Filter on the window instead.
   const { data: deployments } = await supabase
     .from('assessment_deployments')
     .select('id, opens_at, closes_at, status, assessment_version:assessment_versions(id, assessment:assessments(id, title))')
-    .in('subject_offering_id', (enrollments ?? []).map((e: any) => e.subject_offering?.id).filter(Boolean))
-    .eq('status', 'active')
+    .in('subject_offering_id', (enrollments ?? []).map((e: Record<string, unknown>) => (e.subject_offering as Record<string, unknown>)?.id as string).filter(Boolean))
+    .in('status', ['active', 'scheduled'])
     .gte('closes_at', new Date().toISOString())
     .order('opens_at', { ascending: true })
     .limit(5);
@@ -39,7 +42,7 @@ export default async function StudentDashboardPage() {
   const upcomingCount = deployments?.length ?? 0;
   const completedCount = results?.length ?? 0;
   const avgScore = completedCount > 0
-    ? Math.round((results ?? []).reduce((sum: number, r: any) => sum + (r.percentage ?? 0), 0) / completedCount)
+    ? Math.round((results ?? []).reduce((sum: number, r: Record<string, unknown>) => sum + ((r.percentage as number) ?? 0), 0) / completedCount)
     : 0;
 
   const stats = [
@@ -69,21 +72,21 @@ export default async function StudentDashboardPage() {
           <h2 className="text-lg font-semibold text-[var(--color-foreground)] mb-4">Upcoming Assessments</h2>
           {deployments && deployments.length > 0 ? (
             <div className="space-y-3">
-              {deployments.map((d: any) => {
-                const assessment = d.assessment_version?.assessment;
-                const opensAt = new Date(d.opens_at);
-                const closesAt = new Date(d.closes_at);
+              {deployments.map((d: Record<string, unknown>) => {
+                const assessment = (d.assessment_version as Record<string, unknown>)?.assessment as Record<string, unknown> | undefined;
+                const opensAt = new Date(d.opens_at as string);
+                const closesAt = new Date(d.closes_at as string);
                 const now = new Date();
                 const timeUntilOpen = opensAt > now
                   ? `Opens ${opensAt.toLocaleDateString()} ${opensAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
                   : `Closes ${closesAt.toLocaleDateString()} ${closesAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
 
                 return (
-                  <Card key={d.id}>
+                  <Card key={d.id as string}>
                     <CardContent className="flex items-center justify-between">
                       <div>
                         <p className="font-medium text-[var(--color-foreground)]">
-                          {assessment?.title ?? 'Untitled Assessment'}
+                          {(assessment?.title as string) ?? 'Untitled Assessment'}
                         </p>
                         <p className="text-sm text-[var(--color-muted)]">{timeUntilOpen}</p>
                       </div>
@@ -105,21 +108,23 @@ export default async function StudentDashboardPage() {
           <h2 className="text-lg font-semibold text-[var(--color-foreground)] mb-4">Recent Results</h2>
           {results && results.length > 0 ? (
             <div className="space-y-3">
-              {results.map((r: any) => {
-                const assessment = r.deployment?.assessment_version?.assessment;
+              {results.map((r: Record<string, unknown>) => {
+                const deployment = r.deployment as Record<string, unknown> | undefined;
+                const assessmentVersion = deployment?.assessment_version as Record<string, unknown> | undefined;
+                const assessment = assessmentVersion?.assessment as Record<string, unknown> | undefined;
                 return (
-                  <Card key={r.id}>
+                  <Card key={r.id as string}>
                     <CardContent className="flex items-center justify-between">
                       <div>
                         <p className="font-medium text-[var(--color-foreground)]">
-                          {assessment?.title ?? 'Untitled'}
+                          {(assessment?.title as string) ?? 'Untitled'}
                         </p>
                         <p className="text-sm text-[var(--color-muted)]">
-                          Score: {r.raw_score}/{r.possible_score} ({Math.round(r.percentage)}%)
+                          Score: {r.raw_score as number}/{r.possible_score as number} ({Math.round(r.percentage as number)}%)
                         </p>
                       </div>
-                      <Badge variant={r.percentage >= 75 ? 'success' : r.percentage >= 50 ? 'warning' : 'danger'}>
-                        {Math.round(r.percentage)}%
+                      <Badge variant={(r.percentage as number) >= 75 ? 'success' : (r.percentage as number) >= 50 ? 'warning' : 'danger'}>
+                        {Math.round(r.percentage as number)}%
                       </Badge>
                     </CardContent>
                   </Card>

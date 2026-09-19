@@ -17,6 +17,16 @@ export const ROLES: readonly UserRole[] = [
   'student',
 ] as const;
 
+export const ROLE_PRIORITY: Record<UserRole, number> = {
+  super_admin: 0,
+  faculty: 1,
+  student: 2,
+};
+
+export function getPrimaryRole(roles: UserRole[]): UserRole {
+  return [...roles].sort((a, b) => ROLE_PRIORITY[a] - ROLE_PRIORITY[b])[0] ?? 'student';
+}
+
 export const QUESTION_TYPES: readonly QuestionType[] = [
   'multiple_choice',
   'identification',
@@ -139,22 +149,22 @@ export const NAVIGATION: Record<UserRole, readonly NavItem[]> = {
     { label: 'AI Configuration', href: '/admin/ai-config', icon: 'cpu' },
     { label: 'Audit Logs', href: '/admin/audit-logs', icon: 'scroll' },
     { label: 'System Monitoring', href: '/admin/monitoring', icon: 'activity' },
+    { label: 'Notifications', href: '/notifications', icon: 'bell' },
+    { label: 'Profile', href: '/profile', icon: 'user' },
   ],
   faculty: [
     { label: 'Dashboard', href: '/faculty', icon: 'home' },
     { label: 'My Subjects', href: '/faculty/subjects', icon: 'book' },
-    { label: 'Assessments', href: '/faculty/assessments', icon: 'file-text' },
-    { label: 'Question Bank', href: '/faculty/question-bank', icon: 'database' },
-    { label: 'Results & Analytics', href: '/faculty/results', icon: 'bar-chart' },
-    { label: 'Notifications', href: '/faculty/notifications', icon: 'bell' },
+    { label: 'Notifications', href: '/notifications', icon: 'bell' },
+    { label: 'Profile', href: '/profile', icon: 'user' },
   ],
   student: [
     { label: 'Dashboard', href: '/student', icon: 'home' },
     { label: 'My Subjects', href: '/student/subjects', icon: 'book' },
     { label: 'Assessments', href: '/student/assessments', icon: 'file-text' },
     { label: 'My Results', href: '/student/results', icon: 'bar-chart' },
-    { label: 'Notifications', href: '/student/notifications', icon: 'bell' },
-    { label: 'Profile', href: '/student/profile', icon: 'user' },
+    { label: 'Notifications', href: '/notifications', icon: 'bell' },
+    { label: 'Profile', href: '/profile', icon: 'user' },
   ],
 } as const;
 

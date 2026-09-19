@@ -1,7 +1,6 @@
 'use client';
 
 import { type JSX } from 'react';
-import Badge from '@/components/ui/Badge';
 
 const SUGGESTIONS = [
   'Focus on key concepts from the selected materials',
@@ -25,7 +24,6 @@ interface StepCustomInstructionsProps {
 export default function StepCustomInstructions({
   state,
   onUpdate,
-  errors,
 }: StepCustomInstructionsProps): JSX.Element {
   const addSuggestion = (suggestion: string) => {
     const current = state.customInstructions.trim();

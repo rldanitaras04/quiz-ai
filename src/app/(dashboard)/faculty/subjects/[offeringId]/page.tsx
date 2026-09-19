@@ -9,6 +9,32 @@ interface Props {
   params: Promise<{ offeringId: string }>;
 }
 
+interface OfferingDetail {
+  id: string;
+  status: string;
+  subject: { id: string; code: string; title: string; description: string | null } | null;
+  semester: {
+    id: string;
+    name: string;
+    academic_year: {
+      id: string;
+      name: string;
+      starts_on: string;
+      ends_on: string;
+    } | null;
+  } | null;
+  section: {
+    id: string;
+    name: string;
+    program: { id: string; code: string; name: string } | null;
+    year_level: { id: string; name: string } | null;
+  } | null;
+  faculty_assignments: Array<{
+    id: string;
+    faculty: { id: string; full_name: string; email: string | null } | null;
+  }>;
+}
+
 export default async function SubjectOfferingDetailPage({ params }: Props) {
   const { offeringId } = await params;
   const supabase = await createClient();
@@ -31,13 +57,13 @@ export default async function SubjectOfferingDetailPage({ params }: Props) {
 
   if (!offering) redirect('/faculty/subjects');
 
-  const o = offering as any;
+  const o = offering as unknown as OfferingDetail;
 
   const [enrollmentsCount, assessmentsCount, sourcesCount] = await Promise.all([
     supabase.from('enrollments').select('id', { count: 'exact', head: true })
       .eq('subject_offering_id', offeringId).eq('status', 'enrolled'),
     supabase.from('assessments').select('id', { count: 'exact', head: true })
-      .eq('subject_id', o.subject?.id),
+      .eq('subject_offering_id', offeringId),
     supabase.from('source_materials').select('id', { count: 'exact', head: true })
       .eq('subject_offering_id', offeringId),
   ]);
@@ -51,6 +77,7 @@ export default async function SubjectOfferingDetailPage({ params }: Props) {
     { label: 'Students', href: `/faculty/subjects/${offeringId}/students` },
     { label: 'Assessments', href: `/faculty/subjects/${offeringId}/assessments` },
     { label: 'Source Materials', href: `/faculty/subjects/${offeringId}/sources` },
+    { label: 'Deployments', href: `/faculty/subjects/${offeringId}/deployments` },
   ];
 
   return (
@@ -146,7 +173,7 @@ export default async function SubjectOfferingDetailPage({ params }: Props) {
           <CardContent>
             {o.faculty_assignments && o.faculty_assignments.length > 0 ? (
               <ul className="space-y-3">
-                {o.faculty_assignments.map((fa: any) => (
+                {o.faculty_assignments.map((fa) => (
                   <li key={fa.id} className="flex items-center gap-3">
                     <div className="w-8 h-8 rounded-full bg-[var(--color-surface-hover)] flex items-center justify-center">
                       <span className="text-sm font-medium text-[var(--color-muted)]">
