@@ -4,15 +4,12 @@ import { usePathname } from 'next/navigation';
 import Link from 'next/link';
 import type { JSX } from 'react';
 import type { UserRole } from '@/lib/types';
-import { NAVIGATION, ROLE_LABELS, APP_NAME } from '@/lib/constants';
+import { NAVIGATION, APP_NAME } from '@/lib/constants';
 import type { NavItem } from '@/lib/constants';
 
 interface SidebarProps {
   role: UserRole;
-  userName: string;
-  userEmail: string;
   collapsed?: boolean;
-  onToggleCollapse?: () => void;
 }
 
 const iconMap: Record<string, JSX.Element> = {
@@ -100,7 +97,7 @@ const iconMap: Record<string, JSX.Element> = {
   ),
   user: (
     <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4-4v2" />
+      <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" />
       <circle cx="12" cy="7" r="4" />
     </svg>
   ),
@@ -111,14 +108,16 @@ function NavIcon({ name }: { name?: string }): JSX.Element | null {
   return iconMap[name] ?? null;
 }
 
-export default function Sidebar({
-  role,
-  userName,
-  collapsed = false,
-  onToggleCollapse,
-}: SidebarProps): JSX.Element {
+/**
+ * Primary navigation, grouped by area of work (see `NAVIGATION`). Identity and
+ * the account menu live in the top bar, so the sidebar carries navigation only.
+ *
+ * Collapsing is driven by the hamburger in the top bar; this component just
+ * renders the requested width.
+ */
+export default function Sidebar({ role, collapsed = false }: SidebarProps): JSX.Element {
   const pathname = usePathname();
-  const navItems = NAVIGATION[role];
+  const groups = NAVIGATION[role];
 
   const isActive = (item: NavItem) => {
     if (item.href === `/${role === 'super_admin' ? 'admin' : role}`) {
@@ -127,21 +126,18 @@ export default function Sidebar({
     return pathname.startsWith(item.href);
   };
 
-  const initials = userName
-    .split(' ')
-    .map((n) => n[0])
-    .join('')
-    .slice(0, 2)
-    .toUpperCase();
-
   return (
     <aside
-      className={`hidden lg:flex flex-col h-full bg-[var(--color-surface)] border-r border-[var(--color-border)] transition-all duration-200 ${
+      className={`flex flex-col h-full bg-[var(--color-surface)] border-r border-[var(--color-border)] transition-[width] duration-200 ${
         collapsed ? 'w-[68px]' : 'w-64'
       }`}
       aria-label="Sidebar navigation"
     >
-      <div className={`flex items-center h-16 px-4 border-b border-[var(--color-border)] ${collapsed ? 'justify-center' : 'gap-3'}`}>
+      <div
+        className={`flex items-center h-16 border-b border-[var(--color-border)] ${
+          collapsed ? 'justify-center px-2' : 'gap-3 px-4'
+        }`}
+      >
         <div className="flex-shrink-0 flex items-center justify-center h-8 w-8 rounded-[var(--radius-md)] bg-[var(--color-primary)] text-white text-sm font-bold">
           M
         </div>
@@ -151,63 +147,46 @@ export default function Sidebar({
       </div>
 
       <nav className="flex-1 overflow-y-auto py-3 px-2" aria-label="Main navigation">
-        <ul className="flex flex-col gap-0.5">
-          {navItems.map((item) => {
-            const active = isActive(item);
-            return (
-              <li key={item.href}>
-                <Link
-                  href={item.href}
-                  className={`flex items-center gap-3 rounded-[var(--radius-md)] px-3 py-2 text-sm font-medium transition-colors ${
-                    active
-                      ? 'bg-[var(--color-primary-light)] text-[var(--color-primary)]'
-                      : 'text-[var(--color-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-foreground)]'
-                  } ${collapsed ? 'justify-center' : ''}`}
-                  title={collapsed ? item.label : undefined}
-                  aria-current={active ? 'page' : undefined}
-                >
-                  <NavIcon name={item.icon} />
-                  {!collapsed && <span>{item.label}</span>}
-                </Link>
-              </li>
-            );
-          })}
-        </ul>
-      </nav>
+        {groups.map((group, groupIndex) => (
+          <div key={group.label} className={groupIndex > 0 ? 'mt-4' : undefined}>
+            {collapsed ? (
+              groupIndex > 0 && (
+                <div
+                  className="mx-2 mb-2 h-px bg-[var(--color-border)]"
+                  aria-hidden="true"
+                />
+              )
+            ) : (
+              <p className="px-3 pb-1 text-xs font-semibold uppercase tracking-wide text-[var(--color-muted-light)]">
+                {group.label}
+              </p>
+            )}
 
-      <div className={`border-t border-[var(--color-border)] p-3 ${collapsed ? 'flex justify-center' : ''}`}>
-        <div className={`flex items-center gap-3 ${collapsed ? 'justify-center' : ''}`}>
-          <div className="flex-shrink-0 flex items-center justify-center h-9 w-9 rounded-full bg-[var(--color-primary-light)] text-[var(--color-primary)] text-sm font-semibold">
-            {initials}
+            <ul className="flex flex-col gap-0.5">
+              {group.items.map((item) => {
+                const active = isActive(item);
+                return (
+                  <li key={item.href}>
+                    <Link
+                      href={item.href}
+                      className={`flex items-center gap-3 rounded-[var(--radius-md)] px-3 py-2 text-sm font-medium transition-colors ${
+                        active
+                          ? 'bg-[var(--color-primary-light)] text-[var(--color-primary)]'
+                          : 'text-[var(--color-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-foreground)]'
+                      } ${collapsed ? 'justify-center' : ''}`}
+                      title={collapsed ? item.label : undefined}
+                      aria-current={active ? 'page' : undefined}
+                    >
+                      <NavIcon name={item.icon} />
+                      {!collapsed && <span>{item.label}</span>}
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
           </div>
-          {!collapsed && (
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium text-[var(--color-foreground)] truncate">{userName}</p>
-              <p className="text-xs text-[var(--color-muted)] truncate">{ROLE_LABELS[role]}</p>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {onToggleCollapse && (
-        <button
-          onClick={onToggleCollapse}
-          className="hidden xl:flex items-center justify-center h-10 border-t border-[var(--color-border)] text-[var(--color-muted)] hover:text-[var(--color-foreground)] hover:bg-[var(--color-surface-hover)] transition-colors"
-          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-        >
-          <svg
-            className={`h-4 w-4 transition-transform ${collapsed ? 'rotate-180' : ''}`}
-            viewBox="0 0 20 20"
-            fill="currentColor"
-          >
-            <path
-              fillRule="evenodd"
-              d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z"
-              clipRule="evenodd"
-            />
-          </svg>
-        </button>
-      )}
+        ))}
+      </nav>
     </aside>
   );
 }

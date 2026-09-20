@@ -28,12 +28,15 @@ export const AUDIT_ACTIONS: AuditAction[] = [
   'logout',
 ];
 
+/** Every `entity_type` the application writes, so the filter can reach them all. */
 export const ENTITY_TYPES = [
   'profile',
+  'student_profile',
   'user_role',
   'academic_year',
   'semester',
   'program',
+  'year_level',
   'section',
   'subject',
   'subject_offering',
@@ -42,10 +45,13 @@ export const ENTITY_TYPES = [
   'assessment',
   'assessment_version',
   'assessment_deployment',
+  'assessment_generation_job',
   'question',
+  'source_material',
   'exam_attempt',
   'assessment_result',
   'notification',
+  'system_settings',
 ] as const;
 
 export const actionVariant: Record<string, 'success' | 'warning' | 'danger' | 'info' | 'default'> = {

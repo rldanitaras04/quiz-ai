@@ -139,32 +139,88 @@ export interface NavItem {
   icon?: string;
 }
 
-export const NAVIGATION: Record<UserRole, readonly NavItem[]> = {
+/**
+ * Navigation is grouped so a long list (the administrator's ten entries) reads
+ * as a handful of named sections instead of one undifferentiated column. The
+ * sidebar renders one labelled section per group; collapsed, the label is
+ * replaced by a divider.
+ */
+export interface NavGroup {
+  label: string;
+  items: readonly NavItem[];
+}
+
+export const NAVIGATION: Record<UserRole, readonly NavGroup[]> = {
   super_admin: [
-    { label: 'Dashboard', href: '/admin', icon: 'home' },
-    { label: 'Users', href: '/admin/users', icon: 'users' },
-    { label: 'Academic Structure', href: '/admin/academic', icon: 'building' },
-    { label: 'Subjects / Offerings', href: '/admin/subjects', icon: 'book' },
-    { label: 'System Settings', href: '/admin/settings', icon: 'settings' },
-    { label: 'AI Configuration', href: '/admin/ai-config', icon: 'cpu' },
-    { label: 'Audit Logs', href: '/admin/audit-logs', icon: 'scroll' },
-    { label: 'System Monitoring', href: '/admin/monitoring', icon: 'activity' },
-    { label: 'Notifications', href: '/notifications', icon: 'bell' },
-    { label: 'Profile', href: '/profile', icon: 'user' },
+    {
+      label: 'Overview',
+      items: [
+        { label: 'Dashboard', href: '/admin', icon: 'home' },
+        { label: 'System Monitoring', href: '/admin/monitoring', icon: 'activity' },
+      ],
+    },
+    {
+      label: 'Academic',
+      items: [
+        { label: 'Academic Structure', href: '/admin/academic', icon: 'building' },
+        { label: 'Subjects / Offerings', href: '/admin/subjects', icon: 'book' },
+      ],
+    },
+    {
+      label: 'Access',
+      items: [
+        { label: 'Users', href: '/admin/users', icon: 'users' },
+        { label: 'Audit Logs', href: '/admin/audit-logs', icon: 'scroll' },
+      ],
+    },
+    {
+      label: 'System',
+      items: [
+        { label: 'System Settings', href: '/admin/settings', icon: 'settings' },
+        { label: 'AI Configuration', href: '/admin/ai-config', icon: 'cpu' },
+      ],
+    },
+    {
+      label: 'Account',
+      items: [
+        { label: 'Notifications', href: '/notifications', icon: 'bell' },
+        { label: 'Profile', href: '/profile', icon: 'user' },
+      ],
+    },
   ],
   faculty: [
-    { label: 'Dashboard', href: '/faculty', icon: 'home' },
-    { label: 'My Subjects', href: '/faculty/subjects', icon: 'book' },
-    { label: 'Notifications', href: '/notifications', icon: 'bell' },
-    { label: 'Profile', href: '/profile', icon: 'user' },
+    {
+      label: 'Teaching',
+      items: [
+        { label: 'Dashboard', href: '/faculty', icon: 'home' },
+        { label: 'My Subjects', href: '/faculty/subjects', icon: 'book' },
+      ],
+    },
+    {
+      label: 'Account',
+      items: [
+        { label: 'Notifications', href: '/notifications', icon: 'bell' },
+        { label: 'Profile', href: '/profile', icon: 'user' },
+      ],
+    },
   ],
   student: [
-    { label: 'Dashboard', href: '/student', icon: 'home' },
-    { label: 'My Subjects', href: '/student/subjects', icon: 'book' },
-    { label: 'Assessments', href: '/student/assessments', icon: 'file-text' },
-    { label: 'My Results', href: '/student/results', icon: 'bar-chart' },
-    { label: 'Notifications', href: '/notifications', icon: 'bell' },
-    { label: 'Profile', href: '/profile', icon: 'user' },
+    {
+      label: 'Learning',
+      items: [
+        { label: 'Dashboard', href: '/student', icon: 'home' },
+        { label: 'My Subjects', href: '/student/subjects', icon: 'book' },
+        { label: 'Assessments', href: '/student/assessments', icon: 'file-text' },
+        { label: 'My Results', href: '/student/results', icon: 'bar-chart' },
+      ],
+    },
+    {
+      label: 'Account',
+      items: [
+        { label: 'Notifications', href: '/notifications', icon: 'bell' },
+        { label: 'Profile', href: '/profile', icon: 'user' },
+      ],
+    },
   ],
 } as const;
 
@@ -196,3 +252,73 @@ export const MIN_QUESTION_POINTS = 1;
 export const APP_NAME = 'MiMo';
 
 export const APP_DESCRIPTION = 'AI-Assisted Secure Assessment System';
+
+// ============================================================================
+// Configurable Settings
+// ============================================================================
+
+/**
+ * Settings a super administrator can change at runtime (/admin/settings). They
+ * are stored in `system_settings` and read through `src/lib/settings.ts`; the
+ * `default` here is the fallback whenever no row exists or the read fails.
+ *
+ * This module is client-safe on purpose: the settings form renders its labels
+ * and input constraints from the same definitions the server action validates
+ * against, so the two cannot drift apart.
+ */
+export interface SettingDef {
+  label: string;
+  description: string;
+  default: number;
+  min: number;
+  max: number;
+  /** Whole numbers only (megabytes, row counts) versus decimals (thresholds). */
+  integer: boolean;
+  step: number;
+}
+
+export const SETTING_DEFS = {
+  max_upload_size_mb: {
+    label: 'Maximum upload size (MB)',
+    description:
+      'Largest source material a faculty member may upload. The `source-materials` storage bucket caps objects at 50 MB, so this cannot be raised above that.',
+    default: MAX_FILE_SIZE_MB,
+    min: 1,
+    max: MAX_FILE_SIZE_MB,
+    integer: true,
+    step: 1,
+  },
+  similarity_threshold: {
+    label: 'Duplicate similarity threshold',
+    description:
+      'Cosine similarity at or above which a generated question counts as a duplicate of an existing one. Lower values flag more questions.',
+    default: DEFAULT_SIMILARITY_THRESHOLD,
+    min: 0.5,
+    max: 1,
+    integer: false,
+    step: 0.01,
+  },
+  default_page_size: {
+    label: 'Items per page',
+    description:
+      'How many rows a paged admin list loads at once — currently the recent entries on the audit log page.',
+    default: ITEMS_PER_PAGE,
+    min: 5,
+    max: 100,
+    integer: true,
+    step: 5,
+  },
+} as const satisfies Record<string, SettingDef>;
+
+export type SettingKey = keyof typeof SETTING_DEFS;
+
+/** Fully resolved settings: every key present, every value validated. */
+export type AppSettings = { [K in SettingKey]: number };
+
+export const SETTING_KEYS = Object.keys(SETTING_DEFS) as SettingKey[];
+
+export const DEFAULT_SETTINGS: AppSettings = {
+  max_upload_size_mb: SETTING_DEFS.max_upload_size_mb.default,
+  similarity_threshold: SETTING_DEFS.similarity_threshold.default,
+  default_page_size: SETTING_DEFS.default_page_size.default,
+};

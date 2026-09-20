@@ -4,6 +4,7 @@ import { useState, type JSX } from 'react';
 import { useRouter } from 'next/navigation';
 import Button from '@/components/ui/Button';
 import Badge from '@/components/ui/Badge';
+import { notifyError, notifySuccess } from '@/components/ui/alerts';
 import { approveAssessment, saveGeneratedQuestions } from '@/app/(dashboard)/faculty/subjects/[offeringId]/assessments/actions';
 import type { WizardState } from '@/app/(dashboard)/faculty/subjects/[offeringId]/assessments/new/page';
 
@@ -66,18 +67,26 @@ export default function StepApprove({
         }))
       );
       if (!saveResult.success) {
-        setError(saveResult.error ?? 'Failed to save questions');
+        const message = saveResult.error ?? 'Failed to save questions';
+        setError(message);
+        notifyError('Could not save the questions', message);
         return;
       }
 
       // 2. Approve assessment + version.
       await approveAssessment(state.assessmentId);
       setApproved(true);
+      notifySuccess('Assessment approved', 'Review it, then deploy when you are ready.');
       setTimeout(() => {
-        router.push(`/faculty/subjects/${offeringId}/assessments/${state.assessmentId}`);
+        // The review surface: questions can be edited and published from there.
+        router.push(
+          `/faculty/subjects/${offeringId}/assessments/${state.assessmentId}`
+        );
       }, 2000);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to approve assessment');
+      const message = err instanceof Error ? err.message : 'Failed to approve assessment';
+      setError(message);
+      notifyError('Could not approve the assessment', message);
     } finally {
       setApproving(false);
     }
@@ -93,7 +102,7 @@ export default function StepApprove({
           Assessment Approved!
         </h2>
         <p className="text-sm text-[var(--color-muted)]">
-          Redirecting to assessment details...
+          Redirecting to the assessment...
         </p>
       </div>
     );

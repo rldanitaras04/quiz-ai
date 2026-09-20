@@ -1,10 +1,12 @@
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import PageHeader from '@/components/ui/PageHeader';
-import { Card, CardContent } from '@/components/ui/Card';
+import { Card } from '@/components/ui/Card';
 import Badge from '@/components/ui/Badge';
 import EmptyState from '@/components/ui/EmptyState';
+import { Table, THead, TBody, TR, TH, TD } from '@/components/ui/Table';
 import SourceUpload from '@/components/sources/SourceUpload';
+import { getSettings } from '@/lib/settings';
 import DeleteSourceButton from './DeleteSourceButton';
 
 interface Props {
@@ -52,6 +54,10 @@ export default async function SourcesPage({ params }: Props) {
 
   const o = offering as unknown as OfferingHeading;
 
+  // Administrator-configured upload ceiling, so the client hint and the
+  // pre-check agree with what /api/sources/upload will accept.
+  const { max_upload_size_mb } = await getSettings();
+
   const { data: sources } = await supabase
     .from('source_materials')
     .select('id, title, source_type, processing_status, file_size, original_filename, mime_type, created_at')
@@ -88,40 +94,63 @@ export default async function SourcesPage({ params }: Props) {
         ]}
         title="Source Materials"
         description="Upload and manage course materials for AI-powered question generation"
-        actions={<SourceUpload offeringId={offeringId} />}
+        actions={<SourceUpload offeringId={offeringId} maxSizeMb={max_upload_size_mb} />}
       />
 
       {sources && sources.length > 0 ? (
-        <div className="space-y-3">
-          {(sources as unknown as SourceMaterialRow[]).map((s) => (
-            <Card key={s.id}>
-              <CardContent className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div className="flex items-center gap-3 min-w-0">
-                  <span className="text-xl flex-shrink-0">{typeIcon(s.source_type)}</span>
-                  <div className="min-w-0">
-                    <h3 className="font-medium text-[var(--color-foreground)] truncate">{s.title}</h3>
-                    <p className="text-sm text-[var(--color-muted)] truncate">
-                      {s.original_filename || s.source_type} | {formatFileSize(s.file_size)}
-                    </p>
-                    <p className="text-xs text-[var(--color-muted-light)]">
-                      Uploaded {new Date(s.created_at).toLocaleDateString()}
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Badge variant={statusVariant(s.processing_status)}>
-                    {s.processing_status}
-                  </Badge>
-                  <DeleteSourceButton
-                    sourceMaterialId={s.id}
-                    offeringId={offeringId}
-                    title={s.title}
-                  />
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
+        <Card>
+          <Table caption="Source materials uploaded for this offering">
+            <THead>
+              <TR>
+                <TH>Title</TH>
+                <TH>File</TH>
+                <TH align="right">Size</TH>
+                <TH>Uploaded</TH>
+                <TH>Processing</TH>
+                <TH align="right">Actions</TH>
+              </TR>
+            </THead>
+            <TBody>
+              {(sources as unknown as SourceMaterialRow[]).map((s) => (
+                <TR key={s.id} className="hover:bg-[var(--color-surface-hover)]">
+                  <TD>
+                    <span className="flex items-center gap-2">
+                      <span className="text-lg flex-shrink-0" aria-hidden="true">
+                        {typeIcon(s.source_type)}
+                      </span>
+                      <span className="font-medium text-[var(--color-foreground)]">
+                        {s.title}
+                      </span>
+                    </span>
+                  </TD>
+                  <TD className="text-[var(--color-muted)]">
+                    {s.original_filename || s.source_type}
+                  </TD>
+                  <TD numeric className="text-[var(--color-muted)]">
+                    {formatFileSize(s.file_size)}
+                  </TD>
+                  <TD className="text-xs text-[var(--color-muted)]">
+                    {new Date(s.created_at).toLocaleDateString()}
+                  </TD>
+                  <TD>
+                    <Badge variant={statusVariant(s.processing_status)}>
+                      {s.processing_status}
+                    </Badge>
+                  </TD>
+                  <TD>
+                    <div className="flex justify-end">
+                      <DeleteSourceButton
+                        sourceMaterialId={s.id}
+                        offeringId={offeringId}
+                        title={s.title}
+                      />
+                    </div>
+                  </TD>
+                </TR>
+              ))}
+            </TBody>
+          </Table>
+        </Card>
       ) : (
         <EmptyState
           title="No source materials"

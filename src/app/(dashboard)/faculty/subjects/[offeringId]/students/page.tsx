@@ -5,6 +5,7 @@ import { Card } from '@/components/ui/Card';
 import Badge from '@/components/ui/Badge';
 import EmptyState from '@/components/ui/EmptyState';
 import AddStudentButton from './AddStudentButton';
+import RemoveStudentButton from './RemoveStudentButton';
 
 interface Props {
   params: Promise<{ offeringId: string }>;
@@ -18,6 +19,7 @@ interface OfferingHeading {
 
 interface EnrollmentRow {
   id: string;
+  student_id: string;
   status: string;
   enrolled_at: string;
   student: {
@@ -49,6 +51,7 @@ export default async function StudentsPage({ params }: Props) {
     .from('enrollments')
     .select(`
       id,
+      student_id,
       status,
       enrolled_at,
       student:profiles(id, full_name, email, student_profiles(student_number))
@@ -85,6 +88,7 @@ export default async function StudentsPage({ params }: Props) {
                   <th className="text-left px-6 py-3 font-medium text-[var(--color-muted)]">Email</th>
                   <th className="text-left px-6 py-3 font-medium text-[var(--color-muted)]">Status</th>
                   <th className="text-left px-6 py-3 font-medium text-[var(--color-muted)]">Enrolled</th>
+                  <th className="text-right px-6 py-3 font-medium text-[var(--color-muted)]">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -104,6 +108,15 @@ export default async function StudentsPage({ params }: Props) {
                       </td>
                       <td className="px-6 py-3 text-[var(--color-muted)]">
                         {new Date(e.enrolled_at).toLocaleDateString()}
+                      </td>
+                      <td className="px-6 py-3">
+                        <div className="flex justify-end">
+                          <RemoveStudentButton
+                            offeringId={offeringId}
+                            studentId={e.student_id}
+                            studentName={e.student?.full_name ?? 'this student'}
+                          />
+                        </div>
                       </td>
                     </tr>
                   );

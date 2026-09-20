@@ -31,14 +31,12 @@ export default async function DashboardLayout({ children }: DashboardLayoutProps
 
   const role = getPrimaryRole(roles?.map((r) => r.role) ?? []);
   const userName = profile?.full_name ?? user.email ?? 'User';
-  const userEmail = user.email ?? '';
 
   return (
     <AppShell
       title="Dashboard"
       role={role}
       userName={userName}
-      userEmail={userEmail}
       avatarUrl={getAvatarUrl(profile?.avatar_path)}
     >
       {children}

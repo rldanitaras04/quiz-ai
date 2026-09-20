@@ -1,9 +1,10 @@
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import PageHeader from '@/components/ui/PageHeader';
-import { Card, CardContent } from '@/components/ui/Card';
+import { Card } from '@/components/ui/Card';
 import Badge from '@/components/ui/Badge';
 import EmptyState from '@/components/ui/EmptyState';
+import { Table, THead, TBody, TR, TH, TD } from '@/components/ui/Table';
 import CancelDeploymentButton from './CancelDeploymentButton';
 import ReleaseResultsButton from './ReleaseResultsButton';
 
@@ -91,45 +92,76 @@ export default async function DeploymentsPage({ params }: Props) {
       />
 
       {list.length > 0 ? (
-        <div className="space-y-3">
-          {list.map((d) => {
-            const assessment = d.assessment;
-            const version = d.assessment_version;
-            const opensAt = new Date(d.opens_at);
-            const closesAt = new Date(d.closes_at);
+        <Card>
+          <Table caption="Assessment deployments for this offering">
+            <THead>
+              <TR>
+                <TH>Assessment</TH>
+                <TH>Version</TH>
+                <TH align="right">Items</TH>
+                <TH align="right">Points</TH>
+                <TH align="right">Duration</TH>
+                <TH align="right">Attempts</TH>
+                <TH>Window</TH>
+                <TH>Status</TH>
+                <TH align="right">Actions</TH>
+              </TR>
+            </THead>
+            <TBody>
+              {list.map((d) => {
+                const assessment = d.assessment;
+                const version = d.assessment_version;
+                const opensAt = new Date(d.opens_at);
+                const closesAt = new Date(d.closes_at);
 
-            return (
-              <Card key={d.id}>
-                <CardContent className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <h3 className="font-medium text-[var(--color-foreground)]">
+                return (
+                  <TR key={d.id} className="hover:bg-[var(--color-surface-hover)] align-top">
+                    <TD className="font-medium text-[var(--color-foreground)]">
                       {assessment?.title ?? 'Untitled Assessment'}
-                      {version ? ` · v${version.version_number}` : ''}
-                    </h3>
-                    <p className="text-sm text-[var(--color-muted)]">
-                      {version ? `${version.total_items} items, ${version.total_points} pts · ` : ''}
-                      {d.duration_minutes} min · {d.attempt_limit} attempt{d.attempt_limit === 1 ? '' : 's'}
-                    </p>
-                    <p className="text-xs text-[var(--color-muted-light)]">
-                      {opensAt.toLocaleString()} — {closesAt.toLocaleString()}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Badge variant={deploymentVariant(d.status)}>
-                      {d.status}
-                    </Badge>
-                    {(d.status === 'scheduled' || d.status === 'active') && (
-                      <CancelDeploymentButton deploymentId={d.id} />
-                    )}
-                    {d.status === 'active' || d.status === 'closed' ? (
-                      <ReleaseResultsButton deploymentId={d.id} />
-                    ) : null}
-                  </div>
-                </CardContent>
-              </Card>
-            );
-          })}
-        </div>
+                    </TD>
+                    <TD className="text-[var(--color-muted)] tabular-nums">
+                      {version ? `v${version.version_number}` : '—'}
+                    </TD>
+                    <TD numeric className="text-[var(--color-foreground)]">
+                      {version?.total_items ?? '—'}
+                    </TD>
+                    <TD numeric className="text-[var(--color-foreground)]">
+                      {version?.total_points ?? '—'}
+                    </TD>
+                    <TD numeric className="text-[var(--color-muted)]">
+                      {d.duration_minutes} min
+                    </TD>
+                    <TD numeric className="text-[var(--color-muted)]">
+                      {d.attempt_limit}
+                    </TD>
+                    <TD className="text-xs text-[var(--color-muted)]">
+                      {opensAt.toLocaleString()}
+                      <span className="block">→ {closesAt.toLocaleString()}</span>
+                    </TD>
+                    <TD>
+                      <Badge variant={deploymentVariant(d.status)}>{d.status}</Badge>
+                    </TD>
+                    <TD>
+                      <div className="flex items-center justify-end gap-1">
+                        {(d.status === 'scheduled' || d.status === 'active') && (
+                          <CancelDeploymentButton deploymentId={d.id} />
+                        )}
+                        {(d.status === 'active' || d.status === 'closed') && (
+                          <ReleaseResultsButton deploymentId={d.id} />
+                        )}
+                        {d.status !== 'scheduled' &&
+                          d.status !== 'active' &&
+                          d.status !== 'closed' && (
+                            <span className="text-xs text-[var(--color-muted)]">—</span>
+                          )}
+                      </div>
+                    </TD>
+                  </TR>
+                );
+              })}
+            </TBody>
+          </Table>
+        </Card>
       ) : (
         <EmptyState
           title="No deployments yet"

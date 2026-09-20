@@ -1,5 +1,3 @@
-import { redirect } from 'next/navigation';
-import { createClient } from '@/lib/supabase/server';
 import PageHeader from '@/components/ui/PageHeader';
 import { Card, CardContent } from '@/components/ui/Card';
 import { getAuditLogs } from '../actions';
@@ -11,18 +9,8 @@ interface AuditLogsPageProps {
 }
 
 export default async function AuditLogsPage({ searchParams }: AuditLogsPageProps) {
-  const supabase = await createClient();
-
-  const { data: { user }, error: authError } = await supabase.auth.getUser();
-  if (authError || !user) redirect('/login');
-
-  const { data: roles } = await supabase
-    .from('user_roles')
-    .select('role')
-    .eq('user_id', user.id);
-
-  if (!roles?.some((r) => r.role === 'super_admin')) redirect('/');
-
+  // Access is gated by the admin layout; `getAuditLogs` re-authorizes the caller
+  // server-side before it reads anything.
   const params = await searchParams;
   const { logs, totalCount } = await getAuditLogs({
     action: params.action as AuditAction | undefined,
@@ -45,12 +33,16 @@ export default async function AuditLogsPage({ searchParams }: AuditLogsPageProps
           <CardContent>
             <p className="text-sm font-medium text-[var(--color-muted)]">Total Logs</p>
             <p className="mt-1 text-3xl font-bold text-[var(--color-foreground)]">{totalCount}</p>
+            <p className="mt-1 text-xs text-[var(--color-muted)]">
+              Showing the {logs.length} most recent
+            </p>
           </CardContent>
         </Card>
       </div>
 
       <AuditLogsFilter
         logs={logs}
+        totalCount={totalCount}
         currentAction={params.action}
         currentEntityType={params.entityType}
       />

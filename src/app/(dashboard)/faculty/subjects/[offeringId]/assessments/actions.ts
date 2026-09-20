@@ -3,6 +3,13 @@
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
 import { notifyOfferingStudents } from '@/lib/notifications';
+import { recordAuditLog } from '@/lib/audit';
+import {
+  getFacultyAssessment,
+  getFacultyAssessmentForQuestion,
+  isFacultyOfOffering,
+  type FacultyAssessment,
+} from '@/lib/auth';
 import type {
   Assessment,
   Question,
@@ -11,10 +18,120 @@ import type {
   BloomLevel,
 } from '@/lib/types';
 
-export async function getSourceMaterials(offeringId: string) {
+/**
+ * Session client + authenticated user id, for the actions below.
+ *
+ * Authorization is separate and explicit: every mutation resolves the
+ * assessment through `getFacultyAssessment`/`getFacultyAssessmentForQuestion`,
+ * which fail when the caller is not faculty on the owning offering. RLS still
+ * backstops the writes, but an action must not report success for a write RLS
+ * silently dropped.
+ */
+async function requireUser(): Promise<{
+  supabase: Awaited<ReturnType<typeof createClient>>;
+  userId: string;
+}> {
   const supabase = await createClient();
-  const { data: { user }, error: authError } = await supabase.auth.getUser();
-  if (authError || !user) throw new Error('Not authenticated');
+  const { data: { user }, error } = await supabase.auth.getUser();
+  if (error || !user) throw new Error('Not authenticated');
+  return { supabase, userId: user.id };
+}
+
+/**
+ * Throws unless the user is faculty on the offering itself (used when creating
+ * an assessment, where no assessment id exists yet).
+ */
+async function requireOfferingFaculty(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string,
+  offeringId: string
+): Promise<void> {
+  if (!(await isFacultyOfOffering(supabase, userId, offeringId))) {
+    throw new Error('Subject offering not found or you are not assigned to it');
+  }
+}
+
+/**
+ * True when the version's questions must not change any more.
+ *
+ * An attempt's `exam_manifests` row snapshots the question and choice ids at
+ * start, and choice edits delete and re-insert rows (new ids), so rewriting a
+ * version that students are already sitting would leave manifests pointing at
+ * choices that no longer exist. Published or deployed versions are frozen.
+ */
+async function isQuestionsLocked(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  versionId: string | null
+): Promise<boolean> {
+  if (!versionId) return false;
+
+  const { data: deployment } = await supabase
+    .from('assessment_deployments')
+    .select('id')
+    .eq('assessment_version_id', versionId)
+    .limit(1)
+    .maybeSingle();
+
+  return Boolean(deployment);
+}
+
+/** Throws when a question mutation would rewrite a frozen version. */
+async function assertQuestionsEditable(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  assessment: FacultyAssessment
+): Promise<void> {
+  if (assessment.status === 'published') {
+    throw new Error(
+      'This assessment is published, so its questions are read-only. Editing them would invalidate attempts already taken.'
+    );
+  }
+
+  if (await isQuestionsLocked(supabase, assessment.currentVersionId)) {
+    throw new Error(
+      'This version has already been deployed, so its questions are read-only. Editing them would break exams in progress.'
+    );
+  }
+}
+
+/**
+ * Recomputes a version's cached item/point totals from its questions.
+ *
+ * `assessment_versions.total_items`/`total_points` are cached columns the list
+ * and deploy screens read, so every question mutation has to refresh them.
+ */
+async function refreshVersionTotals(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  versionId: string
+): Promise<void> {
+  const [{ count }, { data: pointRows }] = await Promise.all([
+    supabase
+      .from('questions')
+      .select('id', { count: 'exact', head: true })
+      .eq('assessment_version_id', versionId),
+    supabase.from('questions').select('points').eq('assessment_version_id', versionId),
+  ]);
+
+  await supabase
+    .from('assessment_versions')
+    .update({
+      total_items: count || 0,
+      total_points: pointRows?.reduce((sum, row) => sum + (row.points || 0), 0) || 0,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', versionId);
+}
+
+/** Refreshes every faculty view that shows an assessment. */
+function revalidateAssessment(offeringId: string, assessmentId?: string): void {
+  revalidatePath(`/faculty/subjects/${offeringId}`);
+  revalidatePath(`/faculty/subjects/${offeringId}/assessments`);
+  if (assessmentId) {
+    revalidatePath(`/faculty/subjects/${offeringId}/assessments/${assessmentId}`);
+  }
+}
+
+export async function getSourceMaterials(offeringId: string) {
+  const { supabase } = await requireUser();
 
   const { data, error } = await supabase
     .from('source_materials')
@@ -26,54 +143,157 @@ export async function getSourceMaterials(offeringId: string) {
   return data || [];
 }
 
-export async function getAssessmentWithVersion(assessmentId: string) {
-  const supabase = await createClient();
-  const { data: { user }, error: authError } = await supabase.auth.getUser();
-  if (authError || !user) throw new Error('Not authenticated');
+// ---------------------------------------------------------------------------
+// Detail loader
+// ---------------------------------------------------------------------------
 
-  const { data: assessment, error: assessErr } = await supabase
-    .from('assessments')
-    .select('*, current_version:assessment_versions(*)')
-    .eq('id', assessmentId)
-    .single();
-
-  if (assessErr || !assessment) throw new Error('Assessment not found');
-
-  const versionId = assessment.current_version_id;
-  let questions: Question[] = [];
-  if (versionId) {
-    const { data: qData } = await supabase
-      .from('questions')
-      .select('*')
-      .eq('assessment_version_id', versionId)
-      .order('position', { ascending: true });
-    questions = qData || [];
-  }
-
-  return { assessment, questions };
+export interface AssessmentDetailChoice {
+  id: string;
+  choice_key: string;
+  choice_text: string;
 }
 
-export async function getAssessmentQuestions(assessmentId: string) {
-  const supabase = await createClient();
-  const { data: { user }, error: authError } = await supabase.auth.getUser();
-  if (authError || !user) throw new Error('Not authenticated');
+export interface AssessmentDetailQuestion {
+  id: string;
+  position: number | null;
+  question_type: QuestionType;
+  question_text: string;
+  difficulty: Difficulty;
+  bloom_level: BloomLevel;
+  points: number;
+  is_ai_generated: boolean;
+  choices: AssessmentDetailChoice[];
+  correctChoiceId: string | null;
+  canonicalAnswer: string | null;
+  acceptedAnswers: string[] | null;
+}
 
-  const { data: assessment } = await supabase
-    .from('assessments')
-    .select('current_version_id')
-    .eq('id', assessmentId)
-    .single();
+export interface AssessmentDetail {
+  id: string;
+  title: string;
+  status: string;
+  instructions: string | null;
+  subjectOfferingId: string;
+  /**
+   * True when questions can no longer be edited (published or deployed). The
+   * client hides the controls; the actions re-check before writing.
+   */
+  questionsLocked: boolean;
+  version: {
+    id: string;
+    versionNumber: number;
+    status: string;
+    totalItems: number;
+    totalPoints: number;
+  } | null;
+  questions: AssessmentDetailQuestion[];
+}
 
-  if (!assessment?.current_version_id) return [];
+/**
+ * Everything the assessment detail page renders: the assessment, its current
+ * version, and its questions with choices and answer keys in position order.
+ *
+ * Returns null when the caller is not faculty on the owning offering, so the
+ * page can 404 instead of exposing an assessment it may not read.
+ */
+export async function getAssessmentDetail(
+  assessmentId: string
+): Promise<AssessmentDetail | null> {
+  const { supabase, userId } = await requireUser();
 
-  const { data, error } = await supabase
-    .from('questions')
-    .select('*, question_choices(*), answer_key:answer_keys(*)')
-    .eq('assessment_version_id', assessment.current_version_id)
-    .order('position', { ascending: true });
+  const assessment = await getFacultyAssessment(supabase, userId, assessmentId);
+  if (!assessment) return null;
 
-  if (error) throw new Error(error.message);
-  return data || [];
+  const questionsLocked =
+    assessment.status === 'published' ||
+    (await isQuestionsLocked(supabase, assessment.currentVersionId));
+
+  let version: AssessmentDetail['version'] = null;
+  let instructions: string | null = null;
+  let questions: AssessmentDetailQuestion[] = [];
+
+  if (assessment.currentVersionId) {
+    const { data: versionRow } = await supabase
+      .from('assessment_versions')
+      .select('id, version_number, status, total_items, total_points, instructions')
+      .eq('id', assessment.currentVersionId)
+      .maybeSingle();
+
+    if (versionRow) {
+      version = {
+        id: versionRow.id,
+        versionNumber: versionRow.version_number,
+        status: versionRow.status,
+        totalItems: versionRow.total_items ?? 0,
+        totalPoints: versionRow.total_points ?? 0,
+      };
+      instructions = versionRow.instructions ?? null;
+    }
+
+    const { data: questionRows } = await supabase
+      .from('questions')
+      .select(`
+        id, position, question_type, question_text, difficulty, bloom_level, points, is_ai_generated,
+        question_choices(id, choice_key, choice_text, position),
+        answer_key:answer_keys(correct_choice_id, canonical_answer, accepted_answers)
+      `)
+      .eq('assessment_version_id', assessment.currentVersionId)
+      .order('position', { ascending: true });
+
+    questions = (questionRows ?? []).map((row: Record<string, unknown>) => {
+      const answerKey = (Array.isArray(row.answer_key) ? row.answer_key[0] : row.answer_key) as
+        | {
+            correct_choice_id?: string | null;
+            canonical_answer?: string | null;
+            accepted_answers?: string[] | null;
+          }
+        | null
+        | undefined;
+
+      const choices = ((row.question_choices ?? []) as Array<{
+        id: string;
+        choice_key: string;
+        choice_text: string;
+        position: number | null;
+      }>)
+        .slice()
+        .sort(
+          (a, b) =>
+            (a.position ?? 0) - (b.position ?? 0) || a.choice_key.localeCompare(b.choice_key)
+        )
+        .map((choice) => ({
+          id: choice.id,
+          choice_key: choice.choice_key,
+          choice_text: choice.choice_text,
+        }));
+
+      return {
+        id: row.id as string,
+        position: (row.position as number | null) ?? null,
+        question_type: row.question_type as QuestionType,
+        question_text: row.question_text as string,
+        difficulty: row.difficulty as Difficulty,
+        bloom_level: row.bloom_level as BloomLevel,
+        points: (row.points as number) ?? 0,
+        is_ai_generated: Boolean(row.is_ai_generated),
+        choices,
+        correctChoiceId: answerKey?.correct_choice_id ?? null,
+        canonicalAnswer: answerKey?.canonical_answer ?? null,
+        acceptedAnswers: answerKey?.accepted_answers ?? null,
+      };
+    });
+  }
+
+  return {
+    id: assessment.id,
+    title: assessment.title,
+    status: assessment.status,
+    instructions,
+    subjectOfferingId: assessment.subjectOfferingId,
+    questionsLocked,
+    version,
+    questions,
+  };
 }
 
 export async function createAssessment(
@@ -84,24 +304,19 @@ export async function createAssessment(
     assessment_category?: string;
   }
 ) {
-  const supabase = await createClient();
-  const { data: { user }, error: authError } = await supabase.auth.getUser();
-  if (authError || !user) throw new Error('Not authenticated');
+  const { supabase, userId } = await requireUser();
 
-  // Ownership check (RLS also enforces is_faculty_of_offering).
-  const { data: offering } = await supabase
-    .from('subject_offerings')
-    .select('id')
-    .eq('id', offeringId)
-    .single();
+  await requireOfferingFaculty(supabase, userId, offeringId);
 
-  if (!offering) throw new Error('Subject offering not found');
+  const title = data.title?.trim();
+  if (!title) throw new Error('A title is required');
+  if (title.length > 200) throw new Error('Title must be 200 characters or fewer');
 
   const { data: assessment, error: createErr } = await supabase
     .from('assessments')
     .insert({
       subject_offering_id: offeringId,
-      created_by: user.id,
+      created_by: userId,
       title: data.title,
       assessment_type: 'multiple_choice' as QuestionType,
       status: 'draft' as const,
@@ -127,12 +342,22 @@ export async function createAssessment(
 
   if (verErr || !version) throw new Error(verErr?.message || 'Failed to create version');
 
-  await supabase
+  const { error: linkError } = await supabase
     .from('assessments')
     .update({ current_version_id: version.id })
     .eq('id', assessment.id);
 
-  revalidatePath(`/faculty/subjects/${offeringId}/assessments`);
+  if (linkError) throw new Error(linkError.message);
+
+  await recordAuditLog({
+    actorUserId: userId,
+    action: 'create',
+    entityType: 'assessment',
+    entityId: assessment.id,
+    metadata: { title, subject_offering_id: offeringId },
+  });
+
+  revalidateAssessment(offeringId, assessment.id);
   return assessment as Assessment;
 }
 
@@ -143,33 +368,45 @@ export async function updateAssessment(
     instructions?: string;
   }
 ) {
-  const supabase = await createClient();
-  const { data: { user }, error: authError } = await supabase.auth.getUser();
-  if (authError || !user) throw new Error('Not authenticated');
+  const { supabase, userId } = await requireUser();
+
+  const assessment = await getFacultyAssessment(supabase, userId, assessmentId);
+  if (!assessment) throw new Error('Assessment not found or you are not assigned to its offering');
 
   if (data.title) {
-    const { error } = await supabase
+    const title = data.title.trim();
+    if (!title) throw new Error('A title is required');
+
+    const { data: updated, error } = await supabase
       .from('assessments')
-      .update({ title: data.title, updated_at: new Date().toISOString() })
-      .eq('id', assessmentId);
+      .update({ title, updated_at: new Date().toISOString() })
+      .eq('id', assessmentId)
+      .select('id')
+      .maybeSingle();
+
     if (error) throw new Error(error.message);
+    if (!updated) throw new Error('That assessment no longer exists or you cannot modify it');
   }
 
-  const { data: assessment } = await supabase
-    .from('assessments')
-    .select('current_version_id')
-    .eq('id', assessmentId)
-    .single();
-
-  if (assessment?.current_version_id && data.instructions !== undefined) {
+  if (assessment.currentVersionId && data.instructions !== undefined) {
     const { error } = await supabase
       .from('assessment_versions')
       .update({ instructions: data.instructions, updated_at: new Date().toISOString() })
-      .eq('id', assessment.current_version_id);
+      .eq('id', assessment.currentVersionId)
+      .select('id')
+      .maybeSingle();
     if (error) throw new Error(error.message);
   }
 
-  revalidatePath(`/faculty/subjects`);
+  await recordAuditLog({
+    actorUserId: userId,
+    action: 'update',
+    entityType: 'assessment',
+    entityId: assessment.id,
+    metadata: { fields: Object.keys(data) },
+  });
+
+  revalidateAssessment(assessment.subjectOfferingId, assessment.id);
   return { success: true };
 }
 
@@ -177,24 +414,23 @@ export async function updateGenerationConfig(
   assessmentId: string,
   config: Record<string, unknown>
 ) {
-  const supabase = await createClient();
-  const { data: { user }, error: authError } = await supabase.auth.getUser();
-  if (authError || !user) throw new Error('Not authenticated');
+  const { supabase, userId } = await requireUser();
 
-  const { data: assessment } = await supabase
-    .from('assessments')
-    .select('current_version_id')
-    .eq('id', assessmentId)
-    .single();
+  const assessment = await getFacultyAssessment(supabase, userId, assessmentId);
+  if (!assessment) throw new Error('Assessment not found or you are not assigned to its offering');
 
-  if (!assessment?.current_version_id) throw new Error('No version found');
+  if (!assessment.currentVersionId) throw new Error('No version found');
 
-  const { error } = await supabase
+  const { data: updated, error } = await supabase
     .from('assessment_versions')
     .update({ generation_config: config, updated_at: new Date().toISOString() })
-    .eq('id', assessment.current_version_id);
+    .eq('id', assessment.currentVersionId)
+    .select('id')
+    .maybeSingle();
 
   if (error) throw new Error(error.message);
+  if (!updated) throw new Error('That assessment version no longer exists or you cannot modify it');
+
   return { success: true };
 }
 
@@ -212,40 +448,44 @@ export async function addQuestion(
     correct_choice_key?: string;
   }
 ) {
-  const supabase = await createClient();
-  const { data: { user }, error: authError } = await supabase.auth.getUser();
-  if (authError || !user) throw new Error('Not authenticated');
+  const { supabase, userId } = await requireUser();
 
-  const { data: assessment } = await supabase
-    .from('assessments')
-    .select('current_version_id')
-    .eq('id', assessmentId)
-    .single();
+  const assessment = await getFacultyAssessment(supabase, userId, assessmentId);
+  if (!assessment) throw new Error('Assessment not found or you are not assigned to its offering');
+  if (!assessment.currentVersionId) throw new Error('No version found');
 
-  if (!assessment?.current_version_id) throw new Error('No version found');
+  await assertQuestionsEditable(supabase, assessment);
+
+  const versionId = assessment.currentVersionId;
+
+  const questionText = data.question_text?.trim();
+  if (!questionText) throw new Error('Question text is required');
+  if (!Number.isFinite(data.points) || data.points < 1) {
+    throw new Error('Points must be at least 1');
+  }
 
   const { data: maxPos } = await supabase
     .from('questions')
     .select('position')
-    .eq('assessment_version_id', assessment.current_version_id)
+    .eq('assessment_version_id', versionId)
     .order('position', { ascending: false })
     .limit(1)
-    .single();
+    .maybeSingle();
 
   const nextPosition = (maxPos?.position || 0) + 1;
 
   const { data: question, error: qErr } = await supabase
     .from('questions')
     .insert({
-      assessment_version_id: assessment.current_version_id,
+      assessment_version_id: versionId,
       question_type: data.question_type,
-      question_text: data.question_text,
+      question_text: questionText,
       difficulty: data.difficulty,
       bloom_level: data.bloom_level,
       points: data.points,
       position: nextPosition,
       status: 'active',
-      created_by: user.id,
+      created_by: userId,
       is_ai_generated: false,
     })
     .select()
@@ -274,7 +514,7 @@ export async function addQuestion(
         await supabase.from('answer_keys').insert({
           question_id: question.id,
           correct_choice_id: correctChoice.id,
-          updated_by: user.id,
+          updated_by: userId,
         });
       }
     }
@@ -285,34 +525,28 @@ export async function addQuestion(
       question_id: question.id,
       canonical_answer: data.canonical_answer,
       accepted_answers: data.accepted_answers || [],
-      updated_by: user.id,
+      updated_by: userId,
     });
   }
 
-  await supabase
-    .from('assessment_versions')
-    .update({
-      total_items: (await supabase
-        .from('questions')
-        .select('id', { count: 'exact', head: true })
-        .eq('assessment_version_id', assessment.current_version_id)
-      ).count || 0,
-      total_points: (await supabase
-        .from('questions')
-        .select('points')
-        .eq('assessment_version_id', assessment.current_version_id)
-      ).data?.reduce((sum, q) => sum + (q.points || 0), 0) || 0,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', assessment.current_version_id);
+  await refreshVersionTotals(supabase, versionId);
 
-  revalidatePath(`/faculty/subjects`);
+  await recordAuditLog({
+    actorUserId: userId,
+    action: 'create',
+    entityType: 'question',
+    entityId: question.id,
+    metadata: { assessment_id: assessmentId },
+  });
+
+  revalidateAssessment(assessment.subjectOfferingId, assessment.id);
   return question as Question;
 }
 
 export async function updateQuestion(
   questionId: string,
   data: {
+    question_type?: QuestionType;
     question_text?: string;
     difficulty?: Difficulty;
     bloom_level?: BloomLevel;
@@ -323,22 +557,38 @@ export async function updateQuestion(
     accepted_answers?: string[];
   }
 ) {
-  const supabase = await createClient();
-  const { data: { user }, error: authError } = await supabase.auth.getUser();
-  if (authError || !user) throw new Error('Not authenticated');
+  const { supabase, userId } = await requireUser();
+
+  const assessment = await getFacultyAssessmentForQuestion(supabase, userId, questionId);
+  if (!assessment) throw new Error('Question not found or you are not assigned to its offering');
+
+  await assertQuestionsEditable(supabase, assessment);
+
+  const questionText = data.question_text?.trim();
+  if (data.question_text !== undefined && !questionText) {
+    throw new Error('Question text cannot be empty');
+  }
+  if (data.points !== undefined && (!Number.isFinite(data.points) || data.points < 1)) {
+    throw new Error('Points must be at least 1');
+  }
 
   const updateFields: Record<string, unknown> = { updated_at: new Date().toISOString() };
-  if (data.question_text !== undefined) updateFields.question_text = data.question_text;
+  if (data.question_type !== undefined) updateFields.question_type = data.question_type;
+  if (questionText !== undefined) updateFields.question_text = questionText;
   if (data.difficulty !== undefined) updateFields.difficulty = data.difficulty;
   if (data.bloom_level !== undefined) updateFields.bloom_level = data.bloom_level;
   if (data.points !== undefined) updateFields.points = data.points;
 
   if (Object.keys(updateFields).length > 1) {
-    const { error } = await supabase
+    const { data: updated, error } = await supabase
       .from('questions')
       .update(updateFields)
-      .eq('id', questionId);
+      .eq('id', questionId)
+      .select('id')
+      .maybeSingle();
+
     if (error) throw new Error(error.message);
+    if (!updated) throw new Error('That question no longer exists or you cannot modify it');
   }
 
   if (data.choices) {
@@ -365,7 +615,7 @@ export async function updateQuestion(
           await supabase.from('answer_keys').insert({
             question_id: questionId,
             correct_choice_id: correct.id,
-            updated_by: user.id,
+            updated_by: userId,
           });
         }
       }
@@ -378,27 +628,58 @@ export async function updateQuestion(
       question_id: questionId,
       canonical_answer: data.canonical_answer,
       accepted_answers: data.accepted_answers || [],
-      updated_by: user.id,
+      updated_by: userId,
     });
   }
 
-  revalidatePath(`/faculty/subjects`);
+  // Points drive the version's cached totals, so refresh them when they move.
+  if (data.points !== undefined) {
+    const { data: question } = await supabase
+      .from('questions')
+      .select('assessment_version_id')
+      .eq('id', questionId)
+      .maybeSingle();
+
+    if (question?.assessment_version_id) {
+      await refreshVersionTotals(supabase, question.assessment_version_id);
+    }
+  }
+
+  await recordAuditLog({
+    actorUserId: userId,
+    action: 'update',
+    entityType: 'question',
+    entityId: questionId,
+    metadata: { assessment_id: assessment.id },
+  });
+
+  revalidateAssessment(assessment.subjectOfferingId, assessment.id);
   return { success: true };
 }
 
 export async function deleteQuestion(questionId: string) {
-  const supabase = await createClient();
-  const { data: { user }, error: authError } = await supabase.auth.getUser();
-  if (authError || !user) throw new Error('Not authenticated');
+  const { supabase, userId } = await requireUser();
+
+  const assessment = await getFacultyAssessmentForQuestion(supabase, userId, questionId);
+  if (!assessment) throw new Error('Question not found or you are not assigned to its offering');
+
+  await assertQuestionsEditable(supabase, assessment);
 
   const { data: question } = await supabase
     .from('questions')
     .select('assessment_version_id, position')
     .eq('id', questionId)
-    .single();
+    .maybeSingle();
 
-  const { error } = await supabase.from('questions').delete().eq('id', questionId);
+  const { data: deleted, error } = await supabase
+    .from('questions')
+    .delete()
+    .eq('id', questionId)
+    .select('id')
+    .maybeSingle();
+
   if (error) throw new Error(error.message);
+  if (!deleted) throw new Error('That question no longer exists or you cannot delete it');
 
   if (question) {
     // Decrement position of all questions after the deleted one
@@ -418,109 +699,77 @@ export async function deleteQuestion(questionId: string) {
       }
     }
 
-    const { count } = await supabase
-      .from('questions')
-      .select('id', { count: 'exact', head: true })
-      .eq('assessment_version_id', question.assessment_version_id);
-
-    const { data: remaining } = await supabase
-      .from('questions')
-      .select('points')
-      .eq('assessment_version_id', question.assessment_version_id);
-
-    await supabase
-      .from('assessment_versions')
-      .update({
-        total_items: count || 0,
-        total_points: remaining?.reduce((sum, q) => sum + (q.points || 0), 0) || 0,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', question.assessment_version_id);
+    await refreshVersionTotals(supabase, question.assessment_version_id);
   }
 
-  revalidatePath(`/faculty/subjects`);
-  return { success: true };
-}
-
-export async function addAnswerKey(
-  questionId: string,
-  data: {
-    correct_choice_id?: string;
-    canonical_answer?: string;
-    accepted_answers?: string[];
-  }
-) {
-  const supabase = await createClient();
-  const { data: { user }, error: authError } = await supabase.auth.getUser();
-  if (authError || !user) throw new Error('Not authenticated');
-
-  await supabase.from('answer_keys').delete().eq('question_id', questionId);
-
-  const { error } = await supabase.from('answer_keys').insert({
-    question_id: questionId,
-    correct_choice_id: data.correct_choice_id || null,
-    canonical_answer: data.canonical_answer || null,
-    accepted_answers: data.accepted_answers || null,
-    updated_by: user.id,
+  await recordAuditLog({
+    actorUserId: userId,
+    action: 'delete',
+    entityType: 'question',
+    entityId: questionId,
+    metadata: { assessment_id: assessment.id },
   });
 
-  if (error) throw new Error(error.message);
-  revalidatePath(`/faculty/subjects`);
+  revalidateAssessment(assessment.subjectOfferingId, assessment.id);
   return { success: true };
 }
 
 export async function approveAssessment(assessmentId: string) {
-  const supabase = await createClient();
-  const { data: { user }, error: authError } = await supabase.auth.getUser();
-  if (authError || !user) throw new Error('Not authenticated');
+  const { supabase, userId } = await requireUser();
 
-  const { data: assessment } = await supabase
-    .from('assessments')
-    .select('current_version_id')
-    .eq('id', assessmentId)
-    .single();
+  const assessment = await getFacultyAssessment(supabase, userId, assessmentId);
+  if (!assessment) throw new Error('Assessment not found or you are not assigned to its offering');
+  if (!assessment.currentVersionId) throw new Error('No version found');
 
-  if (!assessment?.current_version_id) throw new Error('No version found');
-
-  const { error: assessErr } = await supabase
+  const { data: approved, error: assessErr } = await supabase
     .from('assessments')
     .update({ status: 'approved', updated_at: new Date().toISOString() })
-    .eq('id', assessmentId);
+    .eq('id', assessmentId)
+    .select('id')
+    .maybeSingle();
+
   if (assessErr) throw new Error(assessErr.message);
+  if (!approved) throw new Error('That assessment no longer exists or you cannot modify it');
 
   const { error: verErr } = await supabase
     .from('assessment_versions')
     .update({
       status: 'approved',
-      approved_by: user.id,
+      approved_by: userId,
       approved_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     })
-    .eq('id', assessment.current_version_id);
+    .eq('id', assessment.currentVersionId);
   if (verErr) throw new Error(verErr.message);
 
-  revalidatePath(`/faculty/subjects`);
+  await recordAuditLog({
+    actorUserId: userId,
+    action: 'approve',
+    entityType: 'assessment',
+    entityId: assessmentId,
+    metadata: { title: assessment.title },
+  });
+
+  revalidateAssessment(assessment.subjectOfferingId, assessment.id);
   return { success: true };
 }
 
 export async function publishAssessment(assessmentId: string) {
-  const supabase = await createClient();
-  const { data: { user }, error: authError } = await supabase.auth.getUser();
-  if (authError || !user) throw new Error('Not authenticated');
+  const { supabase, userId } = await requireUser();
 
-  const { data: assessment } = await supabase
-    .from('assessments')
-    .select('current_version_id, title, subject_offering_id')
-    .eq('id', assessmentId)
-    .single();
+  const assessment = await getFacultyAssessment(supabase, userId, assessmentId);
+  if (!assessment) throw new Error('Assessment not found or you are not assigned to its offering');
+  if (!assessment.currentVersionId) throw new Error('No version found');
 
-  if (!assessment?.current_version_id) throw new Error('No version found');
-
-  const { error: assessErr } = await supabase
+  const { data: published, error: assessErr } = await supabase
     .from('assessments')
     .update({ status: 'published', updated_at: new Date().toISOString() })
-    .eq('id', assessmentId);
+    .eq('id', assessmentId)
+    .select('id')
+    .maybeSingle();
+
   if (assessErr) throw new Error(assessErr.message);
+  if (!published) throw new Error('That assessment no longer exists or you cannot modify it');
 
   const { error: verErr } = await supabase
     .from('assessment_versions')
@@ -529,20 +778,30 @@ export async function publishAssessment(assessmentId: string) {
       published_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     })
-    .eq('id', assessment.current_version_id);
+    .eq('id', assessment.currentVersionId);
   if (verErr) throw new Error(verErr.message);
 
   // Tell the class an assessment is coming (notifications are server-written
   // only; see lib/notifications.ts).
   await notifyOfferingStudents({
-    offeringId: assessment.subject_offering_id,
+    offeringId: assessment.subjectOfferingId,
     type: 'assessment_published',
     title: 'New assessment published',
     body: `${assessment.title} has been published. Watch for its schedule.`,
     data: { assessment_id: assessmentId },
   });
 
-  revalidatePath(`/faculty/subjects`);
+  await recordAuditLog({
+    actorUserId: userId,
+    action: 'publish',
+    entityType: 'assessment',
+    entityId: assessmentId,
+    metadata: { title: assessment.title },
+  });
+
+  revalidateAssessment(assessment.subjectOfferingId, assessment.id);
+  // Students see published assessments on their own list.
+  revalidatePath('/student/assessments');
   return { success: true };
 }
 
@@ -560,22 +819,16 @@ export async function saveGeneratedQuestions(
     accepted_answers?: string[];
   }[]
 ): Promise<{ success: boolean; saved?: number; error?: string }> {
-  const supabase = await createClient();
-  const { data: { user }, error: authError } = await supabase.auth.getUser();
-  if (authError || !user) return { success: false, error: 'Not authenticated' };
-
   if (!assessmentId) return { success: false, error: 'Missing assessment' };
   if (!questions || questions.length === 0) return { success: false, error: 'No questions to save' };
 
-  // RLS restricts this select to assessments in offerings the faculty owns.
-  const { data: assessment } = await supabase
-    .from('assessments')
-    .select('current_version_id')
-    .eq('id', assessmentId)
-    .single();
+  const { supabase, userId } = await requireUser();
 
-  if (!assessment?.current_version_id) return { success: false, error: 'Assessment not found or not authorized' };
-  const versionId = assessment.current_version_id;
+  const assessment = await getFacultyAssessment(supabase, userId, assessmentId);
+  if (!assessment) return { success: false, error: 'Assessment not found or not authorized' };
+  if (!assessment.currentVersionId) return { success: false, error: 'No version found' };
+
+  const versionId = assessment.currentVersionId;
 
   // Idempotent re-save (wizard retry): clear any previous questions first.
   // Cascades remove choices and answer keys.
@@ -602,7 +855,7 @@ export async function saveGeneratedQuestions(
         position: i + 1,
         status: 'active',
         is_ai_generated: q.is_ai_generated ?? false,
-        created_by: user.id,
+        created_by: userId,
       })
       .select('id')
       .single();
@@ -629,7 +882,7 @@ export async function saveGeneratedQuestions(
           await supabase.from('answer_keys').insert({
             question_id: question.id,
             correct_choice_id: correctRow.id,
-            updated_by: user.id,
+            updated_by: userId,
           });
         }
       }
@@ -640,34 +893,24 @@ export async function saveGeneratedQuestions(
         question_id: question.id,
         canonical_answer: q.canonical_answer,
         accepted_answers: q.accepted_answers ?? [],
-        updated_by: user.id,
+        updated_by: userId,
       });
     }
 
     saved++;
   }
 
-  // Refresh version totals.
-  const { count } = await supabase
-    .from('questions')
-    .select('id', { count: 'exact', head: true })
-    .eq('assessment_version_id', versionId);
+  await refreshVersionTotals(supabase, versionId);
 
-  const { data: pointRows } = await supabase
-    .from('questions')
-    .select('points')
-    .eq('assessment_version_id', versionId);
+  await recordAuditLog({
+    actorUserId: userId,
+    action: 'create',
+    entityType: 'assessment',
+    entityId: assessment.id,
+    metadata: { questions_saved: saved, replaced_previous_questions: true },
+  });
 
-  await supabase
-    .from('assessment_versions')
-    .update({
-      total_items: count || 0,
-      total_points: pointRows?.reduce((sum, r) => sum + (r.points || 0), 0) || 0,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', versionId);
-
-  revalidatePath(`/faculty/subjects`);
+  revalidateAssessment(assessment.subjectOfferingId, assessment.id);
   return { success: true, saved };
 }
 
@@ -682,15 +925,16 @@ export async function triggerGeneration(
     custom_instructions?: string;
   }
 ) {
-  const supabase = await createClient();
-  const { data: { user }, error: authError } = await supabase.auth.getUser();
-  if (authError || !user) throw new Error('Not authenticated');
+  const { supabase, userId } = await requireUser();
+
+  const assessment = await getFacultyAssessment(supabase, userId, assessmentId);
+  if (!assessment) throw new Error('Assessment not found or you are not assigned to its offering');
 
   const { data: job, error: jobErr } = await supabase
     .from('assessment_generation_jobs')
     .insert({
       assessment_id: assessmentId,
-      requested_by: user.id,
+      requested_by: userId,
       operation: 'generate_questions',
       status: 'queued',
       input_config: config,
@@ -699,6 +943,14 @@ export async function triggerGeneration(
     .single();
 
   if (jobErr || !job) throw new Error(jobErr?.message || 'Failed to create generation job');
+
+  await recordAuditLog({
+    actorUserId: userId,
+    action: 'create',
+    entityType: 'assessment_generation_job',
+    entityId: job.id,
+    metadata: { assessment_id: assessmentId },
+  });
 
   return job;
 }

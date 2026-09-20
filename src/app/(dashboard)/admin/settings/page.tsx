@@ -1,147 +1,123 @@
-import { redirect } from 'next/navigation';
-import { createClient } from '@/lib/supabase/server';
+import type { JSX } from 'react';
+import Link from 'next/link';
 import PageHeader from '@/components/ui/PageHeader';
-import { Card, CardHeader, CardContent } from '@/components/ui/Card';
-import { APP_NAME } from '@/lib/constants';
+import { Card, CardContent, CardHeader } from '@/components/ui/Card';
+import { APP_NAME, APP_DESCRIPTION } from '@/lib/constants';
+import { getSettings } from '@/lib/settings';
+import { requireAdminUser } from '../actions';
+import SettingsForm from './SettingsForm';
 
-export default async function SystemSettingsPage() {
-  const supabase = await createClient();
+/**
+ * Super-admin configuration. Access is gated by the admin layout and again by
+ * `requireAdminUser`, which re-derives the caller's role server-side.
+ *
+ * The editable values live in `system_settings` (see ./actions); the reference
+ * data behind them — academic years, programs, year levels — is only summarised
+ * here, because it is managed under /admin/academic.
+ */
+export default async function SystemSettingsPage(): Promise<JSX.Element> {
+  const { supabase } = await requireAdminUser();
 
-  const { data: { user }, error: authError } = await supabase.auth.getUser();
-  if (authError || !user) redirect('/login');
-
-  const { data: roles } = await supabase
-    .from('user_roles')
-    .select('role')
-    .eq('user_id', user.id);
-
-  if (!roles?.some((r) => r.role === 'super_admin')) redirect('/');
-
-  const [academicYears, programs, yearLevels] = await Promise.all([
-    supabase.from('academic_years').select('*').order('starts_on', { ascending: false }),
-    supabase.from('programs').select('*').order('code'),
-    supabase.from('year_levels').select('*').order('sort_order'),
+  const [settings, yearsResult, programsResult, yearLevelsResult] = await Promise.all([
+    getSettings(),
+    supabase
+      .from('academic_years')
+      .select('name, starts_on, ends_on, is_active')
+      .order('starts_on', { ascending: false }),
+    supabase.from('programs').select('id', { count: 'exact', head: true }),
+    supabase.from('year_levels').select('name').order('sort_order', { ascending: true }),
   ]);
 
-  const activeYear = academicYears.data?.find((y) => y.is_active);
+  const activeYear = (yearsResult.data ?? []).find((y) => y.is_active);
+  const programCount = programsResult.count ?? 0;
+  const yearLevels = (yearLevelsResult.data ?? []).map((y) => y.name);
+
+  const related = [
+    {
+      label: 'Academic Structure',
+      href: '/admin/academic',
+      description: 'Academic years, semesters, programs, year levels, and sections',
+    },
+    {
+      label: 'Users & Roles',
+      href: '/admin/users',
+      description: 'Account approval, roles, and student verification',
+    },
+    {
+      label: 'AI Configuration',
+      href: '/admin/ai-config',
+      description: 'Provider status and AI usage',
+    },
+  ];
 
   return (
     <div>
-      <PageHeader title="System Settings" description="Configure application-wide settings" />
+      <PageHeader
+        title="System Settings"
+        description="Configure system-wide limits and defaults"
+        breadcrumbs={[
+          { label: 'Admin', href: '/admin' },
+          { label: 'System Settings' },
+        ]}
+      />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card>
-          <CardHeader>Application</CardHeader>
-          <CardContent className="space-y-4">
-            <div>
-              <p className="text-sm text-[var(--color-muted)]">Application Name</p>
-              <p className="text-sm font-medium text-[var(--color-foreground)]">{APP_NAME}</p>
-            </div>
-            <div>
-              <p className="text-sm text-[var(--color-muted)]">Active Academic Year</p>
-              <p className="text-sm font-medium text-[var(--color-foreground)]">
-                {activeYear ? `${activeYear.name} (${activeYear.starts_on} to ${activeYear.ends_on})` : 'None configured'}
-              </p>
-            </div>
-            <div>
-              <p className="text-sm text-[var(--color-muted)]">Total Programs</p>
-              <p className="text-sm font-medium text-[var(--color-foreground)]">{programs.data?.length ?? 0}</p>
-            </div>
-            <div>
-              <p className="text-sm text-[var(--color-muted)]">Year Levels</p>
-              <p className="text-sm font-medium text-[var(--color-foreground)]">
-                {yearLevels.data?.map((y) => y.name).join(', ') || 'None configured'}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
+        <SettingsForm settings={settings} />
 
-        <Card>
-          <CardHeader>Academic Years</CardHeader>
-          <CardContent>
-            {academicYears.data && academicYears.data.length > 0 ? (
-              <div className="space-y-3">
-                {academicYears.data.map((year) => (
-                  <div
-                    key={year.id}
-                    className="flex items-center justify-between p-3 rounded-lg border border-[var(--color-border)]"
-                  >
-                    <div>
-                      <p className="text-sm font-medium text-[var(--color-foreground)]">{year.name}</p>
-                      <p className="text-xs text-[var(--color-muted)]">
-                        {year.starts_on} to {year.ends_on}
-                      </p>
-                    </div>
-                    {year.is_active ? (
-                      <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-[var(--color-success-light)] text-[var(--color-success)]">
-                        Active
-                      </span>
-                    ) : (
-                      <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-[var(--color-surface-hover)] text-[var(--color-muted)]">
-                        Inactive
-                      </span>
-                    )}
-                  </div>
-                ))}
+        <div className="space-y-6">
+          <Card>
+            <CardHeader>
+              <h2 className="text-lg font-semibold text-[var(--color-foreground)]">
+                Deployment
+              </h2>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div>
+                <p className="text-sm text-[var(--color-muted)]">Application</p>
+                <p className="text-sm font-medium text-[var(--color-foreground)]">{APP_NAME}</p>
+                <p className="text-xs text-[var(--color-muted)]">{APP_DESCRIPTION}</p>
               </div>
-            ) : (
-              <p className="text-sm text-[var(--color-muted)]">No academic years configured. Run the seed SQL to add defaults.</p>
-            )}
-          </CardContent>
-        </Card>
+              <div>
+                <p className="text-sm text-[var(--color-muted)]">Active Academic Year</p>
+                <p className="text-sm font-medium text-[var(--color-foreground)]">
+                  {activeYear
+                    ? `${activeYear.name} (${activeYear.starts_on} to ${activeYear.ends_on})`
+                    : 'None configured'}
+                </p>
+              </div>
+              <div>
+                <p className="text-sm text-[var(--color-muted)]">Programs</p>
+                <p className="text-sm font-medium text-[var(--color-foreground)]">
+                  {programCount === 0 ? 'None configured' : programCount}
+                </p>
+              </div>
+              <div>
+                <p className="text-sm text-[var(--color-muted)]">Year Levels</p>
+                <p className="text-sm font-medium text-[var(--color-foreground)]">
+                  {yearLevels.length > 0 ? yearLevels.join(', ') : 'None configured'}
+                </p>
+              </div>
+            </CardContent>
+          </Card>
 
-        <Card>
-          <CardHeader>Programs</CardHeader>
-          <CardContent>
-            {programs.data && programs.data.length > 0 ? (
-              <div className="space-y-2">
-                {programs.data.map((program) => (
-                  <div
-                    key={program.id}
-                    className="flex items-center justify-between p-3 rounded-lg border border-[var(--color-border)]"
-                  >
-                    <div>
-                      <p className="text-sm font-medium text-[var(--color-foreground)]">{program.name}</p>
-                      <p className="text-xs text-[var(--color-muted)]">{program.code}</p>
-                    </div>
-                    {program.is_active ? (
-                      <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-[var(--color-success-light)] text-[var(--color-success)]">
-                        Active
-                      </span>
-                    ) : (
-                      <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-[var(--color-surface-hover)] text-[var(--color-muted)]">
-                        Inactive
-                      </span>
-                    )}
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-sm text-[var(--color-muted)]">No programs configured. Run the seed SQL to add defaults.</p>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>Year Levels</CardHeader>
-          <CardContent>
-            {yearLevels.data && yearLevels.data.length > 0 ? (
-              <div className="space-y-2">
-                {yearLevels.data.map((yl) => (
-                  <div
-                    key={yl.id}
-                    className="flex items-center justify-between p-3 rounded-lg border border-[var(--color-border)]"
-                  >
-                    <p className="text-sm font-medium text-[var(--color-foreground)]">{yl.name}</p>
-                    <span className="text-xs text-[var(--color-muted)]">Order: {yl.sort_order}</span>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-sm text-[var(--color-muted)]">No year levels configured. Run the seed SQL to add defaults.</p>
-            )}
-          </CardContent>
-        </Card>
+          <Card>
+            <CardHeader>
+              <h2 className="text-lg font-semibold text-[var(--color-foreground)]">
+                Configured Elsewhere
+              </h2>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {related.map((item) => (
+                <Link key={item.href} href={item.href} className="block group">
+                  <p className="text-sm font-medium text-[var(--color-foreground)] group-hover:text-[var(--color-primary)]">
+                    {item.label}
+                  </p>
+                  <p className="text-xs text-[var(--color-muted)]">{item.description}</p>
+                </Link>
+              ))}
+            </CardContent>
+          </Card>
+        </div>
       </div>
     </div>
   );

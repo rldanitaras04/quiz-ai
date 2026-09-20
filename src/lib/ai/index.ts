@@ -9,7 +9,7 @@ import { generateQuestions as groqGenerate, generateEmbedding as groqEmbedding }
 import { generateQuestions as openaiGenerate, generateEmbedding as openaiEmbedding } from '@/lib/ai/providers/openai';
 import { chunkText, extractText } from '@/lib/ai/text-extraction';
 import { cosineSimilarity, findSimilarQuestions, detectDuplicateWithinAssessment } from '@/lib/ai/similarity';
-import { DEFAULT_SIMILARITY_THRESHOLD } from '@/lib/constants';
+import { getSettings } from '@/lib/settings';
 
 type Provider = 'groq' | 'openai';
 
@@ -48,14 +48,20 @@ export async function generateEmbeddings(
   return results;
 }
 
+/**
+ * Duplicate check for a single question. The threshold defaults to the
+ * administrator-configured value (/admin/settings) so the similarity rule can be
+ * tuned without a redeploy; callers may still override it per call.
+ */
 export async function checkSimilarity(
   questionText: string,
   existingEmbeddings: { id: string; question_text: string; embedding: number[] }[],
-  threshold: number = DEFAULT_SIMILARITY_THRESHOLD
+  threshold?: number
 ): Promise<SimilarityCheckResult> {
+  const effectiveThreshold = threshold ?? (await getSettings()).similarity_threshold;
   const { embedding } = await generateEmbedding(questionText);
 
-  const similar = findSimilarQuestions(embedding, existingEmbeddings, threshold);
+  const similar = findSimilarQuestions(embedding, existingEmbeddings, effectiveThreshold);
 
   if (similar.length > 0) {
     return {

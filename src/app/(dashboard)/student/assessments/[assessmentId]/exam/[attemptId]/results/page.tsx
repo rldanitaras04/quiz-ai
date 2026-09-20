@@ -5,6 +5,7 @@ import PageHeader from '@/components/ui/PageHeader';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import Badge from '@/components/ui/Badge';
 import Button from '@/components/ui/Button';
+import { Table, THead, TBody, TR, TH, TD } from '@/components/ui/Table';
 import Link from 'next/link';
 
 interface Props {
@@ -137,55 +138,61 @@ export default async function ExamResultsPage({ params }: Props) {
               <CardHeader>
                 <h2 className="text-lg font-semibold">Question Breakdown</h2>
               </CardHeader>
-              <CardContent className="space-y-3">
-                {responses.map((r, i) => {
-                  const isCorrect = r.earnedPoints !== null && r.earnedPoints === r.points;
-                  const selectedChoice = r.choices.find((c) => c.id === r.selectedChoiceId);
-                  const correctChoice = r.choices.find((c) => c.id === r.correctChoiceId);
+              <CardContent className="p-0">
+                <Table caption="Your answers, item by item">
+                  <THead>
+                    <TR>
+                      <TH align="right">#</TH>
+                      <TH>Question</TH>
+                      <TH>Your answer</TH>
+                      <TH>Correct answer</TH>
+                      <TH>Result</TH>
+                      <TH align="right">Points</TH>
+                    </TR>
+                  </THead>
+                  <TBody>
+                    {responses.map((r, i) => {
+                      const isCorrect = r.earnedPoints !== null && r.earnedPoints === r.points;
+                      const selectedChoice = r.choices.find((c) => c.id === r.selectedChoiceId);
+                      const correctChoice = r.choices.find((c) => c.id === r.correctChoiceId);
+                      const givenAnswer =
+                        r.questionType === 'multiple_choice'
+                          ? selectedChoice?.choice_text
+                          : r.textAnswer;
 
-                  return (
-                    <div
-                      key={r.questionId}
-                      className={`p-3 rounded-lg border ${
-                        isCorrect
-                          ? 'border-[var(--color-success)]/30 bg-[var(--color-success-light)]'
-                          : 'border-[var(--color-danger)]/30 bg-[var(--color-danger-light)]'
-                      }`}
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium">
-                            {(r.position ?? i + 1)}. {r.questionText}
-                          </p>
-                          {r.questionType === 'multiple_choice' && (
-                            <div className="mt-1 text-sm space-y-0.5">
-                              <p>
-                                Your answer: <span className={isCorrect ? 'text-[var(--color-success)]' : 'text-[var(--color-danger)]'}>
-                                  {selectedChoice?.choice_text ?? 'No answer'}
-                                </span>
-                              </p>
-                              {!isCorrect && d?.show_correct_answers && correctChoice && (
-                                <p>
-                                  Correct answer: <span className="text-[var(--color-success)]">{correctChoice.choice_text}</span>
-                                </p>
-                              )}
-                            </div>
-                          )}
-                          {r.questionType === 'identification' && (
-                            <p className="mt-1 text-sm">
-                              Your answer: <span className={isCorrect ? 'text-[var(--color-success)]' : 'text-[var(--color-danger)]'}>
-                                {r.textAnswer || 'No answer'}
-                              </span>
-                            </p>
-                          )}
-                        </div>
-                        <span className="text-sm font-medium whitespace-nowrap">
-                          {r.earnedPoints ?? 0}/{r.points} pts
-                        </span>
-                      </div>
-                    </div>
-                  );
-                })}
+                      return (
+                        <TR key={r.questionId} className="align-top">
+                          <TD numeric className="text-[var(--color-muted)]">
+                            {r.position ?? i + 1}
+                          </TD>
+                          <TD className="text-[var(--color-foreground)]">{r.questionText}</TD>
+                          <TD
+                            className={
+                              isCorrect
+                                ? 'text-[var(--color-success)]'
+                                : 'text-[var(--color-danger)]'
+                            }
+                          >
+                            {givenAnswer || 'No answer'}
+                          </TD>
+                          <TD className="text-[var(--color-muted)]">
+                            {d?.show_correct_answers && correctChoice
+                              ? correctChoice.choice_text
+                              : '—'}
+                          </TD>
+                          <TD>
+                            <Badge variant={isCorrect ? 'success' : 'danger'}>
+                              {isCorrect ? 'Correct' : 'Incorrect'}
+                            </Badge>
+                          </TD>
+                          <TD numeric className="font-medium text-[var(--color-foreground)]">
+                            {r.earnedPoints ?? 0}/{r.points}
+                          </TD>
+                        </TR>
+                      );
+                    })}
+                  </TBody>
+                </Table>
               </CardContent>
             </Card>
           )}
@@ -209,27 +216,27 @@ export default async function ExamResultsPage({ params }: Props) {
             <CardContent className="space-y-3 text-sm">
               <div className="flex justify-between">
                 <span className="text-[var(--color-muted)]">Total Items</span>
-                <span className="font-medium">{version?.total_items ?? 0}</span>
+                <span className="font-medium tabular-nums">{version?.total_items ?? 0}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-[var(--color-muted)]">Total Points</span>
-                <span className="font-medium">{version?.total_points ?? 0}</span>
+                <span className="font-medium tabular-nums">{version?.total_points ?? 0}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-[var(--color-muted)]">Your Score</span>
-                <span className="font-medium">{result ? `${result.raw_score}/${result.possible_score}` : 'N/A'}</span>
+                <span className="font-medium tabular-nums">{result ? `${result.raw_score}/${result.possible_score}` : 'N/A'}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-[var(--color-muted)]">Percentage</span>
-                <span className="font-medium">{percentage}%</span>
+                <span className="font-medium tabular-nums">{percentage}%</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-[var(--color-muted)]">Attempt</span>
-                <span className="font-medium">#{attempt.attempt_number}</span>
+                <span className="font-medium tabular-nums">#{attempt.attempt_number}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-[var(--color-muted)]">Submitted</span>
-                <span className="font-medium">
+                <span className="font-medium tabular-nums">
                   {attempt.submitted_at
                     ? new Date(attempt.submitted_at).toLocaleString()
                     : 'N/A'}

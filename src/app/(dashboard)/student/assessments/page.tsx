@@ -1,9 +1,10 @@
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import PageHeader from '@/components/ui/PageHeader';
-import { Card, CardContent } from '@/components/ui/Card';
+import { Card } from '@/components/ui/Card';
 import Badge from '@/components/ui/Badge';
 import EmptyState from '@/components/ui/EmptyState';
+import { Table, THead, TBody, TR, TH, TD } from '@/components/ui/Table';
 import Link from 'next/link';
 
 export default async function StudentAssessmentsPage() {
@@ -88,51 +89,84 @@ export default async function StudentAssessmentsPage() {
       />
 
       {deployments && deployments.length > 0 ? (
-        <div className="space-y-3">
-          {deployments.map((d: Record<string, unknown>) => {
-            const assessment = (d.assessment_version as Record<string, unknown>)?.assessment as Record<string, unknown> | undefined;
-            const version = d.assessment_version as Record<string, unknown> | undefined;
-            const opensAt = new Date(d.opens_at as string);
-            const closesAt = new Date(d.closes_at as string);
-            const status = getDeploymentStatus(d);
-            const isAvailable = now >= opensAt && now <= closesAt && !status.attemptId;
-            const canResume = !!status.attemptId;
+        <Card>
+          <Table caption="Assessments available from your enrolled subjects">
+            <THead>
+              <TR>
+                <TH>Assessment</TH>
+                <TH>Type</TH>
+                <TH align="right">Items</TH>
+                <TH align="right">Points</TH>
+                <TH align="right">Duration</TH>
+                <TH>Window</TH>
+                <TH>Status</TH>
+                <TH align="right">Action</TH>
+              </TR>
+            </THead>
+            <TBody>
+              {deployments.map((d: Record<string, unknown>) => {
+                const assessment = (d.assessment_version as Record<string, unknown>)?.assessment as Record<string, unknown> | undefined;
+                const version = d.assessment_version as Record<string, unknown> | undefined;
+                const opensAt = new Date(d.opens_at as string);
+                const closesAt = new Date(d.closes_at as string);
+                const status = getDeploymentStatus(d);
+                const isAvailable = now >= opensAt && now <= closesAt && !status.attemptId;
+                const canResume = !!status.attemptId;
+                const href = `/student/assessments/${(assessment?.id as string) ?? (d.id as string)}`;
 
-            return (
-              <Link key={d.id as string} href={`/student/assessments/${(assessment?.id as string) ?? (d.id as string)}`}>
-                <Card className="hover:shadow-md transition-shadow cursor-pointer">
-                  <CardContent className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                    <div className="min-w-0 flex-1">
-                      <h3 className="font-medium text-[var(--color-foreground)]">
+                return (
+                  <TR key={d.id as string} className="hover:bg-[var(--color-surface-hover)] align-top">
+                    <TD>
+                      <Link
+                        href={href}
+                        className="font-medium text-[var(--color-primary)] hover:underline"
+                      >
                         {(assessment?.title as string) ?? 'Untitled Assessment'}
-                      </h3>
-                      <p className="text-sm text-[var(--color-muted)]">
-                        {assessment?.assessment_type === 'multiple_choice' ? 'Multiple Choice' : 'Identification'}
-                        {version ? ` \u00B7 ${version.total_items} items, ${version.total_points} pts` : ''}
-                        {` \u00B7 ${d.duration_minutes} min`}
-                      </p>
-                      <p className="text-xs text-[var(--color-muted-light)]">
-                        Opens {opensAt.toLocaleDateString()} {opensAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        {' \u2014 '}
-                        Closes {closesAt.toLocaleDateString()} {closesAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-2">
+                      </Link>
+                    </TD>
+                    <TD className="text-[var(--color-muted)]">
+                      {assessment?.assessment_type === 'multiple_choice'
+                        ? 'Multiple Choice'
+                        : 'Identification'}
+                    </TD>
+                    <TD numeric className="text-[var(--color-foreground)]">
+                      {(version?.total_items as number) ?? '—'}
+                    </TD>
+                    <TD numeric className="text-[var(--color-foreground)]">
+                      {(version?.total_points as number) ?? '—'}
+                    </TD>
+                    <TD numeric className="text-[var(--color-muted)]">
+                      {d.duration_minutes as number} min
+                    </TD>
+                    <TD className="text-xs text-[var(--color-muted)]">
+                      Opens {opensAt.toLocaleDateString()}{' '}
+                      {opensAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      <span className="block">
+                        Closes {closesAt.toLocaleDateString()}{' '}
+                        {closesAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    </TD>
+                    <TD>
                       <Badge variant={status.variant}>{status.label}</Badge>
-                      {/* Styled label, not a nested <button> inside the card's
-                          <Link> (a link cannot legally contain a button). */}
-                      {(isAvailable || canResume) && (
-                        <span className="inline-flex items-center rounded-[var(--radius-md)] bg-[var(--color-primary)] px-3 py-1.5 text-sm font-medium text-white">
+                    </TD>
+                    <TD className="text-right">
+                      {isAvailable || canResume ? (
+                        <Link
+                          href={href}
+                          className="inline-flex items-center rounded-[var(--radius-md)] bg-[var(--color-primary)] px-3 py-1.5 text-sm font-medium text-white hover:bg-[var(--color-primary-hover)]"
+                        >
                           {canResume ? 'Resume' : 'Start'}
-                        </span>
+                        </Link>
+                      ) : (
+                        <span className="text-xs text-[var(--color-muted)]">—</span>
                       )}
-                    </div>
-                  </CardContent>
-                </Card>
-              </Link>
-            );
-          })}
-        </div>
+                    </TD>
+                  </TR>
+                );
+              })}
+            </TBody>
+          </Table>
+        </Card>
       ) : (
         <EmptyState
           title="No assessments available"

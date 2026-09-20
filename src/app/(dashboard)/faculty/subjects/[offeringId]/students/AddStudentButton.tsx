@@ -4,6 +4,7 @@ import { useState, type JSX } from 'react';
 import Button from '@/components/ui/Button';
 import Modal from '@/components/ui/Modal';
 import Input from '@/components/ui/Input';
+import { notifyError, notifySuccess } from '@/components/ui/alerts';
 import { addStudentToOffering } from './actions';
 
 interface AddStudentButtonProps {
@@ -27,8 +28,10 @@ export default function AddStudentButton({ offeringId }: AddStudentButtonProps):
       const result = await addStudentToOffering(offeringId, studentNumber);
       if (result.error) {
         setError(result.error);
+        notifyError('Could not add the student', result.error);
       } else {
         setSuccess(true);
+        notifySuccess('Student enrolled', `${studentNumber} added to this offering.`);
         setStudentNumber('');
         setTimeout(() => {
           setOpen(false);
@@ -38,6 +41,7 @@ export default function AddStudentButton({ offeringId }: AddStudentButtonProps):
       }
     } catch {
       setError('An unexpected error occurred.');
+      notifyError('Could not add the student', 'An unexpected error occurred.');
     } finally {
       setLoading(false);
     }

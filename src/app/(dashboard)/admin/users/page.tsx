@@ -1,42 +1,30 @@
-import { redirect } from 'next/navigation';
-import { createClient } from '@/lib/supabase/server';
+import type { JSX } from 'react';
 import PageHeader from '@/components/ui/PageHeader';
 import { Card, CardContent } from '@/components/ui/Card';
-import { getUsers } from '../actions';
-import UsersFilter from './UsersFilter';
+import { requireRole } from '@/lib/auth';
+import { getAdminUsers } from './actions';
+import UsersManager from './UsersManager';
 
-export default async function UsersPage() {
-  const supabase = await createClient();
+export default async function UsersPage(): Promise<JSX.Element> {
+  // The layout already gates this route; this call supplies the actor id so the
+  // UI can disable self-destructive controls.
+  const gate = await requireRole(['super_admin']);
+  const currentUserId = gate.status === 'ok' ? gate.user.id : '';
 
-  const { data: { user }, error: authError } = await supabase.auth.getUser();
-  if (authError || !user) redirect('/login');
-
-  const { data: roles } = await supabase
-    .from('user_roles')
-    .select('role')
-    .eq('user_id', user.id);
-
-  if (!roles?.some((r) => r.role === 'super_admin')) redirect('/');
-
-  const users = await getUsers();
-
-  const totalUsers = users.length;
-  const activeCount = users.filter((u) => u.status === 'active').length;
-  const pendingCount = users.filter((u) => u.status === 'pending').length;
-  const adminCount = users.filter((u) => u.roles.includes('super_admin')).length;
+  const users = await getAdminUsers();
 
   const stats = [
-    { label: 'Total Users', value: totalUsers },
-    { label: 'Active', value: activeCount },
-    { label: 'Pending', value: pendingCount },
-    { label: 'Admins', value: adminCount },
+    { label: 'Total Users', value: users.length },
+    { label: 'Active', value: users.filter((u) => u.status === 'active').length },
+    { label: 'Pending', value: users.filter((u) => u.status === 'pending').length },
+    { label: 'Admins', value: users.filter((u) => u.roles.includes('super_admin')).length },
   ];
 
   return (
     <div>
       <PageHeader
         title="User Management"
-        description="View and manage all user accounts"
+        description="Approve accounts, manage roles, and review student verification"
         breadcrumbs={[
           { label: 'Admin', href: '/admin' },
           { label: 'Users' },
@@ -54,7 +42,7 @@ export default async function UsersPage() {
         ))}
       </div>
 
-      <UsersFilter users={users} />
+      <UsersManager users={users} currentUserId={currentUserId} />
     </div>
   );
 }

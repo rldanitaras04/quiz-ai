@@ -1,27 +1,18 @@
-import { redirect } from 'next/navigation';
-import { createClient } from '@/lib/supabase/server';
+import type { JSX } from 'react';
 import PageHeader from '@/components/ui/PageHeader';
 import { Card, CardContent } from '@/components/ui/Card';
-import { getSubjects } from '../actions';
-import SubjectsFilter from './SubjectsFilter';
+import { getAdminReferenceData } from '../actions';
+import { getSubjectsOverview } from './actions';
+import SubjectsManager from './SubjectsManager';
 
-export default async function SubjectsPage() {
-  const supabase = await createClient();
-
-  const { data: { user }, error: authError } = await supabase.auth.getUser();
-  if (authError || !user) redirect('/login');
-
-  const { data: roles } = await supabase
-    .from('user_roles')
-    .select('role')
-    .eq('user_id', user.id);
-
-  if (!roles?.some((r) => r.role === 'super_admin')) redirect('/');
-
-  const subjects = await getSubjects();
+export default async function SubjectsPage(): Promise<JSX.Element> {
+  const [subjects, reference] = await Promise.all([
+    getSubjectsOverview(),
+    getAdminReferenceData(),
+  ]);
 
   const totalSubjects = subjects.length;
-  const activeSubjects = subjects.filter((s) => s.is_active).length;
+  const activeSubjects = subjects.filter((s) => s.isActive).length;
   const totalOfferings = subjects.reduce((sum, s) => sum + s.offerings.length, 0);
   const activeOfferings = subjects.reduce(
     (sum, s) => sum + s.offerings.filter((o) => o.status === 'active').length,
@@ -39,7 +30,7 @@ export default async function SubjectsPage() {
     <div>
       <PageHeader
         title="Subjects & Offerings"
-        description="Manage subjects and their semester offerings"
+        description="Manage subjects, their semester offerings, and faculty assignments"
         breadcrumbs={[
           { label: 'Admin', href: '/admin' },
           { label: 'Subjects' },
@@ -57,7 +48,7 @@ export default async function SubjectsPage() {
         ))}
       </div>
 
-      <SubjectsFilter subjects={subjects} />
+      <SubjectsManager subjects={subjects} reference={reference} />
     </div>
   );
 }

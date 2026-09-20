@@ -3,6 +3,7 @@
 import { useState, useCallback, type JSX } from 'react';
 import Button from '@/components/ui/Button';
 import Spinner from '@/components/ui/Spinner';
+import { notifyError, notifySuccess } from '@/components/ui/alerts';
 import { createAssessment, updateGenerationConfig, triggerGeneration } from '@/app/(dashboard)/faculty/subjects/[offeringId]/assessments/actions';
 import { useSupabase } from '@/lib/hooks';
 import type {
@@ -223,6 +224,11 @@ export default function StepGenerate({
 
       updatePhase(3, 'done');
 
+      notifySuccess(
+        'Questions generated',
+        `${allGeneratedQuestions.length} question${allGeneratedQuestions.length === 1 ? '' : 's'} ready to review.`
+      );
+
       onUpdate({
         generatedQuestions: allGeneratedQuestions,
         generationStats: {
@@ -235,6 +241,7 @@ export default function StepGenerate({
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Generation failed';
       setGenerationError(msg);
+      notifyError('Generation failed', msg);
       onUpdate({ isGenerating: false, generationError: msg });
       if (currentPhase >= 0) {
         updatePhase(currentPhase, 'error');

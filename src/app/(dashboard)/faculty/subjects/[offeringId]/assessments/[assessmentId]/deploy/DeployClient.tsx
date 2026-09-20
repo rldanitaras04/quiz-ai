@@ -8,6 +8,7 @@ import Input from '@/components/ui/Input';
 import Select from '@/components/ui/Select';
 import Badge from '@/components/ui/Badge';
 import Modal from '@/components/ui/Modal';
+import { notifyError, notifySuccess } from '@/components/ui/alerts';
 import { createDeployment } from './actions';
 import type {
   AssessmentVersion,
@@ -98,10 +99,13 @@ export default function DeployClient({
     });
 
     if (result.success) {
+      notifySuccess('Assessment deployed', 'Students can now take this assessment in the window you set.');
       router.push(`/faculty/subjects/${offeringId}/deployments`);
       router.refresh();
     } else {
-      setError(result.error ?? 'Failed to create deployment');
+      const message = result.error ?? 'Failed to create deployment';
+      setError(message);
+      notifyError('Could not deploy the assessment', message);
       setLoading(false);
     }
   };

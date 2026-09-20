@@ -8,8 +8,11 @@ import { createClient } from '@/lib/supabase/server';
  * - `create_admin` is only permitted while NO super_admin exists yet
  *   (initial self-host bootstrap window). Once an admin exists, this
  *   endpoint can no longer mint new ones.
- * - `promote_to_admin`, `diagnose`, and `run_migration` require an
- *   authenticated, active super_admin session.
+ * - `promote_to_admin` and `diagnose` require an authenticated, active
+ *   super_admin session.
+ *
+ * There is deliberately no SQL-execution action: schema changes are applied
+ * with `supabase db push`, not through an HTTP endpoint.
  * - This route must never trust client input for authorization decisions.
  */
 
@@ -117,16 +120,41 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: 'User creation failed' }, { status: 500 });
       }
 
+      const adminUserId = userData.user.id;
+
+      // Create the profiles row FIRST. There is no trigger on auth.users in this
+      // project, and both user_roles.user_id and faculty_profiles.user_id carry
+      // a FK to profiles(id) — inserting the role before the profile fails with
+      // a foreign-key violation and leaves an auth user with no profile at all.
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .insert({
+          id: adminUserId,
+          email,
+          full_name: fullName,
+          status: 'active',
+        });
+
+      if (profileError) {
+        await supabase.auth.admin.deleteUser(adminUserId);
+        return NextResponse.json(
+          { error: profileError.message, details: 'Failed to create admin profile' },
+          { status: 500 }
+        );
+      }
+
       const { error: roleError } = await supabase
         .from('user_roles')
-        .insert({ user_id: userData.user.id, role: 'super_admin' });
+        .insert({ user_id: adminUserId, role: 'super_admin' });
 
       if (roleError) {
+        await supabase.auth.admin.deleteUser(adminUserId);
         return NextResponse.json({ error: roleError.message }, { status: 500 });
       }
 
-      // The auth trigger already creates the profiles row; add faculty profile.
-      await supabase.from('faculty_profiles').insert({ user_id: userData.user.id });
+      // Optional: admins may also be assigned to offerings, so give them the
+      // faculty profile row. Not fatal if it fails.
+      await supabase.from('faculty_profiles').insert({ user_id: adminUserId });
 
       return NextResponse.json({
         success: true,
@@ -198,33 +226,6 @@ export async function POST(request: Request) {
         rolesError: rolesResult.error?.message,
         adminClientUrl: process.env.NEXT_PUBLIC_SUPABASE_URL,
       });
-    }
-
-    if (action === 'run_migration') {
-      const supabase = createAdminClient();
-
-      const migrationSQL = `
-        CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-        CREATE EXTENSION IF NOT EXISTS "vector";
-        SELECT EXISTS (
-          SELECT FROM information_schema.tables
-          WHERE table_name = 'profiles'
-        ) as migration_applied;
-      `;
-
-      const { data, error } = await supabase.rpc('exec_sql', { sql: migrationSQL }).single();
-
-      if (error) {
-        return NextResponse.json(
-          {
-            error: 'Migration check failed. Please run the SQL migration manually from the SQL Editor.',
-            details: error.message,
-          },
-          { status: 500 }
-        );
-      }
-
-      return NextResponse.json({ success: true, data });
     }
 
     return NextResponse.json({ error: 'Unknown action' }, { status: 400 });

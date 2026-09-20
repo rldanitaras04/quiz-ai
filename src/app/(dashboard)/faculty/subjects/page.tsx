@@ -1,10 +1,11 @@
 import { redirect } from 'next/navigation';
+import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
 import PageHeader from '@/components/ui/PageHeader';
-import { Card, CardContent } from '@/components/ui/Card';
+import { Card } from '@/components/ui/Card';
 import Badge from '@/components/ui/Badge';
 import EmptyState from '@/components/ui/EmptyState';
-import Link from 'next/link';
+import { Table, THead, TBody, TR, TH, TD } from '@/components/ui/Table';
 
 interface SubjectOfferingSummary {
   id: string;
@@ -63,56 +64,75 @@ export default async function FacultySubjectsPage() {
     });
   }
 
-  const breadcrumbs = [
-    { label: 'Faculty', href: '/faculty' },
-    { label: 'My Subjects' },
-  ];
-
   return (
     <div>
       <PageHeader
-        breadcrumbs={breadcrumbs}
+        breadcrumbs={[
+          { label: 'Faculty', href: '/faculty' },
+          { label: 'My Subjects' },
+        ]}
         title="My Subjects"
         description="Subject offerings you are assigned to"
       />
 
       {assignmentRows.length > 0 ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {assignmentRows.map((a) => {
-            const offering = a.subject_offering;
-            const subject = offering?.subject;
-            const section = offering?.section;
-            const semester = offering?.semester;
-            const studentCount = offering ? enrollmentCounts[offering.id] ?? 0 : 0;
+        <Card>
+          <Table caption="Subject offerings you are assigned to">
+            <THead>
+              <TR>
+                <TH>Code</TH>
+                <TH>Subject</TH>
+                <TH>Section</TH>
+                <TH>Program / Year</TH>
+                <TH>Term</TH>
+                <TH align="right">Enrolled</TH>
+                <TH>Status</TH>
+              </TR>
+            </THead>
+            <TBody>
+              {assignmentRows.map((a) => {
+                const offering = a.subject_offering;
+                const subject = offering?.subject;
+                const section = offering?.section;
+                const semester = offering?.semester;
+                const studentCount = offering ? enrollmentCounts[offering.id] ?? 0 : 0;
 
-            return (
-              <Link key={a.id} href={`/faculty/subjects/${offering?.id}`}>
-                <Card className="hover:shadow-md transition-shadow cursor-pointer h-full">
-                  <CardContent className="flex flex-col h-full">
-                    <div className="flex items-start justify-between mb-3">
-                      <div>
-                        <p className="font-mono text-xs text-[var(--color-muted)]">{subject?.code}</p>
-                        <h3 className="font-semibold text-[var(--color-foreground)]">{subject?.title}</h3>
-                      </div>
+                return (
+                  <TR key={a.id} className="hover:bg-[var(--color-surface-hover)]">
+                    <TD className="font-mono text-xs text-[var(--color-muted)]">
+                      {subject?.code ?? '—'}
+                    </TD>
+                    <TD>
+                      <Link
+                        href={`/faculty/subjects/${offering?.id}`}
+                        className="font-medium text-[var(--color-primary)] hover:underline"
+                      >
+                        {subject?.title ?? 'Untitled offering'}
+                      </Link>
+                    </TD>
+                    <TD className="text-[var(--color-muted)]">{section?.name ?? '—'}</TD>
+                    <TD className="text-[var(--color-muted)]">
+                      {section?.program?.code ?? '—'}
+                      {section?.year_level?.name ? ` · ${section.year_level.name}` : ''}
+                    </TD>
+                    <TD className="text-[var(--color-muted)]">
+                      {semester?.name ?? '—'}
+                      {semester?.academic_year?.name ? ` (${semester.academic_year.name})` : ''}
+                    </TD>
+                    <TD numeric className="text-[var(--color-foreground)]">
+                      {studentCount}
+                    </TD>
+                    <TD>
                       <Badge variant={offering?.status === 'active' ? 'success' : 'default'}>
-                        {offering?.status}
+                        {offering?.status ?? 'unknown'}
                       </Badge>
-                    </div>
-
-                    <div className="mt-auto space-y-1 text-sm text-[var(--color-muted)]">
-                      <p>Section: {section?.name}</p>
-                      <p>{section?.program?.code} - {section?.year_level?.name}</p>
-                      <p>{semester?.name} {semester?.academic_year?.name}</p>
-                      <p className="font-medium text-[var(--color-foreground)]">
-                        {studentCount} enrolled student{studentCount !== 1 ? 's' : ''}
-                      </p>
-                    </div>
-                  </CardContent>
-                </Card>
-              </Link>
-            );
-          })}
-        </div>
+                    </TD>
+                  </TR>
+                );
+              })}
+            </TBody>
+          </Table>
+        </Card>
       ) : (
         <EmptyState
           title="No subjects assigned"

@@ -241,6 +241,68 @@ h4 {
 }
 
 /* ============================================================================
+   Native Dialog (Modals)
+   ============================================================================ */
+
+/*
+ * Tailwind's preflight resets `margin` on every element, which also strips the
+ * user-agent's `dialog { margin: auto }` — the rule that centers a native
+ * <dialog>. Without it a modal is pinned to the top of the viewport. Restoring
+ * it here centres every modal (one implementation, src/components/ui/Modal).
+ */
+dialog {
+  margin: auto;
+  max-height: 85vh;
+}
+
+/* The dialog element itself scrolls nowhere; keep its content reachable. */
+dialog > * {
+  max-height: inherit;
+}
+
+/* ============================================================================
+   SweetAlert2 (toasts and confirmations)
+   ============================================================================ */
+
+/*
+ * SweetAlert2 ships its own palette and its own dark theme. The wrapper in
+ * src/components/ui/alerts.ts pins `theme: 'light'` so those defaults never
+ * apply, and the popup is re-skinned here from the same tokens the rest of the
+ * app uses (which already switch for dark mode).
+ */
+.swal2-popup {
+  --swal2-font: var(--font-sans);
+  --swal2-background: var(--color-surface);
+  --swal2-color: var(--color-foreground);
+  --swal2-border: 1px solid var(--color-border);
+  --swal2-border-radius: var(--radius-lg);
+  --swal2-html-container-padding: 0.75em 1.5em 0;
+  --swal2-footer-border-color: var(--color-border);
+  --swal2-close-button-color: var(--color-muted);
+  --swal2-outline: 0 0 0 3px var(--color-focus-ring);
+  --swal2-confirm-button-background-color: var(--color-primary);
+  --swal2-confirm-button-color: #ffffff;
+  --swal2-confirm-button-border-radius: var(--radius-md);
+  --swal2-cancel-button-background-color: var(--color-surface-hover);
+  --swal2-cancel-button-color: var(--color-foreground);
+  --swal2-cancel-button-border-radius: var(--radius-md);
+  --swal2-action-button-hover: black 6%;
+  --swal2-action-button-active: black 12%;
+  color: var(--color-foreground);
+}
+
+/* Destructive confirmations use the danger token for their confirm button. */
+.swal2-popup .swal2-confirm.swal-destructive {
+  background-color: var(--color-danger);
+}
+
+/* Toasts are non-modal feedback: keep them out of the way and compact. */
+.swal2-toast {
+  padding: 0.65em 0.9em;
+  font-size: 0.875rem;
+}
+
+/* ============================================================================
    Focus Ring (Accessibility)
    ============================================================================ */
 

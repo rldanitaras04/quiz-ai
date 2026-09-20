@@ -3,6 +3,7 @@
 import { useState, type JSX } from 'react';
 import { useRouter } from 'next/navigation';
 import Button from '@/components/ui/Button';
+import { confirmAction, notifyError, notifySuccess } from '@/components/ui/alerts';
 import { deleteSourceMaterial } from './actions';
 
 interface DeleteSourceButtonProps {
@@ -21,7 +22,13 @@ export default function DeleteSourceButton({
   const [error, setError] = useState<string | null>(null);
 
   const handleDelete = async () => {
-    if (!confirm(`Remove "${title}"? This cannot be undone.`)) return;
+    const confirmed = await confirmAction({
+      title: 'Remove this material?',
+      text: `"${title}" and its extracted text will be deleted. This cannot be undone.`,
+      confirmText: 'Remove',
+      destructive: true,
+    });
+    if (!confirmed) return;
 
     setLoading(true);
     setError(null);
@@ -30,10 +37,12 @@ export default function DeleteSourceButton({
 
     if (result.error) {
       setError(result.error);
+      notifyError('Could not remove the material', result.error);
       setLoading(false);
       return;
     }
 
+    notifySuccess('Source material removed');
     setLoading(false);
     router.refresh();
   };

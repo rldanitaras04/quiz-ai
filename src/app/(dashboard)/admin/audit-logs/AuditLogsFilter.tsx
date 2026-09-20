@@ -9,12 +9,15 @@ import { AUDIT_ACTION_LABELS, AUDIT_ACTIONS, ENTITY_TYPES, actionVariant } from 
 
 interface AuditLogsFilterProps {
   logs: AuditLogEntry[];
+  /** Full match count, so the heading can show how many rows are not loaded. */
+  totalCount: number;
   currentAction?: string;
   currentEntityType?: string;
 }
 
 export default function AuditLogsFilter({
   logs,
+  totalCount,
   currentAction,
   currentEntityType,
 }: AuditLogsFilterProps) {
@@ -83,7 +86,8 @@ export default function AuditLogsFilter({
       <Card>
         <CardHeader>
           <h2 className="text-lg font-semibold text-[var(--color-foreground)]">
-            Activity Log ({logs.length})
+            Activity Log ({logs.length}
+            {totalCount > logs.length ? ` of ${totalCount}` : ''})
           </h2>
         </CardHeader>
         <CardContent>

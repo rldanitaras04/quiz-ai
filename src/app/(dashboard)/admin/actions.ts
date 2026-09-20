@@ -1,17 +1,10 @@
 'use server';
 
 import { redirect } from 'next/navigation';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { createClient } from '@/lib/supabase/server';
+import { getSettings } from '@/lib/settings';
 import type { AuditAction } from '@/lib/types';
-
-export interface UserWithRoles {
-  id: string;
-  email: string;
-  full_name: string;
-  status: string;
-  created_at: string;
-  roles: string[];
-}
 
 export interface AcademicStructure {
   academicYears: Array<{
@@ -45,23 +38,8 @@ export interface AcademicStructure {
   }>;
 }
 
-export interface SubjectWithOfferings {
-  id: string;
-  code: string;
-  title: string;
-  description: string | null;
-  is_active: boolean;
-  offerings: Array<{
-    id: string;
-    status: string;
-    semester: string;
-    academicYear: string;
-    program: string;
-    yearLevel: string;
-    section: string;
-    enrolledCount: number;
-  }>;
-}
+/** Shared result shape for the admin CRUD server actions. */
+export type ActionResult = { success: true } | { error: string };
 
 export interface AuditLogEntry {
   id: string;
@@ -79,7 +57,16 @@ export interface AuditLogsResult {
   totalCount: number;
 }
 
-async function requireAdmin() {
+/**
+ * Authorizes the caller as a super_admin from trusted session state — never
+ * from client input — and hands back the session-scoped client plus the actor
+ * id. The returned client is deliberately NOT service-role: every admin write
+ * still has to satisfy the `Admin can manage ...` RLS policies.
+ */
+export async function requireAdminUser(): Promise<{
+  supabase: SupabaseClient;
+  userId: string;
+}> {
   const supabase = await createClient();
   const { data: { user }, error: authError } = await supabase.auth.getUser();
   if (authError || !user) redirect('/login');
@@ -92,45 +79,11 @@ async function requireAdmin() {
   const isAdmin = roles?.some((r) => r.role === 'super_admin');
   if (!isAdmin) redirect('/');
 
-  return supabase;
-}
-
-export async function getUsers(): Promise<UserWithRoles[]> {
-  const supabase = await requireAdmin();
-
-  const { data: profiles } = await supabase
-    .from('profiles')
-    .select('id, email, full_name, status, created_at')
-    .order('created_at', { ascending: false });
-
-  if (!profiles) return [];
-
-  const userIds = profiles.map((p) => p.id);
-
-  const { data: userRoles } = await supabase
-    .from('user_roles')
-    .select('user_id, role')
-    .in('user_id', userIds);
-
-  const rolesByUser = new Map<string, string[]>();
-  for (const ur of userRoles ?? []) {
-    const existing = rolesByUser.get(ur.user_id) ?? [];
-    existing.push(ur.role);
-    rolesByUser.set(ur.user_id, existing);
-  }
-
-  return profiles.map((p) => ({
-    id: p.id,
-    email: p.email,
-    full_name: p.full_name,
-    status: p.status,
-    created_at: p.created_at,
-    roles: rolesByUser.get(p.id) ?? [],
-  }));
+  return { supabase, userId: user.id };
 }
 
 export async function getAcademicStructure(): Promise<AcademicStructure> {
-  const supabase = await requireAdmin();
+  const { supabase } = await requireAdminUser();
 
   const [yearsResult, semestersResult, programsResult, yearLevelsResult, sectionsResult] =
     await Promise.all([
@@ -154,6 +107,8 @@ export async function getAcademicStructure(): Promise<AcademicStructure> {
     semestersByYear.set(s.academic_year_id, existing);
   }
 
+  // sections are keyed (program_id, year_level_id) — a section always belongs
+  // to one program *and* one year level.
   const sectionsByProgramYear = new Map<string, Record<string, unknown>[]>();
   for (const sec of sectionsResult.data ?? []) {
     const key = `${sec.program_id}-${sec.year_level_id}`;
@@ -162,13 +117,10 @@ export async function getAcademicStructure(): Promise<AcademicStructure> {
     sectionsByProgramYear.set(key, existing);
   }
 
-  const yearLevelsByProgram = new Map<string, Record<string, unknown>[]>();
-  for (const yl of yearLevelsResult.data ?? []) {
-    const sections = sectionsByProgramYear.get(yl.id) ?? [];
-    const existing = yearLevelsByProgram.get(yl.program_id) ?? [];
-    existing.push({ ...yl, sections });
-    yearLevelsByProgram.set(yl.program_id, existing);
-  }
+  // year_levels are GLOBAL (the table has no program_id) — '1st Year' is not
+  // owned by a program. So every program is listed against every year level,
+  // and each pairing carries whichever sections exist for that combination.
+  const allYearLevels = yearLevelsResult.data ?? [];
 
   const academicYears = (yearsResult.data ?? []).map((year) => ({
     id: year.id,
@@ -176,7 +128,9 @@ export async function getAcademicStructure(): Promise<AcademicStructure> {
     starts_on: year.starts_on,
     ends_on: year.ends_on,
     is_active: year.is_active,
-    semesters: semestersByYear.get(year.id) ?? [],
+    semesters: (semestersByYear.get(year.id) ?? []).sort(
+      (a, b) => String(a.starts_on).localeCompare(String(b.starts_on))
+    ),
   }));
 
   const programs = (programsResult.data ?? []).map((program) => ({
@@ -184,80 +138,27 @@ export async function getAcademicStructure(): Promise<AcademicStructure> {
     code: program.code,
     name: program.name,
     is_active: program.is_active,
-    yearLevels: yearLevelsByProgram.get(program.id) ?? [],
+    yearLevels: allYearLevels.map((yl) => ({
+      id: yl.id,
+      name: yl.name,
+      sections: (sectionsByProgramYear.get(`${program.id}-${yl.id}`) ?? []).sort(
+        (a, b) => String(a.name).localeCompare(String(b.name))
+      ),
+    })),
   }));
 
   return { academicYears, programs } as AcademicStructure;
 }
 
-export async function getSubjects(): Promise<SubjectWithOfferings[]> {
-  const supabase = await requireAdmin();
-
-  const { data: subjects } = await supabase
-    .from('subjects')
-    .select('*')
-    .order('code', { ascending: true });
-
-  if (!subjects) return [];
-
-  const { data: offerings } = await supabase
-    .from('subject_offerings')
-    .select(`
-      id, subject_id, status,
-      semester:semesters(name, academic_year:academic_years(name)),
-      program:programs(name),
-      year_level:year_levels(name),
-      section:sections(name)
-    `);
-
-  const { data: enrollments } = await supabase
-    .from('enrollments')
-    .select('subject_offering_id, id')
-    .eq('status', 'enrolled');
-
-  const enrollmentsByOffering = new Map<string, number>();
-  for (const e of enrollments ?? []) {
-    const count = enrollmentsByOffering.get(e.subject_offering_id) ?? 0;
-    enrollmentsByOffering.set(e.subject_offering_id, count + 1);
-  }
-
-  const offeringsBySubject = new Map<string, Record<string, unknown>[]>();
-  for (const o of offerings ?? []) {
-    const raw = o as Record<string, unknown>;
-    const sem = Array.isArray(raw.semester) ? raw.semester[0] : raw.semester;
-    const ay = sem && Array.isArray(sem.academic_year) ? sem.academic_year[0] : sem?.academic_year;
-    const prog = Array.isArray(raw.program) ? raw.program[0] : raw.program;
-    const yl = Array.isArray(raw.year_level) ? raw.year_level[0] : raw.year_level;
-    const sec = Array.isArray(raw.section) ? raw.section[0] : raw.section;
-
-    const existing = offeringsBySubject.get(o.subject_id) ?? [];
-    existing.push({
-      id: o.id,
-      status: o.status,
-      semester: sem?.name ?? '—',
-      academicYear: ay?.name ?? '—',
-      program: prog?.name ?? '—',
-      yearLevel: yl?.name ?? '—',
-      section: sec?.name ?? '—',
-      enrolledCount: enrollmentsByOffering.get(o.id) ?? 0,
-    });
-    offeringsBySubject.set(o.subject_id, existing);
-  }
-
-  return subjects.map((s) => ({
-    id: s.id,
-    code: s.code,
-    title: s.title,
-    description: s.description,
-    is_active: s.is_active,
-    offerings: offeringsBySubject.get(s.id) ?? [],
-  })) as SubjectWithOfferings[];
-}
-
 export async function getAuditLogs(
   filters?: { action?: AuditAction; entityType?: string }
 ): Promise<AuditLogsResult> {
-  const supabase = await requireAdmin();
+  const { supabase } = await requireAdminUser();
+
+  // The row cap is administrator-configurable (/admin/settings): a busy log must
+  // not ship every entry to the browser, but the operator decides how many of
+  // the most recent ones they want. `totalCount` still reports the full match.
+  const { default_page_size } = await getSettings();
 
   let query = supabase
     .from('audit_logs')
@@ -266,7 +167,7 @@ export async function getAuditLogs(
       actor:profiles!audit_logs_actor_user_id_fkey(email, full_name)
     `, { count: 'exact' })
     .order('created_at', { ascending: false })
-    .limit(100);
+    .limit(default_page_size);
 
   if (filters?.action) {
     query = query.eq('action', filters.action);
@@ -293,3 +194,77 @@ export async function getAuditLogs(
 
   return { logs, totalCount: count ?? 0 };
 }
+
+/**
+ * Every option list the admin CRUD forms need, in one round trip.
+ *
+ * `faculty` is the set of users holding the faculty role — the candidates for
+ * a faculty assignment on an offering.
+ */
+export interface AdminReferenceData {
+  academicYears: Array<{ id: string; name: string; isActive: boolean }>;
+  semesters: Array<{ id: string; name: string; academicYearName: string }>;
+  programs: Array<{ id: string; code: string; name: string }>;
+  yearLevels: Array<{ id: string; name: string }>;
+  sections: Array<{ id: string; name: string; programId: string; yearLevelId: string }>;
+  faculty: Array<{ id: string; fullName: string; email: string }>;
+}
+
+export async function getAdminReferenceData(): Promise<AdminReferenceData> {
+  const { supabase } = await requireAdminUser();
+
+  const [yearsResult, semestersResult, programsResult, yearLevelsResult, sectionsResult, rolesResult, profilesResult] =
+    await Promise.all([
+      supabase.from('academic_years').select('id, name, is_active').order('starts_on', { ascending: false }),
+      supabase.from('semesters').select('id, name, starts_on, academic_year_id').order('starts_on', { ascending: true }),
+      supabase.from('programs').select('id, code, name').order('code', { ascending: true }),
+      supabase.from('year_levels').select('id, name, sort_order').order('sort_order', { ascending: true }),
+      supabase.from('sections').select('id, name, program_id, year_level_id').order('name', { ascending: true }),
+      supabase.from('user_roles').select('user_id, role').eq('role', 'faculty'),
+      supabase.from('profiles').select('id, full_name, email, status'),
+    ]);
+
+  const yearNameById = new Map(
+    (yearsResult.data ?? []).map((y) => [y.id, y.name] as const)
+  );
+  const profileById = new Map(
+    (profilesResult.data ?? []).map((p) => [p.id, p] as const)
+  );
+
+  const faculty = (rolesResult.data ?? [])
+    .map((r) => profileById.get(r.user_id))
+    .filter((p): p is NonNullable<typeof p> => Boolean(p))
+    .map((p) => ({
+      id: p.id,
+      fullName: p.full_name ?? '(no name)',
+      email: p.email ?? '',
+    }))
+    .sort((a, b) => a.fullName.localeCompare(b.fullName));
+
+  return {
+    academicYears: (yearsResult.data ?? []).map((y) => ({
+      id: y.id,
+      name: y.name,
+      isActive: y.is_active,
+    })),
+    semesters: (semestersResult.data ?? []).map((s) => ({
+      id: s.id,
+      name: s.name,
+      academicYearName: yearNameById.get(s.academic_year_id) ?? '—',
+    })),
+    programs: (programsResult.data ?? []).map((p) => ({
+      id: p.id,
+      code: p.code,
+      name: p.name,
+    })),
+    yearLevels: (yearLevelsResult.data ?? []).map((y) => ({ id: y.id, name: y.name })),
+    sections: (sectionsResult.data ?? []).map((s) => ({
+      id: s.id,
+      name: s.name,
+      programId: s.program_id,
+      yearLevelId: s.year_level_id,
+    })),
+    faculty,
+  };
+}
+

@@ -3,30 +3,36 @@
 import { useState, useRef, useCallback, type JSX } from 'react';
 import Button from '@/components/ui/Button';
 import Modal from '@/components/ui/Modal';
+import { notifyError, notifySuccess } from '@/components/ui/alerts';
 import { useSupabase } from '@/lib/hooks';
-import { SUPPORTED_SOURCE_EXTENSIONS, MAX_FILE_SIZE_MB } from '@/lib/constants';
+import { SUPPORTED_SOURCE_EXTENSIONS } from '@/lib/constants';
 
 function isSupportedExtension(ext: string): boolean {
   return (SUPPORTED_SOURCE_EXTENSIONS as readonly string[]).includes(ext);
 }
 
-/** Client-side pre-check; the upload route validates type and size again. */
-function validateFile(f: File): string | null {
+/**
+ * Client-side pre-check; the upload route validates type and size again, against
+ * the same administrator-configured ceiling that is passed in here.
+ */
+function validateFile(f: File, maxSizeMb: number): string | null {
   const ext = '.' + f.name.split('.').pop()?.toLowerCase();
   if (!isSupportedExtension(ext)) {
     return `Unsupported file type. Accepted: ${SUPPORTED_SOURCE_EXTENSIONS.join(', ')}`;
   }
-  if (f.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
-    return `File too large. Maximum size: ${MAX_FILE_SIZE_MB}MB`;
+  if (f.size > maxSizeMb * 1024 * 1024) {
+    return `File too large. Maximum size: ${maxSizeMb}MB`;
   }
   return null;
 }
 
 interface SourceUploadProps {
   offeringId: string;
+  /** Ceiling from /admin/settings, so the hint matches what the route accepts. */
+  maxSizeMb: number;
 }
 
-export default function SourceUpload({ offeringId }: SourceUploadProps): JSX.Element {
+export default function SourceUpload({ offeringId, maxSizeMb }: SourceUploadProps): JSX.Element {
   const [open, setOpen] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   const [file, setFile] = useState<File | null>(null);
@@ -41,7 +47,7 @@ export default function SourceUpload({ offeringId }: SourceUploadProps): JSX.Ele
 
   const handleFile = useCallback(
     (f: File) => {
-      const err = validateFile(f);
+      const err = validateFile(f, maxSizeMb);
       if (err) {
         setError(err);
         return;
@@ -52,7 +58,7 @@ export default function SourceUpload({ offeringId }: SourceUploadProps): JSX.Ele
         setTitle(f.name.replace(/\.[^/.]+$/, ''));
       }
     },
-    [title]
+    [maxSizeMb, title]
   );
 
   const handleDrop = useCallback(
@@ -106,6 +112,7 @@ export default function SourceUpload({ offeringId }: SourceUploadProps): JSX.Ele
       }
 
       setSuccess(true);
+      notifySuccess('Upload complete', 'Extraction and embedding run in the background.');
       setTimeout(() => {
         setOpen(false);
         setFile(null);
@@ -114,7 +121,9 @@ export default function SourceUpload({ offeringId }: SourceUploadProps): JSX.Ele
         window.location.reload();
       }, 1000);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Upload failed');
+      const message = err instanceof Error ? err.message : 'Upload failed';
+      setError(message);
+      notifyError('Upload failed', message);
     } finally {
       setUploading(false);
     }
@@ -181,7 +190,7 @@ export default function SourceUpload({ offeringId }: SourceUploadProps): JSX.Ele
                   Drag and drop a file here, or click to browse
                 </p>
                 <p className="text-xs text-[var(--color-muted-light)] mt-1">
-                  Supported: {SUPPORTED_SOURCE_EXTENSIONS.join(', ')} (max {MAX_FILE_SIZE_MB}MB)
+                  Supported: {SUPPORTED_SOURCE_EXTENSIONS.join(', ')} (max {maxSizeMb}MB)
                 </p>
               </div>
             )}

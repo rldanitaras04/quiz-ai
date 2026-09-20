@@ -1,10 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { extractAndStoreSource } from '@/lib/ai';
-import {
-  MAX_FILE_SIZE_MB,
-  SUPPORTED_SOURCE_FILE_TYPES,
-} from '@/lib/constants';
+import { SUPPORTED_SOURCE_FILE_TYPES } from '@/lib/constants';
+import { getSettings } from '@/lib/settings';
 
 export async function POST(request: NextRequest) {
   // Service-role client is created per-request (never at module scope) so
@@ -75,11 +73,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Validate file size
-    const maxSize = MAX_FILE_SIZE_MB * 1024 * 1024;
+    // Validate file size against the administrator-configured ceiling (the
+    // storage bucket enforces its own 50 MB cap on top of this).
+    const { max_upload_size_mb } = await getSettings();
+    const maxSize = max_upload_size_mb * 1024 * 1024;
     if (file.size > maxSize) {
       return NextResponse.json(
-        { error: `File too large. Maximum size: ${MAX_FILE_SIZE_MB}MB` },
+        { error: `File too large. Maximum size: ${max_upload_size_mb}MB` },
         { status: 400 }
       );
     }

@@ -1,5 +1,8 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+// Imported before globals.css so the design-token overrides there win over
+// SweetAlert2's own defaults.
+import "sweetalert2/dist/sweetalert2.min.css";
 import "./globals.css";
 import type { JSX, ReactNode } from 'react';
 

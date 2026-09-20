@@ -4,7 +4,38 @@ import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { notifyOfferingStudents } from '@/lib/notifications';
+import { recordAuditLog } from '@/lib/audit';
+import { isFacultyOfOffering } from '@/lib/auth';
 import type { CreateDeploymentInput } from '@/lib/types';
+
+/** Fields a client may set on an existing deployment (everything else is fixed). */
+const UPDATABLE_CONFIG_KEYS: readonly (keyof CreateDeploymentInput)[] = [
+  'assessment_version_id',
+  'opens_at',
+  'closes_at',
+  'duration_minutes',
+  'attempt_limit',
+  'question_order_mode',
+  'choice_order_mode',
+  'score_release_mode',
+  'show_raw_score',
+  'show_percentage',
+  'show_item_correctness',
+  'show_correct_answers',
+  'show_explanations',
+  'requires_identity_verification',
+];
+
+/** Shared validation for the scheduling window. */
+function validateWindow(opensAt: string, closesAt: string): string | null {
+  const opens = new Date(opensAt);
+  const closes = new Date(closesAt);
+  if (Number.isNaN(opens.getTime()) || Number.isNaN(closes.getTime())) {
+    return 'Enter a valid opening and closing time';
+  }
+  if (closes <= opens) return 'The closing time must be after the opening time';
+  return null;
+}
 
 export async function createDeployment(
   assessmentId: string,
@@ -19,15 +50,17 @@ export async function createDeployment(
       return { success: false, error: 'Unauthorized' };
     }
 
-    const { data: assignment } = await supabase
-      .from('faculty_assignments')
-      .select('id')
-      .eq('subject_offering_id', offeringId)
-      .eq('faculty_id', user.id)
-      .single();
-
-    if (!assignment) {
+    if (!(await isFacultyOfOffering(supabase, user.id, offeringId))) {
       return { success: false, error: 'Not authorized for this subject' };
+    }
+
+    const windowError = validateWindow(config.opens_at, config.closes_at);
+    if (windowError) return { success: false, error: windowError };
+    if (!Number.isInteger(config.duration_minutes) || config.duration_minutes < 1) {
+      return { success: false, error: 'Duration must be at least 1 minute' };
+    }
+    if (!Number.isInteger(config.attempt_limit) || config.attempt_limit < 1) {
+      return { success: false, error: 'The attempt limit must be at least 1' };
     }
 
     // The version must belong to this assessment (client payload is untrusted).
@@ -39,6 +72,18 @@ export async function createDeployment(
 
     if (!version || version.assessment_id !== assessmentId) {
       return { success: false, error: 'Selected version does not belong to this assessment' };
+    }
+
+    // The assessment must live in this offering too, so a deployment can never
+    // straddle two offerings.
+    const { data: parent } = await supabase
+      .from('assessments')
+      .select('subject_offering_id')
+      .eq('id', assessmentId)
+      .maybeSingle();
+
+    if (!parent || parent.subject_offering_id !== offeringId) {
+      return { success: false, error: 'Assessment does not belong to this subject offering' };
     }
 
     const { data: deployment, error: insertError } = await supabase
@@ -86,8 +131,22 @@ export async function createDeployment(
       data: { deployment_id: deployment.id, assessment_id: assessmentId },
     });
 
+    await recordAuditLog({
+      actorUserId: user.id,
+      action: 'create',
+      entityType: 'assessment_deployment',
+      entityId: deployment.id,
+      metadata: {
+        assessment_id: assessmentId,
+        subject_offering_id: offeringId,
+        opens_at: config.opens_at,
+        closes_at: config.closes_at,
+      },
+    });
+
     revalidatePath(`/faculty/subjects/${offeringId}/assessments/${assessmentId}`);
     revalidatePath(`/faculty/subjects/${offeringId}/deployments`);
+    revalidatePath('/student/assessments');
 
     return { success: true, deploymentId: deployment.id };
   } catch {
@@ -117,8 +176,25 @@ export async function updateDeployment(
       return { success: false, error: 'Deployment not found' };
     }
 
-    if (deployment.created_by !== user.id) {
+    // Any faculty member assigned to the offering may adjust the deployment,
+    // matching who is allowed to create and cancel one.
+    if (!(await isFacultyOfOffering(supabase, user.id, deployment.subject_offering_id))) {
       return { success: false, error: 'Not authorized' };
+    }
+
+    // Only the schedulable fields are writable: spreading the raw payload would
+    // let a caller move the deployment to another offering or assessment, or
+    // flip its status directly.
+    const updates: Record<string, unknown> = {
+      updated_at: new Date().toISOString(),
+    };
+    for (const key of UPDATABLE_CONFIG_KEYS) {
+      if (config[key] !== undefined) updates[key] = config[key];
+    }
+
+    if (typeof config.opens_at === 'string' && typeof config.closes_at === 'string') {
+      const windowError = validateWindow(config.opens_at, config.closes_at);
+      if (windowError) return { success: false, error: windowError };
     }
 
     if (config.assessment_version_id) {
@@ -140,17 +216,27 @@ export async function updateDeployment(
       }
     }
 
-    const { error: updateError } = await supabase
+    const { data: updated, error: updateError } = await supabase
       .from('assessment_deployments')
-      .update({
-        ...config,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', deploymentId);
+      .update(updates)
+      .eq('id', deploymentId)
+      .select('id')
+      .maybeSingle();
 
     if (updateError) {
       return { success: false, error: updateError.message };
     }
+    if (!updated) {
+      return { success: false, error: 'That deployment no longer exists or you cannot modify it' };
+    }
+
+    await recordAuditLog({
+      actorUserId: user.id,
+      action: 'update',
+      entityType: 'assessment_deployment',
+      entityId: deploymentId,
+      metadata: { fields: Object.keys(updates) },
+    });
 
     revalidatePath(`/faculty/subjects/${deployment.subject_offering_id}/deployments`);
 
@@ -256,11 +342,11 @@ export async function releaseResults(
         }))
       );
 
-      await admin.from('audit_logs').insert({
-        actor_user_id: user.id,
+      await recordAuditLog({
+        actorUserId: user.id,
         action: 'release',
-        entity_type: 'assessment_deployment',
-        entity_id: deploymentId,
+        entityType: 'assessment_deployment',
+        entityId: deploymentId,
         metadata: { released_count: rows.length },
       });
     }
@@ -294,23 +380,37 @@ export async function cancelDeployment(
       return { success: false, error: 'Deployment not found' };
     }
 
-    if (deployment.created_by !== user.id) {
+    if (!(await isFacultyOfOffering(supabase, user.id, deployment.subject_offering_id))) {
       return { success: false, error: 'Not authorized' };
     }
 
-    const { error: updateError } = await supabase
+    const { data: cancelled, error: updateError } = await supabase
       .from('assessment_deployments')
       .update({
         status: 'closed',
         updated_at: new Date().toISOString(),
       })
-      .eq('id', deploymentId);
+      .eq('id', deploymentId)
+      .select('id')
+      .maybeSingle();
 
     if (updateError) {
       return { success: false, error: updateError.message };
     }
+    if (!cancelled) {
+      return { success: false, error: 'That deployment no longer exists or you cannot modify it' };
+    }
+
+    await recordAuditLog({
+      actorUserId: user.id,
+      action: 'update',
+      entityType: 'assessment_deployment',
+      entityId: deploymentId,
+      metadata: { status: 'closed' },
+    });
 
     revalidatePath(`/faculty/subjects/${deployment.subject_offering_id}/deployments`);
+    revalidatePath('/student/assessments');
 
     return { success: true };
   } catch {

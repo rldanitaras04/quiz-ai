@@ -1,9 +1,10 @@
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import PageHeader from '@/components/ui/PageHeader';
-import { Card, CardContent } from '@/components/ui/Card';
+import { Card } from '@/components/ui/Card';
 import Badge from '@/components/ui/Badge';
 import EmptyState from '@/components/ui/EmptyState';
+import { Table, THead, TBody, TR, TH, TD } from '@/components/ui/Table';
 
 export default async function StudentSubjectsPage() {
   const supabase = await createClient();
@@ -41,41 +42,70 @@ export default async function StudentSubjectsPage() {
       />
 
       {enrollments && enrollments.length > 0 ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {enrollments.map((e) => {
-            const offering = e.subject_offering as unknown as Record<string, unknown> | undefined;
-            const subject = offering?.subject as Record<string, unknown> | undefined;
-            const section = offering?.section as Record<string, unknown> | undefined;
-            const semester = offering?.semester as Record<string, unknown> | undefined;
-            const facultyAssignments = offering?.faculty_assignments as Array<Record<string, unknown>> | undefined;
-            const faculty = facultyAssignments?.[0]?.faculty as Record<string, unknown> | undefined;
+        <Card>
+          <Table caption="Subject offerings you are enrolled in">
+            <THead>
+              <TR>
+                <TH>Code</TH>
+                <TH>Subject</TH>
+                <TH>Section</TH>
+                <TH>Program / Year</TH>
+                <TH>Term</TH>
+                <TH>Instructor</TH>
+                <TH>Status</TH>
+              </TR>
+            </THead>
+            <TBody>
+              {enrollments.map((e) => {
+                const offering = e.subject_offering as unknown as Record<string, unknown> | undefined;
+                const subject = offering?.subject as Record<string, unknown> | undefined;
+                const section = offering?.section as Record<string, unknown> | undefined;
+                const semester = offering?.semester as Record<string, unknown> | undefined;
+                const facultyAssignments = offering?.faculty_assignments as
+                  | Array<Record<string, unknown>>
+                  | undefined;
+                const faculty = facultyAssignments?.[0]?.faculty as
+                  | Record<string, unknown>
+                  | undefined;
+                const program = section?.program as Record<string, unknown> | undefined;
+                const yearLevel = section?.year_level as Record<string, unknown> | undefined;
+                const academicYear = semester?.academic_year as
+                  | Record<string, unknown>
+                  | undefined;
 
-            return (
-              <Card key={e.id as string} className="h-full">
-                <CardContent className="flex flex-col h-full">
-                  <div className="flex items-start justify-between mb-3">
-                    <div>
-                      <p className="font-mono text-xs text-[var(--color-muted)]">{subject?.code as string}</p>
-                      <h3 className="font-semibold text-[var(--color-foreground)]">{subject?.title as string}</h3>
-                    </div>
-                    <Badge variant={offering?.status === 'active' ? 'success' : 'default'}>
-                      {offering?.status as string}
-                    </Badge>
-                  </div>
-
-                  <div className="mt-auto space-y-1 text-sm text-[var(--color-muted)]">
-                    <p>Section: {section?.name as string}</p>
-                    <p>{(section?.program as Record<string, unknown>)?.code as string} - {(section?.year_level as Record<string, unknown>)?.name as string}</p>
-                    <p>{semester?.name as string} {(semester?.academic_year as Record<string, unknown>)?.name as string}</p>
-                    {faculty && (
-                      <p>Instructor: {faculty.full_name as string}</p>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
-            );
-          })}
-        </div>
+                return (
+                  <TR key={e.id as string} className="hover:bg-[var(--color-surface-hover)]">
+                    <TD className="font-mono text-xs text-[var(--color-muted)]">
+                      {(subject?.code as string) ?? '—'}
+                    </TD>
+                    <TD className="font-medium text-[var(--color-foreground)]">
+                      {(subject?.title as string) ?? '—'}
+                    </TD>
+                    <TD className="text-[var(--color-muted)]">
+                      {(section?.name as string) ?? '—'}
+                    </TD>
+                    <TD className="text-[var(--color-muted)]">
+                      {(program?.code as string) ?? '—'}
+                      {yearLevel?.name ? ` · ${yearLevel.name as string}` : ''}
+                    </TD>
+                    <TD className="text-[var(--color-muted)]">
+                      {(semester?.name as string) ?? '—'}
+                      {academicYear?.name ? ` (${academicYear.name as string})` : ''}
+                    </TD>
+                    <TD className="text-[var(--color-muted)]">
+                      {(faculty?.full_name as string) ?? 'Unassigned'}
+                    </TD>
+                    <TD>
+                      <Badge variant={offering?.status === 'active' ? 'success' : 'default'}>
+                        {(offering?.status as string) ?? 'unknown'}
+                      </Badge>
+                    </TD>
+                  </TR>
+                );
+              })}
+            </TBody>
+          </Table>
+        </Card>
       ) : (
         <EmptyState
           title="No enrolled subjects"

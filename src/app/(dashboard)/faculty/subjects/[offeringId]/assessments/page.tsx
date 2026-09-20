@@ -1,10 +1,11 @@
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import PageHeader from '@/components/ui/PageHeader';
-import { Card, CardContent } from '@/components/ui/Card';
+import { Card } from '@/components/ui/Card';
 import Badge from '@/components/ui/Badge';
 import EmptyState from '@/components/ui/EmptyState';
 import Button from '@/components/ui/Button';
+import { Table, THead, TBody, TR, TH, TD } from '@/components/ui/Table';
 import { ASSESSMENT_STATUS_LABELS } from '@/lib/constants';
 import Link from 'next/link';
 
@@ -86,38 +87,70 @@ export default async function AssessmentsPage({ params }: Props) {
       />
 
       {assessments && assessments.length > 0 ? (
-        <div className="space-y-3">
-          {(assessments as unknown as AssessmentRow[]).map((a) => {
-            const version = a.current_version;
-            return (
-              <Card key={a.id}>
-                <CardContent className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <h3 className="font-medium text-[var(--color-foreground)]">{a.title}</h3>
+        <Card>
+          <Table caption="Assessments for this offering">
+            <THead>
+              <TR>
+                <TH>Assessment</TH>
+                <TH>Type</TH>
+                <TH align="right">Items</TH>
+                <TH align="right">Points</TH>
+                <TH>Created</TH>
+                <TH>Status</TH>
+                <TH align="right">Actions</TH>
+              </TR>
+            </THead>
+            <TBody>
+              {(assessments as unknown as AssessmentRow[]).map((a) => {
+                const version = a.current_version;
+                return (
+                  <TR key={a.id} className="hover:bg-[var(--color-surface-hover)]">
+                    <TD className="font-medium">
+                      <Link
+                        href={`/faculty/subjects/${offeringId}/assessments/${a.id}`}
+                        className="text-[var(--color-foreground)] hover:text-[var(--color-primary)] hover:underline"
+                      >
+                        {a.title}
+                      </Link>
+                    </TD>
+                    <TD className="text-[var(--color-muted)]">
+                      {a.assessment_type === 'multiple_choice' ? 'Multiple Choice' : 'Identification'}
+                    </TD>
+                    <TD numeric className="text-[var(--color-foreground)]">
+                      {version?.total_items ?? '—'}
+                    </TD>
+                    <TD numeric className="text-[var(--color-foreground)]">
+                      {version?.total_points ?? '—'}
+                    </TD>
+                    <TD className="text-xs text-[var(--color-muted)]">
+                      {new Date(a.created_at).toLocaleDateString()}
+                    </TD>
+                    <TD>
+                      <Badge variant={statusVariant(a.status)}>
+                        {ASSESSMENT_STATUS_LABELS[a.status as keyof typeof ASSESSMENT_STATUS_LABELS] ?? a.status}
+                      </Badge>
+                    </TD>
+                    <TD className="whitespace-nowrap text-right">
+                      <Link
+                        href={`/faculty/subjects/${offeringId}/assessments/${a.id}`}
+                        className="text-sm font-medium text-[var(--color-primary)] hover:underline"
+                      >
+                        Review
+                      </Link>
+                      <span className="mx-2 text-[var(--color-border)]">|</span>
                       <Link
                         href={`/faculty/subjects/${offeringId}/assessments/${a.id}/deploy`}
-                        className="text-xs text-[var(--color-primary)] hover:underline"
+                        className="text-sm font-medium text-[var(--color-primary)] hover:underline"
                       >
-                        Deploy →
+                        Deploy
                       </Link>
-                    </div>
-                    <p className="text-sm text-[var(--color-muted)]">
-                      {a.assessment_type === 'multiple_choice' ? 'Multiple Choice' : 'Identification'}
-                      {version ? ` | ${version.total_items} items, ${version.total_points} pts` : ''}
-                    </p>
-                    <p className="text-xs text-[var(--color-muted-light)]">
-                      Created {new Date(a.created_at).toLocaleDateString()}
-                    </p>
-                  </div>
-                  <Badge variant={statusVariant(a.status)}>
-                    {ASSESSMENT_STATUS_LABELS[a.status as keyof typeof ASSESSMENT_STATUS_LABELS] ?? a.status}
-                  </Badge>
-                </CardContent>
-              </Card>
-            );
-          })}
-        </div>
+                    </TD>
+                  </TR>
+                );
+              })}
+            </TBody>
+          </Table>
+        </Card>
       ) : (
         <EmptyState
           title="No assessments yet"

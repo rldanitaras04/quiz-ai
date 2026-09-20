@@ -2,6 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { recordAuditLog } from '@/lib/audit';
 import { startExamAttempt, isStartExamSuccess } from '@/lib/exam';
 import { scoreAttempt } from '@/lib/scoring';
 import type {
@@ -107,7 +108,7 @@ export async function submitExam(
     .from('exam_attempts')
     .select('id, student_id, status, deployment_id')
     .eq('id', attemptId)
-    .single();
+    .maybeSingle();
 
   if (attemptError || !attempt) return { error: 'Attempt not found' };
   if (attempt.student_id !== user.id) return { error: 'Forbidden' };
@@ -133,6 +134,16 @@ export async function submitExam(
   if (submitError) {
     return { error: 'Failed to submit exam' };
   }
+
+  // Exam submission is the core integrity event of the assessment workflow, so
+  // it is recorded even though scoring below may still fail.
+  await recordAuditLog({
+    actorUserId: user.id,
+    action: 'submit',
+    entityType: 'exam_attempt',
+    entityId: attemptId,
+    metadata: { deployment_id: attempt.deployment_id },
+  });
 
   // 2. Score in-process (no HTTP self-call). Failures are reported but do
   //    not undo the submission — faculty can re-score.

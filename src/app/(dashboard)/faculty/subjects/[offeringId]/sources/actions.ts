@@ -2,6 +2,8 @@
 
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
+import { recordAuditLog } from '@/lib/audit';
+import { isFacultyOfOffering } from '@/lib/auth';
 
 const SOURCE_BUCKET = 'source-materials';
 
@@ -30,13 +32,19 @@ export async function deleteSourceMaterial(
 
   const { data: source } = await supabase
     .from('source_materials')
-    .select('id, storage_path, subject_offering_id')
+    .select('id, title, storage_path, subject_offering_id')
     .eq('id', sourceMaterialId)
-    .single();
+    .maybeSingle();
 
   if (!source) return { error: 'Source material not found' };
   if (offeringId && source.subject_offering_id !== offeringId) {
     return { error: 'Source material does not belong to this offering' };
+  }
+
+  // RLS scopes the read above to offerings the caller is assigned to; asserting
+  // it here keeps the failure explicit instead of surfacing as 'not found'.
+  if (!(await isFacultyOfOffering(supabase, user.id, source.subject_offering_id))) {
+    return { error: 'Not authorized for this offering' };
   }
 
   // Provenance guard: are any chunks of this material cited by a question?
@@ -73,12 +81,26 @@ export async function deleteSourceMaterial(
     }
   }
 
-  const { error: deleteError } = await supabase
+  const { data: deleted, error: deleteError } = await supabase
     .from('source_materials')
     .delete()
-    .eq('id', sourceMaterialId);
+    .eq('id', sourceMaterialId)
+    .select('id')
+    .maybeSingle();
 
   if (deleteError) return { error: deleteError.message };
+  if (!deleted) return { error: 'That source material no longer exists or you cannot delete it' };
+
+  await recordAuditLog({
+    actorUserId: user.id,
+    action: 'delete',
+    entityType: 'source_material',
+    entityId: sourceMaterialId,
+    metadata: {
+      subject_offering_id: source.subject_offering_id,
+      title: source.title,
+    },
+  });
 
   revalidatePath(`/faculty/subjects/${source.subject_offering_id}/sources`);
   return { success: true };

@@ -27,24 +27,19 @@ export async function getAttemptBreakdown(
 
   const { data: attempt } = await supabase
     .from('exam_attempts')
-    .select('student_id')
+    .select('student_id, status')
     .eq('id', attemptId)
-    .single();
+    .maybeSingle();
 
   if (!attempt) return { error: 'Attempt not found' };
   if (attempt.student_id !== user.id) return { error: 'Forbidden' };
-
-  // RLS denies students SELECT on questions/answer_keys (by design), so the
-  // breakdown is fetched with the service-role client after the ownership
-  // check above. Only post-submission attempts expose any of this.
-  const { data: attemptStatus } = await supabase
-    .from('exam_attempts')
-    .select('status')
-    .eq('id', attemptId)
-    .single();
-  if (!attemptStatus || attemptStatus.status === 'in_progress') {
+  if (attempt.status === 'in_progress') {
     return { error: 'Breakdown is only available after submission' };
   }
+
+  // RLS denies students SELECT on questions/answer_keys (by design), so the
+  // breakdown is fetched with the service-role client after the ownership and
+  // submission-state checks above.
 
   const admin = createAdminClient();
 

@@ -3,6 +3,7 @@
 import { useState, type JSX } from 'react';
 import { useRouter } from 'next/navigation';
 import Button from '@/components/ui/Button';
+import { confirmAction, notifyError, notifySuccess } from '@/components/ui/alerts';
 import { cancelDeployment } from '../assessments/[assessmentId]/deploy/actions';
 
 interface CancelDeploymentButtonProps {
@@ -17,7 +18,14 @@ export default function CancelDeploymentButton({
   const [error, setError] = useState<string | null>(null);
 
   const handleCancel = async () => {
-    if (!confirm('Cancel this deployment? Students will no longer be able to start it.')) return;
+    const confirmed = await confirmAction({
+      title: 'Cancel this deployment?',
+      text: 'Students will no longer be able to start it.',
+      confirmText: 'Cancel deployment',
+      cancelText: 'Keep it',
+      destructive: true,
+    });
+    if (!confirmed) return;
 
     setLoading(true);
     setError(null);
@@ -25,10 +33,13 @@ export default function CancelDeploymentButton({
     const result = await cancelDeployment(deploymentId);
     if (result.error) {
       setError(result.error);
+      notifyError('Could not cancel the deployment', result.error);
       setLoading(false);
       return;
     }
 
+    notifySuccess('Deployment cancelled');
+    setLoading(false);
     router.refresh();
   };
 

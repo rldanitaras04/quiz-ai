@@ -13,7 +13,9 @@ interface TopBarProps {
   userName: string;
   role: UserRole;
   avatarUrl: string | null;
-  onMenuToggle: () => void;
+  onNavToggle: () => void;
+  /** Whether the navigation is currently open (mobile) or expanded (desktop). */
+  navExpanded: boolean;
 }
 
 const roleBadgeColors: Record<UserRole, string> = {
@@ -27,7 +29,8 @@ export default function TopBar({
   userName,
   role,
   avatarUrl,
-  onMenuToggle,
+  onNavToggle,
+  navExpanded,
 }: TopBarProps): JSX.Element {
   const router = useRouter();
   const supabase = useSupabase();
@@ -80,10 +83,13 @@ export default function TopBar({
 
   return (
     <header className="flex items-center h-16 px-4 lg:px-6 border-b border-[var(--color-border)] bg-[var(--color-surface)]">
+      {/* One control for both layouts: it opens the mobile drawer and
+          collapses/expands the desktop rail. */}
       <button
-        onClick={onMenuToggle}
-        className="lg:hidden p-2 -ml-2 mr-2 rounded-[var(--radius-md)] text-[var(--color-muted)] hover:text-[var(--color-foreground)] hover:bg-[var(--color-surface-hover)] transition-colors"
-        aria-label="Toggle navigation menu"
+        onClick={onNavToggle}
+        className="p-2 -ml-2 mr-2 rounded-[var(--radius-md)] text-[var(--color-muted)] hover:text-[var(--color-foreground)] hover:bg-[var(--color-surface-hover)] transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus-ring)]"
+        aria-label="Toggle navigation"
+        aria-expanded={navExpanded}
       >
         <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <line x1="3" y1="6" x2="21" y2="6" />

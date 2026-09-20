@@ -49,7 +49,7 @@ export default function Modal({
     <dialog
       ref={dialogRef}
       onClick={handleBackdropClick}
-      className="backdrop:bg-black/50 rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface)] p-0 shadow-[var(--shadow-lg)] max-w-lg w-full mx-auto"
+      className="m-auto w-[calc(100%-2rem)] max-w-lg max-h-[85vh] rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface)] p-0 shadow-[var(--shadow-lg)] backdrop:bg-black/50"
       aria-modal="true"
       aria-label={title}
     >
