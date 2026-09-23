@@ -1,9 +1,8 @@
 import { redirect, notFound } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
-import PageHeader from '@/components/ui/PageHeader';
 import { ASSESSMENT_STATUS_LABELS } from '@/lib/constants';
 import { getAssessmentDetail } from '../actions';
-import AssessmentDetailClient from './AssessmentDetailClient';
+import AssessmentWorkspaceClient from './AssessmentWorkspaceClient';
 
 interface Props {
   params: Promise<{ offeringId: string; assessmentId: string }>;
@@ -45,23 +44,13 @@ export default async function AssessmentDetailPage({ params }: Props) {
     detail.status;
 
   return (
-    <div>
-      <PageHeader
-        breadcrumbs={[
-          { label: 'Faculty', href: '/faculty' },
-          { label: 'My Subjects', href: '/faculty/subjects' },
-          {
-            label: heading?.subject ? `${heading.subject.code} - ${heading.subject.title}` : 'Subject',
-            href: `/faculty/subjects/${offeringId}`,
-          },
-          { label: 'Assessments', href: `/faculty/subjects/${offeringId}/assessments` },
-          { label: detail.title },
-        ]}
-        title={detail.title}
-        description={[subjectName, statusLabel].filter(Boolean).join(' · ')}
-      />
-
-      <AssessmentDetailClient detail={detail} subjectName={subjectName} />
-    </div>
+    <AssessmentWorkspaceClient
+      offeringId={offeringId}
+      assessmentId={assessmentId}
+      detail={detail}
+      subjectName={subjectName}
+      statusLabel={statusLabel}
+      heading={heading}
+    />
   );
 }

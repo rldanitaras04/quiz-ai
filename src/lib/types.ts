@@ -252,6 +252,16 @@ export interface SourceMaterial {
   updated_at: string;
 }
 
+export interface Topic {
+  id: string;
+  subject_id: string;
+  title: string;
+  description: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface SourceChunk {
   id: string;
   source_material_id: string;
@@ -288,6 +298,7 @@ export interface Question {
   status: string;
   created_by: string;
   is_ai_generated: boolean;
+  topic_id?: string | null;
   generation_metadata: Record<string, unknown> | null;
   created_at: string;
   updated_at: string;
@@ -542,7 +553,59 @@ export interface DraftQuestionChoice extends QuestionChoice {
 export interface DraftQuestion extends QuestionWithChoices {
   question_choices: DraftQuestionChoice[];
   canonical_answer?: string;
+  sourceChunkIds?: string[];
+  topic_id?: string | null;
+  topic_title?: string;
 }
+
+export interface QuestionBankChoice {
+  id: string;
+  bank_question_id: string;
+  choice_key: string;
+  choice_text: string;
+  position: number;
+  created_at: string;
+}
+
+export interface QuestionBankAnswerKey {
+  id: string;
+  bank_question_id: string;
+  correct_choice_id: string | null;
+  canonical_answer: string | null;
+  accepted_answers: string[] | null;
+  scoring_config: Record<string, unknown> | null;
+  updated_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface QuestionBankItem {
+  id: string;
+  subject_id: string;
+  topic_id: string | null;
+  topic?: Topic | null;
+  question_type: QuestionType;
+  question_text: string;
+  difficulty: Difficulty;
+  bloom_level: BloomLevel;
+  points: number;
+  source_question_id: string | null;
+  source_metadata: Record<string, unknown> | null;
+  created_by: string | null;
+  status: string;
+  usage_count: number;
+  last_used_at: string | null;
+  created_at: string;
+  updated_at: string;
+  question_bank_choices?: QuestionBankChoice[];
+  question_bank_answer_keys?: QuestionBankAnswerKey | null;
+  // denormalized for UI
+  choices?: QuestionBankChoice[];
+  correct_choice_id?: string | null;
+  canonical_answer?: string | null;
+}
+
+export type AssessmentCreationMode = 'ai' | 'manual' | 'bank' | 'mixed';
 
 export interface DeploymentWithDetails extends AssessmentDeployment {
   assessment_version: AssessmentVersion & { assessment: Assessment };

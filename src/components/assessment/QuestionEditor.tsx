@@ -227,35 +227,68 @@ export default function QuestionEditor({
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <label className="text-sm font-medium text-[var(--color-foreground)]">
-              Choices
+              Choices <span className="text-[var(--color-muted)] font-normal">(click checkmark to mark correct answer)</span>
             </label>
           </div>
           <div className="space-y-2">
-            {question.question_choices.map((choice, ci) => (
-              <div key={choice.id} className="flex items-center gap-2">
-                <span className="shrink-0 w-8 text-center text-sm font-bold text-[var(--color-muted)]">
-                  {choice.choice_key}.
-                </span>
-                <input
-                  type="text"
-                  value={choice.choice_text}
-                  onChange={(e) => handleChoiceTextChange(ci, e.target.value)}
-                  placeholder={`Choice ${choice.choice_key}`}
-                  className="flex-1 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-foreground)] placeholder:text-[var(--color-muted-light)] transition-colors focus:border-[var(--color-primary)] focus:ring-2 focus:ring-[var(--color-focus-ring)] focus:outline-none"
-                />
-                {question.question_choices.length > 2 && (
+            {question.question_choices.map((choice, ci) => {
+              const isCorrect = choice.is_correct;
+              return (
+                <div
+                  key={choice.id}
+                  className={`flex items-center gap-2 p-2 rounded-[var(--radius-md)] border transition-colors ${
+                    isCorrect
+                      ? 'border-[var(--color-success)] bg-[var(--color-success)]/5'
+                      : 'border-[var(--color-border)]'
+                  }`}
+                >
                   <button
                     type="button"
-                    onClick={() => handleRemoveChoice(ci)}
-                    className="p-1.5 rounded text-[var(--color-muted)] hover:text-[var(--color-danger)] hover:bg-[var(--color-danger-light)] transition-colors"
+                    onClick={() => {
+                      const next = question.question_choices.map((c, i) => ({
+                        ...c,
+                        is_correct: i === ci,
+                      }));
+                      onUpdate({ question_choices: next });
+                      setIsDirty(true);
+                    }}
+                    className={`shrink-0 w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors ${
+                      isCorrect
+                        ? 'border-[var(--color-success)] bg-[var(--color-success)] text-white'
+                        : 'border-[var(--color-border)] hover:border-[var(--color-muted)]'
+                    }`}
+                    title={isCorrect ? 'Correct answer' : 'Mark as correct'}
                   >
-                    <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
-                      <path fillRule="evenodd" d="M8.75 1A2.75 2.75 0 006 3.75v.443c-.795.077-1.584.176-2.365.298a.75.75 0 10.23 1.482l.149-.022.841 10.518A2.75 2.75 0 007.596 19h4.807a2.75 2.75 0 002.742-2.53l.841-10.52.149.023a.75.75 0 00.23-1.482A41.03 41.03 0 0014 4.193V3.75A2.75 2.75 0 0011.25 1h-2.5zM10 4c.84 0 1.673.025 2.5.075V3.75c0-.69-.56-1.25-1.25-1.25h-2.5c-.69 0-1.25.56-1.25 1.25v.325C8.327 4.025 9.16 4 10 4zM8.58 7.72a.75.75 0 00-1.5.06l.3 7.5a.75.75 0 101.5-.06l-.3-7.5zm4.34.06a.75.75 0 10-1.5-.06l-.3 7.5a.75.75 0 101.5.06l.3-7.5z" clipRule="evenodd" />
-                    </svg>
+                    {isCorrect && (
+                      <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
+                        <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                      </svg>
+                    )}
                   </button>
-                )}
-              </div>
-            ))}
+                  <span className="shrink-0 w-8 text-center text-sm font-bold text-[var(--color-muted)]">
+                    {choice.choice_key}.
+                  </span>
+                  <textarea
+                    rows={2}
+                    value={choice.choice_text}
+                    onChange={(e) => handleChoiceTextChange(ci, e.target.value)}
+                    placeholder={`Choice ${choice.choice_key}`}
+                    className="flex-1 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-foreground)] placeholder:text-[var(--color-muted-light)] transition-colors focus:border-[var(--color-primary)] focus:ring-2 focus:ring-[var(--color-focus-ring)] focus:outline-none resize-none"
+                  />
+                  {question.question_choices.length > 2 && (
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveChoice(ci)}
+                      className="p-1.5 rounded text-[var(--color-muted)] hover:text-[var(--color-danger)] hover:bg-[var(--color-danger-light)] transition-colors"
+                    >
+                      <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
+                        <path fillRule="evenodd" d="M8.75 1A2.75 2.75 0 006 3.75v.443c-.795.077-1.584.176-2.365.298a.75.75 0 10.23 1.482l.149-.022.841 10.518A2.75 2.75 0 007.596 19h4.807a2.75 2.75 0 002.742-2.53l.841-10.52.149.023a.75.75 0 00.23-1.482A41.03 41.03 0 0014 4.193V3.75A2.75 2.75 0 0011.25 1h-2.5zM10 4c.84 0 1.673.025 2.5.075V3.75c0-.69-.56-1.25-1.25-1.25h-2.5c-.69 0-1.25.56-1.25 1.25v.325C8.327 4.025 9.16 4 10 4zM8.58 7.72a.75.75 0 00-1.5.06l.3 7.5a.75.75 0 101.5-.06l-.3-7.5zm4.34.06a.75.75 0 10-1.5-.06l-.3 7.5a.75.75 0 101.5.06l.3-7.5z" clipRule="evenodd" />
+                      </svg>
+                    </button>
+                  )}
+                </div>
+              );
+            })}
           </div>
           <Button variant="ghost" size="sm" onClick={handleAddChoice}>
             <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
@@ -268,20 +301,25 @@ export default function QuestionEditor({
 
       {/* Answer for Identification */}
       {question.question_type === 'identification' && (
-        <div className="flex flex-col gap-1.5">
+        <div className="space-y-1.5">
           <label className="text-sm font-medium text-[var(--color-foreground)]">
-            Canonical Answer
+            Correct Answer
           </label>
-          <input
-            type="text"
-            value={question.canonical_answer || ''}
-            onChange={(e) => {
-              onUpdate({ canonical_answer: e.target.value });
-              setIsDirty(true);
-            }}
-            placeholder="Enter the expected answer..."
-            className="w-full rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-foreground)] placeholder:text-[var(--color-muted-light)] transition-colors focus:border-[var(--color-primary)] focus:ring-2 focus:ring-[var(--color-focus-ring)] focus:outline-none"
-          />
+          <div className="flex items-center gap-2 p-3 rounded-[var(--radius-md)] border border-[var(--color-success)] bg-[var(--color-success)]/5">
+            <svg className="w-5 h-5 text-[var(--color-success)] shrink-0" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clipRule="evenodd" />
+            </svg>
+            <textarea
+              rows={2}
+              value={question.canonical_answer || ''}
+              onChange={(e) => {
+                onUpdate({ canonical_answer: e.target.value });
+                setIsDirty(true);
+              }}
+              placeholder="Enter the expected answer..."
+              className="flex-1 bg-transparent border-none text-sm text-[var(--color-foreground)] placeholder:text-[var(--color-muted-light)] focus:outline-none resize-none"
+            />
+          </div>
         </div>
       )}
 

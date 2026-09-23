@@ -39,6 +39,7 @@ export default function SetupPage() {
   const [adminPassword, setAdminPassword] = useState('');
   const [adminName, setAdminName] = useState('');
   const [adminResult, setAdminResult] = useState<string | null>(null);
+  const [studentResult, setStudentResult] = useState<string | null>(null);
 
   const checkEnv = async () => {
     setEnvStatus('checking');
@@ -79,6 +80,26 @@ export default function SetupPage() {
       }
     } catch (err) {
       setAdminResult(`Error: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    }
+  };
+
+  const createTestStudent = async () => {
+    try {
+      const res = await fetch('/api/admin/bootstrap', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'create_test_student' }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setStudentResult(
+          `Test student created! Email: ${data.credentials.email} | Password: ${data.credentials.password}`
+        );
+      } else {
+        setStudentResult(`Error: ${data.error}`);
+      }
+    } catch (err) {
+      setStudentResult(`Error: ${err instanceof Error ? err.message : 'Unknown error'}`);
     }
   };
 
@@ -225,6 +246,30 @@ export default function SetupPage() {
               (years, semesters, programs) by running the SQL in <code>supabase/seed.sql</code>
               in your SQL Editor.
             </p>
+          </CardContent>
+        </Card>
+
+        {/* Step 5: Test Student Account */}
+        <Card>
+          <CardHeader>
+            <span className="font-semibold">5. Create Test Student Account</span>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-sm text-[var(--color-muted)]">
+              Creates a ready-to-use student account for testing. Enrolled in all active subject offerings.
+            </p>
+            <div className="p-3 rounded-[var(--radius-md)] bg-[var(--color-surface-hover)] text-sm">
+              <p><strong>Email:</strong> student@test.com</p>
+              <p><strong>Password:</strong> Student123!</p>
+            </div>
+            <Button onClick={createTestStudent} variant="primary" size="sm">
+              Create Test Student
+            </Button>
+            {studentResult && (
+              <p className={`text-sm ${studentResult.startsWith('Error') ? 'text-[var(--color-danger)]' : 'text-[var(--color-success)]'}`}>
+                {studentResult}
+              </p>
+            )}
           </CardContent>
         </Card>
 

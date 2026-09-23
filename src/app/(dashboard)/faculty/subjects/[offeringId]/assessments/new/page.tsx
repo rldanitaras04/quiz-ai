@@ -1,6 +1,6 @@
 'use client';
 
-import { use, useState, useCallback, type JSX } from 'react';
+import { use, useState, useCallback, useEffect, type JSX } from 'react';
 import PageHeader from '@/components/ui/PageHeader';
 import Button from '@/components/ui/Button';
 import StepBasicInfo from '@/components/assessment/StepBasicInfo';
@@ -10,25 +10,25 @@ import StepCustomInstructions from '@/components/assessment/StepCustomInstructio
 import StepGenerate from '@/components/assessment/StepGenerate';
 import StepReview from '@/components/assessment/StepReview';
 import StepApprove from '@/components/assessment/StepApprove';
+import StepCreationMode from '@/components/assessment/StepCreationMode';
+import StepManualEntry from '@/components/assessment/StepManualEntry';
+import StepQuestionBank from '@/components/assessment/StepQuestionBank';
 import type {
   QuestionType,
   Difficulty,
   BloomLevel,
   DraftQuestion,
   SourceMaterial,
+  Topic,
+  AssessmentCreationMode,
 } from '@/lib/types';
+import { getTopicsForOffering, createTopic } from '@/app/(dashboard)/faculty/subjects/[offeringId]/topics/actions';
 
-const STEP_LABELS = [
-  'Basic Info',
-  'Source Materials',
-  'Generation Config',
-  'Custom Instructions',
-  'Generate',
-  'Review & Edit',
-  'Approve & Publish',
-];
-
+// ---------------------------------------------------------------------------
+// Wizard state
+// ---------------------------------------------------------------------------
 export interface WizardState {
+  creationMode: AssessmentCreationMode;
   assessmentId: string | null;
   title: string;
   instructions: string;
@@ -48,9 +48,17 @@ export interface WizardState {
   } | null;
   isGenerating: boolean;
   generationError: string | null;
+  draftStatus: 'draft' | 'final' | null;
+  opensAt: string;
+  closesAt: string;
+  durationMinutes: number;
+  attemptLimit: number;
+  // topic context
+  defaultTopicId: string | null;
 }
 
 const INITIAL_STATE: WizardState = {
+  creationMode: 'ai',
   assessmentId: null,
   title: '',
   instructions: '',
@@ -73,6 +81,33 @@ const INITIAL_STATE: WizardState = {
   generationStats: null,
   isGenerating: false,
   generationError: null,
+  draftStatus: null,
+  opensAt: '',
+  closesAt: '',
+  durationMinutes: 60,
+  attemptLimit: 1,
+  defaultTopicId: null,
+};
+
+type StepId = 'mode' | 'basic' | 'sources' | 'genConfig' | 'custom' | 'generate' | 'manual' | 'bank' | 'review' | 'approve';
+
+const STEP_CONFIG: Record<AssessmentCreationMode, { ids: StepId[]; labels: string[] }> = {
+  ai: {
+    ids: ['mode', 'basic', 'sources', 'genConfig', 'custom', 'generate', 'review', 'approve'],
+    labels: ['Creation Mode', 'Basic Info', 'Source Materials', 'Generation Config', 'Custom Instructions', 'Generate', 'Review & Edit', 'Approve & Schedule'],
+  },
+  manual: {
+    ids: ['mode', 'basic', 'manual', 'review', 'approve'],
+    labels: ['Creation Mode', 'Basic Info', 'Manual Questions', 'Review & Edit', 'Approve & Schedule'],
+  },
+  bank: {
+    ids: ['mode', 'basic', 'bank', 'review', 'approve'],
+    labels: ['Creation Mode', 'Basic Info', 'Question Bank', 'Review & Edit', 'Approve & Schedule'],
+  },
+  mixed: {
+    ids: ['mode', 'basic', 'manual', 'bank', 'review', 'approve'],
+    labels: ['Creation Mode', 'Basic Info', 'Manual', 'Question Bank', 'Review & Edit', 'Approve'],
+  },
 };
 
 interface StepProps {
@@ -90,8 +125,7 @@ export default function NewAssessmentPage({
   const [currentStep, setCurrentStep] = useState(0);
   const [state, setState] = useState<WizardState>(INITIAL_STATE);
   const [stepErrors, setStepErrors] = useState<Record<string, string>>({});
-
-  // Next 16 delivers params as a Promise; unwrap synchronously with use().
+  const [topics, setTopics] = useState<Topic[]>([]);
   const { offeringId } = use(params);
 
   const updateState = useCallback((updates: Partial<WizardState>) => {
@@ -99,58 +133,104 @@ export default function NewAssessmentPage({
     setStepErrors({});
   }, []);
 
+  // Load topics for this subject/offering
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const t = await getTopicsForOffering(offeringId);
+        if (!cancelled) setTopics(t);
+      } catch {
+        // topics table may not exist yet if migration hasn't run — ignore
+        if (!cancelled) setTopics([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [offeringId]);
+
+  // Keep step index in bounds when switching creation mode
+  useEffect(() => {
+    const cfg = STEP_CONFIG[state.creationMode];
+    if (currentStep >= cfg.ids.length) setCurrentStep(cfg.ids.length - 1);
+  }, [state.creationMode, currentStep]);
+
+  const handleCreateTopic = useCallback(
+    async (title: string): Promise<Topic | null> => {
+      try {
+        const nt = await createTopic(offeringId, { title });
+        setTopics((prev) => [...prev, nt].sort((a, b) => a.title.localeCompare(b.title)));
+        return nt;
+      } catch {
+        return null;
+      }
+    },
+    [offeringId]
+  );
+
+  const cfg = STEP_CONFIG[state.creationMode];
+  const stepIds = cfg.ids;
+  const labels = cfg.labels;
+  const activeStepId = stepIds[currentStep];
+
+  // Auto-advance to Review after AI generation completes
+  useEffect(() => {
+    if (activeStepId === 'generate' && !state.isGenerating && state.generatedQuestions.length > 0) {
+      const reviewIdx = stepIds.indexOf('review');
+      if (reviewIdx !== -1) setCurrentStep(reviewIdx);
+    }
+  }, [activeStepId, state.isGenerating, state.generatedQuestions.length, stepIds]);
+
   const validateStep = useCallback(
     (step: number): boolean => {
       const errors: Record<string, string> = {};
-
-      switch (step) {
-        case 0:
+      const sid = stepIds[step] as StepId;
+      switch (sid) {
+        case 'mode':
+          // always valid — mode has default
+          break;
+        case 'basic':
           if (!state.title.trim()) errors.title = 'Title is required';
-          if (state.title.trim().length < 3) errors.title = 'Title must be at least 3 characters';
+          else if (state.title.trim().length < 3) errors.title = 'Title must be at least 3 characters';
           break;
-        case 1:
-          if (state.selectedSourceIds.length === 0)
-            errors.sources = 'Select at least one source material';
+        case 'sources':
+          if (state.selectedSourceIds.length === 0) errors.sources = 'Select at least one source material';
           break;
-        case 2: {
-          const hasType = state.questionTypes.some(
-            (t) => (state.countPerType[t] || 0) > 0
-          );
+        case 'genConfig': {
+          const hasType = state.questionTypes.some((t) => (state.countPerType[t] || 0) > 0);
           if (!hasType) errors.types = 'Configure at least one question type with count > 0';
-          const totalQuestions = state.questionTypes.reduce(
-            (sum, t) => sum + (state.countPerType[t] || 0),
-            0
-          );
-          const totalDifficulty = Object.values(state.difficultyDistribution).reduce(
-            (s, v) => s + v,
-            0
-          );
+          const totalQuestions = state.questionTypes.reduce((sum, t) => sum + (state.countPerType[t] || 0), 0);
+          const totalDifficulty = Object.values(state.difficultyDistribution).reduce((s, v) => s + v, 0);
           if (totalQuestions > 0 && totalDifficulty !== totalQuestions)
             errors.difficulty = `Difficulty total (${totalDifficulty}) must equal question count (${totalQuestions})`;
-          const totalBloom = Object.values(state.bloomDistribution).reduce(
-            (s, v) => s + v,
-            0
-          );
+          const totalBloom = Object.values(state.bloomDistribution).reduce((s, v) => s + v, 0);
           if (totalQuestions > 0 && totalBloom !== totalQuestions)
-            errors.bloom = `Bloom's total (${totalBloom}) must equal question count (${totalQuestions})`;
+            errors.bloom = `Bloom total (${totalBloom}) must equal question count (${totalQuestions})`;
           break;
         }
-        case 5:
-          if (state.generatedQuestions.length === 0)
-            errors.review = 'No questions to review. Go back and generate.';
+        case 'manual':
+          if (state.generatedQuestions.length === 0) errors.manual = 'Add at least one question. You can also import from the Question Bank in the next step.';
+          break;
+        case 'bank':
+          // Bank selection is optional here — Review validates that something was chosen
+          break;
+        case 'review':
+          if (state.generatedQuestions.length === 0) errors.review = 'No questions to review. Add some manually or from the bank, or generate with AI.';
+          break;
+        default:
           break;
       }
-
       setStepErrors(errors);
       return Object.keys(errors).length === 0;
     },
-    [state]
+    [state, stepIds]
   );
 
   const goNext = useCallback(() => {
     if (!validateStep(currentStep)) return;
-    setCurrentStep((prev) => Math.min(prev + 1, STEP_LABELS.length - 1));
-  }, [currentStep, validateStep]);
+    setCurrentStep((prev) => Math.min(prev + 1, labels.length - 1));
+  }, [currentStep, validateStep, labels.length]);
 
   const goBack = useCallback(() => {
     setCurrentStep((prev) => Math.max(prev - 1, 0));
@@ -177,29 +257,77 @@ export default function NewAssessmentPage({
       offeringId,
       errors: stepErrors,
     };
-
-    switch (currentStep) {
-      case 0:
+    switch (activeStepId) {
+      case 'mode':
+        return <StepCreationMode value={state.creationMode} onChange={(m) => updateState({ creationMode: m as AssessmentCreationMode })} />;
+      case 'basic':
         return <StepBasicInfo {...stepProps} />;
-      case 1:
+      case 'sources':
         return <StepSourceMaterials {...stepProps} />;
-      case 2:
+      case 'genConfig':
         return <StepGenerationConfig {...stepProps} />;
-      case 3:
+      case 'custom':
         return <StepCustomInstructions {...stepProps} />;
-      case 4:
+      case 'generate':
         return <StepGenerate {...stepProps} />;
-      case 5:
-        return <StepReview {...stepProps} />;
-      case 6:
-        return <StepApprove {...stepProps} />;
+      case 'manual':
+        return (
+          <StepManualEntry
+            questions={state.generatedQuestions}
+            onChange={(next) => updateState({ generatedQuestions: next })}
+            topics={topics}
+            onCreateTopic={handleCreateTopic}
+          />
+        );
+      case 'bank':
+        return (
+          <StepQuestionBank
+            offeringId={offeringId}
+            topics={topics}
+            onImport={(drafts) => {
+              const merged = [...state.generatedQuestions, ...drafts.map((d, i) => ({ ...d, position: state.generatedQuestions.length + i + 1 }))];
+              updateState({ generatedQuestions: merged });
+            }}
+            existingCount={state.generatedQuestions.length}
+          />
+        );
+      case 'review':
+        return (
+          <StepReview
+            {...stepProps}
+            onRegenerate={() => {
+              if (state.creationMode === 'ai') {
+                updateState({ generatedQuestions: [], generationStats: null, isGenerating: false });
+                const genIdx = stepIds.indexOf('generate');
+                if (genIdx !== -1) setCurrentStep(genIdx);
+              } else {
+                // for manual/bank, just stay — they can edit via Review itself
+              }
+            }}
+            onSaveDraft={() => {
+              updateState({ draftStatus: 'draft' });
+              const approveIdx = stepIds.indexOf('approve');
+              if (approveIdx !== -1) setCurrentStep(approveIdx);
+            }}
+            onSaveFinal={() => {
+              updateState({ draftStatus: 'final' });
+              const approveIdx = stepIds.indexOf('approve');
+              if (approveIdx !== -1) setCurrentStep(approveIdx);
+            }}
+          />
+        );
+      case 'approve':
+        return <StepApprove {...stepProps} topics={topics} allTopics={topics} />;
       default:
         return null;
     }
   };
 
   const isFirstStep = currentStep === 0;
-  const isLastStep = currentStep === STEP_LABELS.length - 1;
+  const isLastStep = currentStep === labels.length - 1;
+  const isGenerateStep = activeStepId === 'generate';
+  const isReviewStep = activeStepId === 'review';
+  const isApproveStep = activeStepId === 'approve';
 
   return (
     <div className="min-h-screen">
@@ -210,22 +338,27 @@ export default function NewAssessmentPage({
           { label: 'New Assessment' },
         ]}
         title="Create Assessment"
-        description="Build a new assessment with AI-assisted question generation"
+        description={
+          state.creationMode === 'ai'
+            ? 'AI-assisted generation from your source materials'
+            : state.creationMode === 'manual'
+              ? 'Manually encode each item — categorized by topic'
+              : 'Pick reusable items from your question bank — grouped by topic'
+        }
       />
 
       <div className="max-w-5xl mx-auto">
         <nav aria-label="Progress" className="mb-8">
           <ol className="flex items-center">
-            {STEP_LABELS.map((label, index) => {
+            {labels.map((label, index) => {
               const isActive = index === currentStep;
               const isCompleted = index < currentStep;
               const isClickable = index <= currentStep;
-
               return (
                 <li key={label} className="flex items-center flex-1 last:flex-none">
                   <button
-                    onClick={() => isClickable && goToStep(index)}
-                    disabled={!isClickable}
+                    onClick={() => isClickable && !state.isGenerating && goToStep(index)}
+                    disabled={!isClickable || state.isGenerating}
                     className={`flex items-center gap-2 text-sm whitespace-nowrap transition-colors ${
                       isActive
                         ? 'text-[var(--color-primary)] font-semibold'
@@ -257,12 +390,8 @@ export default function NewAssessmentPage({
                     </span>
                     <span className="hidden lg:inline">{label}</span>
                   </button>
-                  {index < STEP_LABELS.length - 1 && (
-                    <div
-                      className={`flex-1 h-0.5 mx-3 ${
-                        isCompleted ? 'bg-[var(--color-success)]' : 'bg-[var(--color-border)]'
-                      }`}
-                    />
+                  {index < labels.length - 1 && (
+                    <div className={`flex-1 h-0.5 mx-3 ${isCompleted ? 'bg-[var(--color-success)]' : 'bg-[var(--color-border)]'}`} />
                   )}
                 </li>
               );
@@ -272,14 +401,12 @@ export default function NewAssessmentPage({
 
         <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-[var(--radius-lg)] shadow-[var(--shadow-sm)] p-6">
           {renderStep()}
+          {stepErrors.manual && <p className="mt-4 text-sm text-[var(--color-danger)]">{stepErrors.manual}</p>}
+          {stepErrors.review && <p className="mt-4 text-sm text-[var(--color-danger)]">{stepErrors.review}</p>}
         </div>
 
         <div className="flex items-center justify-between mt-6">
-          <Button
-            variant="secondary"
-            onClick={goBack}
-            disabled={isFirstStep}
-          >
+          <Button variant="secondary" onClick={goBack} disabled={isFirstStep || state.isGenerating}>
             <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
               <path
                 fillRule="evenodd"
@@ -291,10 +418,10 @@ export default function NewAssessmentPage({
           </Button>
 
           <div className="text-sm text-[var(--color-muted)]">
-            Step {currentStep + 1} of {STEP_LABELS.length}
+            Step {currentStep + 1} of {labels.length} · {state.creationMode === 'ai' ? 'AI' : state.creationMode === 'manual' ? 'Manual' : 'Bank'} mode
           </div>
 
-          {!isLastStep && currentStep !== 4 && currentStep !== 5 && currentStep !== 6 && (
+          {!isLastStep && !isGenerateStep && !isReviewStep && !isApproveStep && (
             <Button variant="primary" onClick={goNext}>
               Next
               <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
@@ -306,6 +433,25 @@ export default function NewAssessmentPage({
               </svg>
             </Button>
           )}
+          {/* AI generate hides Next, Manual/Bank next is needed except review/approve handled */}
+          {!isLastStep && isReviewStep && (
+            <Button variant="primary" onClick={goNext}>
+              Continue to Approve
+              <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
+                <path
+                  fillRule="evenodd"
+                  d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"
+                  clipRule="evenodd"
+                />
+              </svg>
+            </Button>
+          )}
+        </div>
+
+        <div className="mt-3 text-center">
+          <p className="text-xs text-[var(--color-muted)]">
+            {state.creationMode !== 'ai' && 'You can combine methods — use Review to add the remaining type before approval.'}
+          </p>
         </div>
       </div>
     </div>

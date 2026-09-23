@@ -7,10 +7,11 @@ import ExamTimer from '@/components/exam/ExamTimer';
 import ExamQuestion from '@/components/exam/ExamQuestion';
 import ExamNavigator from '@/components/exam/ExamNavigator';
 import Button from '@/components/ui/Button';
-import PageHeader from '@/components/ui/PageHeader';
 import Modal from '@/components/ui/Modal';
 import Spinner from '@/components/ui/Spinner';
 import { getAttemptDetails, submitExam } from '../actions';
+import { saveAnswerLocally, syncAnswersToServer, getLocalAnswers, clearLocalAnswers } from '@/lib/sync';
+import ExamShell from '@/components/layout/ExamShell';
 import type {
   ExamAttempt,
   ExamManifest,
@@ -31,7 +32,6 @@ export default function ExamPage({
 }: {
   params: Promise<{ assessmentId: string; attemptId: string }>;
 }) {
-  // Next 16 delivers params as a Promise; unwrap synchronously with use().
   const { assessmentId, attemptId } = use(params);
   const router = useRouter();
   const { loading: userLoading } = useUser();
@@ -49,6 +49,8 @@ export default function ExamPage({
   const [showSubmitDialog, setShowSubmitDialog] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [navigatorOpen, setNavigatorOpen] = useState(false);
+  const [isOnline, setIsOnline] = useState(true);
+  const [pendingSync, setPendingSync] = useState(0);
 
   const answersRef = useRef(answers);
   const flaggedRef = useRef(flagged);
@@ -56,18 +58,36 @@ export default function ExamPage({
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autoSaveTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isSubmittingRef = useRef(false);
+  const isOnlineRef = useRef(true);
 
-  useEffect(() => {
-    answersRef.current = answers;
-  }, [answers]);
+  useEffect(() => { answersRef.current = answers; }, [answers]);
+  useEffect(() => { flaggedRef.current = flagged; }, [flagged]);
+  useEffect(() => { attemptRef.current = attempt; }, [attempt]);
 
+  // Online/offline detection
   useEffect(() => {
-    flaggedRef.current = flagged;
-  }, [flagged]);
+    const handleOnline = () => {
+      setIsOnline(true);
+      isOnlineRef.current = true;
+      if (attemptRef.current) {
+        syncPendingAnswers(attemptRef.current.id);
+      }
+    };
+    const handleOffline = () => {
+      setIsOnline(false);
+      isOnlineRef.current = false;
+    };
 
-  useEffect(() => {
-    attemptRef.current = attempt;
-  }, [attempt]);
+    setIsOnline(navigator.onLine);
+    isOnlineRef.current = navigator.onLine;
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
 
   useEffect(() => {
     async function load() {
@@ -131,43 +151,77 @@ export default function ExamPage({
 
     setSaving(true);
     try {
-      const res = await fetch('/api/exam/save', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          attemptId: attemptRef.current!.id,
-          answers: payload,
-        }),
-      });
+      for (const answer of payload) {
+        await saveAnswerLocally(
+          attemptRef.current!.id,
+          answer.questionId,
+          answer.selectedChoiceId,
+          answer.textAnswer
+        );
+      }
 
-      if (res.ok) {
-        const data = await res.json();
-        if (data.serverRevisions) {
+      if (isOnlineRef.current) {
+        const res = await syncAnswersToServer(attemptRef.current!.id, payload);
+        if (res.serverRevisions) {
           setAnswers((prev) => {
             const next = new Map(prev);
-            for (const [qId, serverRev] of Object.entries(
-              data.serverRevisions as Record<string, number>
-            )) {
+            for (const [qId, serverRev] of Object.entries(res.serverRevisions)) {
               const existing = next.get(qId);
               if (existing) {
                 next.set(qId, {
                   ...existing,
-                  clientRevision: Math.max(
-                    existing.clientRevision,
-                    serverRev as number
-                  ),
+                  clientRevision: Math.max(existing.clientRevision, serverRev),
                 });
               }
             }
             return next;
           });
         }
-        setLastSavedAt(new Date());
+        setPendingSync(0);
+      } else {
+        setPendingSync(payload.length);
       }
+
+      setLastSavedAt(new Date());
     } catch {
       // Silently fail — will retry on next interval
     } finally {
       setSaving(false);
+    }
+  }, []);
+
+  const syncPendingAnswers = useCallback(async (attemptId: string) => {
+    try {
+      const localAnswers = await getLocalAnswers(attemptId);
+      if (localAnswers.length === 0) return;
+
+      const payload = localAnswers.map(a => ({
+        questionId: a.questionId,
+        selectedChoiceId: a.selectedChoiceId,
+        textAnswer: a.textAnswer,
+        clientRevision: a.clientRevision,
+      }));
+
+      const res = await syncAnswersToServer(attemptId, payload);
+      if (res.serverRevisions) {
+        setAnswers((prev) => {
+          const next = new Map(prev);
+          for (const [qId, serverRev] of Object.entries(res.serverRevisions)) {
+            const existing = next.get(qId);
+            if (existing) {
+              next.set(qId, {
+                ...existing,
+                clientRevision: Math.max(existing.clientRevision, serverRev),
+              });
+            }
+          }
+          return next;
+        });
+      }
+      setPendingSync(0);
+      setLastSavedAt(new Date());
+    } catch {
+      // Will retry on next online event
     }
   }, []);
 
@@ -231,6 +285,8 @@ export default function ExamPage({
         return;
       }
 
+      await clearLocalAnswers(attemptId);
+
       router.push(
         `/student/assessments/${assessmentId}/exam/${attemptId}/results`
       );
@@ -251,7 +307,7 @@ export default function ExamPage({
 
   if (loading || userLoading) {
     return (
-      <div className="flex items-center justify-center min-h-[60vh]">
+      <div className="flex items-center justify-center min-h-screen">
         <div className="flex flex-col items-center gap-3">
           <Spinner size="lg" />
           <p className="text-sm text-muted">Loading exam...</p>
@@ -262,7 +318,7 @@ export default function ExamPage({
 
   if (error) {
     return (
-      <div className="flex items-center justify-center min-h-[60vh]">
+      <div className="flex items-center justify-center min-h-screen">
         <div className="text-center">
           <p className="text-lg font-medium text-foreground mb-2">Error</p>
           <p className="text-sm text-muted mb-4">{error}</p>
@@ -292,12 +348,33 @@ export default function ExamPage({
   const answeredCount = navigatorQuestions.filter((q) => q.answered).length;
 
   return (
-    <div className="flex flex-col h-[calc(100vh-4rem)]">
-      <PageHeader
-        title="Exam in Progress"
-        description={`${questions.length} questions \u00B7 ${answeredCount} answered`}
-        actions={
+    <ExamShell
+      backHref={`/student/assessments/${assessmentId}`}
+      backLabel="Back to Assessment"
+    >
+      <div className="flex flex-col h-screen">
+        {/* Minimal exam header bar */}
+        <header className="flex items-center justify-between h-12 px-4 border-b border-[var(--color-border)] bg-[var(--color-surface)] shrink-0">
+          <div className="flex items-center gap-4">
+            <div className="hidden sm:block text-sm font-medium text-[var(--color-foreground)]">
+              {questions.length} questions &middot; {answeredCount} answered
+            </div>
+          </div>
+
           <div className="flex items-center gap-3">
+            {!isOnline && (
+              <span className="text-xs text-warning font-medium flex items-center gap-1">
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 5.636a9 9 0 010 12.728m0 0l-2.829-2.829m2.829 2.829L21 21M15.536 8.464a5 5 0 010 7.072m0 0l-2.829-2.829m-4.242 2.829a5 5 0 01-1.414-2.83m-1.414 5.658a9 9 0 01-2.167-9.238m7.824 2.167a1 1 0 111.414 1.414m-1.414-1.414L3 3" />
+                </svg>
+                Offline
+              </span>
+            )}
+            {pendingSync > 0 && isOnline && (
+              <span className="text-xs text-warning flex items-center gap-1">
+                <Spinner size="sm" /> Syncing...
+              </span>
+            )}
             {saving && (
               <span className="text-xs text-muted flex items-center gap-1">
                 <Spinner size="sm" /> Saving...
@@ -313,126 +390,134 @@ export default function ExamPage({
               onTimeUp={handleTimeUp}
             />
           </div>
-        }
-      />
+        </header>
 
-      <div className="flex flex-1 gap-6 overflow-hidden">
-        <div className="hidden md:block w-64 flex-shrink-0 overflow-y-auto">
-          <div className="sticky top-4">
-            <ExamNavigator
-              questions={navigatorQuestions}
-              currentIndex={currentIndex}
-              onSelect={setCurrentIndex}
-              isOpen={false}
-              onClose={() => {}}
-            />
+        {/* Exam content */}
+        <div className="flex flex-1 overflow-hidden">
+          {/* Desktop navigator sidebar */}
+          <div className="hidden md:block w-64 flex-shrink-0 overflow-y-auto border-r border-[var(--color-border)] bg-[var(--color-surface)]">
+            <div className="sticky top-4 p-4">
+              <ExamNavigator
+                questions={navigatorQuestions}
+                currentIndex={currentIndex}
+                onSelect={setCurrentIndex}
+                isOpen={false}
+                onClose={() => {}}
+              />
+            </div>
+          </div>
+
+          {/* Question area */}
+          <div className="flex-1 overflow-y-auto px-4 pb-24 md:pb-4">
+            <div className="max-w-2xl mx-auto py-6">
+              <ExamQuestion
+                question={currentQuestion}
+                position={currentIndex + 1}
+                selectedChoiceId={currentAnswer?.selectedChoiceId ?? null}
+                textAnswer={currentAnswer?.textAnswer ?? ''}
+                flagged={flagged.has(currentQuestion.id)}
+                onChoiceSelect={(choiceId) =>
+                  updateAnswer(currentQuestion.id, { selectedChoiceId: choiceId })
+                }
+                onTextChange={(text) =>
+                  updateAnswer(currentQuestion.id, { textAnswer: text })
+                }
+                onFlagToggle={() => toggleFlag(currentQuestion.id)}
+              />
+            </div>
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-4 pb-24 md:pb-4">
-          <div className="max-w-2xl mx-auto py-6">
-            <ExamQuestion
-              question={currentQuestion}
-              position={currentIndex + 1}
-              selectedChoiceId={currentAnswer?.selectedChoiceId ?? null}
-              textAnswer={currentAnswer?.textAnswer ?? ''}
-              flagged={flagged.has(currentQuestion.id)}
-              onChoiceSelect={(choiceId) =>
-                updateAnswer(currentQuestion.id, { selectedChoiceId: choiceId })
-              }
-              onTextChange={(text) =>
-                updateAnswer(currentQuestion.id, { textAnswer: text })
-              }
-              onFlagToggle={() => toggleFlag(currentQuestion.id)}
-            />
-          </div>
+        {/* Mobile bottom bar */}
+        <div className="fixed bottom-0 left-0 right-0 bg-surface border-t border-border px-4 py-3 md:hidden z-40">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="w-full"
+            onClick={() => setNavigatorOpen(true)}
+          >
+            Questions ({answeredCount}/{questions.length})
+          </Button>
         </div>
-      </div>
 
-      <div className="fixed bottom-0 left-0 right-0 bg-surface border-t border-border px-4 py-3 md:hidden z-40">
-        <Button
-          variant="ghost"
-          size="sm"
-          className="w-full"
-          onClick={() => setNavigatorOpen(true)}
+        {/* Mobile navigator overlay */}
+        <ExamNavigator
+          questions={navigatorQuestions}
+          currentIndex={currentIndex}
+          onSelect={setCurrentIndex}
+          isOpen={navigatorOpen}
+          onClose={() => setNavigatorOpen(false)}
+        />
+
+        {/* Desktop submit button */}
+        <div className="hidden md:flex fixed bottom-6 right-6 z-30">
+          <Button
+            variant="primary"
+            size="lg"
+            onClick={() => setShowSubmitDialog(true)}
+          >
+            Submit Exam
+          </Button>
+        </div>
+
+        {/* Mobile submit button */}
+        <div className="md:hidden fixed bottom-16 left-4 right-4 z-30">
+          <Button
+            variant="primary"
+            size="lg"
+            className="w-full"
+            onClick={() => setShowSubmitDialog(true)}
+          >
+            Submit Exam
+          </Button>
+        </div>
+
+        {/* Submit confirmation dialog */}
+        <Modal
+          open={showSubmitDialog}
+          onClose={() => setShowSubmitDialog(false)}
+          title="Submit Exam?"
+          actions={
+            <>
+              <Button
+                variant="secondary"
+                onClick={() => setShowSubmitDialog(false)}
+                disabled={submitting}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                onClick={() => handleSubmit(false)}
+                loading={submitting}
+              >
+                Submit
+              </Button>
+            </>
+          }
         >
-          Questions ({answeredCount}/{questions.length})
-        </Button>
-      </div>
-
-      <ExamNavigator
-        questions={navigatorQuestions}
-        currentIndex={currentIndex}
-        onSelect={setCurrentIndex}
-        isOpen={navigatorOpen}
-        onClose={() => setNavigatorOpen(false)}
-      />
-
-      <div className="hidden md:flex fixed bottom-6 right-6 z-30">
-        <Button
-          variant="primary"
-          size="lg"
-          onClick={() => setShowSubmitDialog(true)}
-        >
-          Submit Exam
-        </Button>
-      </div>
-
-      <div className="md:hidden fixed bottom-16 left-4 right-4 z-30">
-        <Button
-          variant="primary"
-          size="lg"
-          className="w-full"
-          onClick={() => setShowSubmitDialog(true)}
-        >
-          Submit Exam
-        </Button>
-      </div>
-
-      <Modal
-        open={showSubmitDialog}
-        onClose={() => setShowSubmitDialog(false)}
-        title="Submit Exam?"
-        actions={
-          <>
-            <Button
-              variant="secondary"
-              onClick={() => setShowSubmitDialog(false)}
-              disabled={submitting}
-            >
-              Cancel
-            </Button>
-            <Button
-              variant="primary"
-              onClick={() => handleSubmit(false)}
-              loading={submitting}
-            >
-              Submit
-            </Button>
-          </>
-        }
-      >
-        <div className="flex flex-col gap-3">
-          <p className="text-sm text-foreground">
-            Are you sure you want to submit your exam? This action cannot be
-            undone.
-          </p>
-          <div className="flex items-center gap-4 text-sm">
-            <span className="text-muted">
-              Answered: {answeredCount}/{questions.length}
-            </span>
-            <span className="text-muted">
-              Flagged: {flagged.size}
-            </span>
-          </div>
-          {answeredCount < questions.length && (
-            <p className="text-sm text-warning font-medium">
-              You have {questions.length - answeredCount} unanswered question
-              {questions.length - answeredCount !== 1 ? 's' : ''}.
+          <div className="flex flex-col gap-3">
+            <p className="text-sm text-foreground">
+              Are you sure you want to submit your exam? This action cannot be
+              undone.
             </p>
-          )}
-        </div>
-      </Modal>
-    </div>
+            <div className="flex items-center gap-4 text-sm">
+              <span className="text-muted">
+                Answered: {answeredCount}/{questions.length}
+              </span>
+              <span className="text-muted">
+                Flagged: {flagged.size}
+              </span>
+            </div>
+            {answeredCount < questions.length && (
+              <p className="text-sm text-warning font-medium">
+                You have {questions.length - answeredCount} unanswered question
+                {questions.length - answeredCount !== 1 ? 's' : ''}.
+              </p>
+            )}
+          </div>
+        </Modal>
+      </div>
+    </ExamShell>
   );
 }

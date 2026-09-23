@@ -33,16 +33,26 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Forbidden: Faculty access required' }, { status: 403 });
     }
 
-    // Parse form data (subjectOfferingId must be read before ownership check)
+    // Parse form data
     const formData = await request.formData();
-    const file = formData.get('file') as File;
+    const file = formData.get('file') as File | null;
+    const textContent = formData.get('textContent') as string | null;
+    const sourceType = formData.get('sourceType') as string | null;
     const subjectOfferingId = formData.get('subjectOfferingId') as string;
     const title = formData.get('title') as string;
     const topicId = formData.get('topicId') as string | null;
 
-    if (!file || !subjectOfferingId || !title) {
+    if (!subjectOfferingId || !title) {
       return NextResponse.json(
-        { error: 'Missing required fields: file, subjectOfferingId, title' },
+        { error: 'Missing required fields: subjectOfferingId, title' },
+        { status: 400 }
+      );
+    }
+
+    // Validate: either file or text content must be provided
+    if (!file && (!textContent || !textContent.trim())) {
+      return NextResponse.json(
+        { error: 'Either a file or text content is required' },
         { status: 400 }
       );
     }
@@ -64,38 +74,50 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Validate file type (server-side; the browser's accept= list is a hint only)
-    const supportedTypes: readonly string[] = SUPPORTED_SOURCE_FILE_TYPES;
-    if (!supportedTypes.includes(file.type)) {
-      return NextResponse.json(
-        { error: `Unsupported file type: ${file.type}. Supported: PDF, DOCX, TXT, MD` },
-        { status: 400 }
-      );
-    }
+    let buffer: Buffer;
+    let mimeType: string;
+    let originalFilename: string;
 
-    // Validate file size against the administrator-configured ceiling (the
-    // storage bucket enforces its own 50 MB cap on top of this).
-    const { max_upload_size_mb } = await getSettings();
-    const maxSize = max_upload_size_mb * 1024 * 1024;
-    if (file.size > maxSize) {
-      return NextResponse.json(
-        { error: `File too large. Maximum size: ${max_upload_size_mb}MB` },
-        { status: 400 }
-      );
-    }
+    if (file) {
+      // Validate file type
+      const supportedTypes: readonly string[] = SUPPORTED_SOURCE_FILE_TYPES;
+      if (!supportedTypes.includes(file.type)) {
+        return NextResponse.json(
+          { error: `Unsupported file type: ${file.type}. Supported: PDF, DOCX, TXT, MD` },
+          { status: 400 }
+        );
+      }
 
-    // Convert file to buffer
-    const arrayBuffer = await file.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
+      // Validate file size
+      const { max_upload_size_mb } = await getSettings();
+      const maxSize = max_upload_size_mb * 1024 * 1024;
+      if (file.size > maxSize) {
+        return NextResponse.json(
+          { error: `File too large. Maximum size: ${max_upload_size_mb}MB` },
+          { status: 400 }
+        );
+      }
+
+      // Convert file to buffer
+      const arrayBuffer = await file.arrayBuffer();
+      buffer = Buffer.from(arrayBuffer);
+      mimeType = file.type;
+      originalFilename = file.name;
+    } else {
+      // Text content provided
+      buffer = Buffer.from(textContent!, 'utf-8');
+      mimeType = 'text/plain';
+      originalFilename = `${title}.txt`;
+    }
 
     // Upload file to Supabase Storage
-    const fileExt = file.name.split('.').pop();
+    const fileExt = originalFilename.split('.').pop();
     const storagePath = `${subjectOfferingId}/${Date.now()}.${fileExt}`;
 
     const { error: uploadError } = await supabase.storage
       .from('source-materials')
       .upload(storagePath, buffer, {
-        contentType: file.type,
+        contentType: mimeType,
         upsert: false,
       });
 
@@ -111,11 +133,11 @@ export async function POST(request: NextRequest) {
         subject_offering_id: subjectOfferingId,
         topic_id: topicId || null,
         title,
-        source_type: 'file',
+        source_type: sourceType === 'text' ? 'text' : 'file',
         storage_path: storagePath,
-        original_filename: file.name,
-        mime_type: file.type,
-        file_size: file.size,
+        original_filename: originalFilename,
+        mime_type: mimeType,
+        file_size: buffer.length,
         raw_text: null,
         processing_status: 'pending',
         created_by: user.id,
@@ -129,7 +151,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Process file asynchronously (extract text, chunk, embed)
-    extractAndStoreSource(sourceMaterial.id, buffer, file.type).catch((error) => {
+    extractAndStoreSource(sourceMaterial.id, buffer, mimeType).catch((error) => {
       console.error('Background processing error:', error);
     });
 

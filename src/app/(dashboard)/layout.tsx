@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server';
 import { getPrimaryRole } from '@/lib/constants';
 import { getAvatarUrl } from '@/lib/avatar';
 import AppShell from '@/components/layout/AppShell';
+import { NavigationProvider } from '@/components/layout/NavigationContext';
 
 interface DashboardLayoutProps {
   children: ReactNode;
@@ -33,13 +34,15 @@ export default async function DashboardLayout({ children }: DashboardLayoutProps
   const userName = profile?.full_name ?? user.email ?? 'User';
 
   return (
-    <AppShell
-      title="Dashboard"
-      role={role}
-      userName={userName}
-      avatarUrl={getAvatarUrl(profile?.avatar_path)}
-    >
-      {children}
-    </AppShell>
+    <NavigationProvider>
+      <AppShell
+        title="Dashboard"
+        role={role}
+        userName={userName}
+        avatarUrl={getAvatarUrl(profile?.avatar_path)}
+      >
+        {children}
+      </AppShell>
+    </NavigationProvider>
   );
 }

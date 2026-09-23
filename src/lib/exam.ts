@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { createAdminClient } from '@/lib/supabase/admin';
-import type { ExamAttempt, ExamManifest, QuestionWithChoices } from '@/lib/types';
+import type { ExamAttempt, ExamManifest, QuestionWithChoices, AssessmentException } from '@/lib/types';
 
 /**
  * Shared server-side exam-start logic.
@@ -94,6 +94,50 @@ export async function startExamAttempt(
     }
   }
 
+  // Check for student exceptions (extended time, additional attempts, schedule override)
+  const admin = createAdminClient();
+  const { data: exceptions } = await admin
+    .from('assessment_exceptions')
+    .select('*')
+    .eq('deployment_id', deploymentId)
+    .eq('student_id', userId);
+
+  let effectiveDurationMinutes = deployment.duration_minutes;
+  let effectiveClosesAt = closesAt;
+  let effectiveAttemptLimit = deployment.attempt_limit;
+
+  const nowISO = now.toISOString();
+  for (const ex of (exceptions ?? []) as AssessmentException[]) {
+    // Skip expired exceptions
+    if (ex.expires_at && new Date(ex.expires_at) < now) continue;
+
+    switch (ex.exception_type) {
+      case 'extended_time':
+        if (ex.additional_minutes) {
+          effectiveDurationMinutes += ex.additional_minutes;
+        }
+        break;
+      case 'additional_attempt':
+        if (ex.additional_attempts) {
+          effectiveAttemptLimit += ex.additional_attempts;
+        }
+        break;
+      case 'schedule_override':
+        if (ex.override_closes_at) {
+          const overrideCloses = new Date(ex.override_closes_at);
+          if (overrideCloses > effectiveClosesAt) {
+            effectiveClosesAt = overrideCloses;
+          }
+        }
+        break;
+    }
+  }
+
+  // Re-validate window with exception overrides applied
+  if (now < opensAt || now > effectiveClosesAt) {
+    return { error: 'Assessment is not currently available', status: 403 };
+  }
+
   const { data: enrollment } = await supabase
     .from('enrollments')
     .select('id')
@@ -113,14 +157,14 @@ export async function startExamAttempt(
     .eq('student_id', userId)
     .in('status', ['created', 'in_progress', 'submitted', 'auto_submitted']);
 
-  if (attemptCount !== null && attemptCount >= deployment.attempt_limit) {
+  if (attemptCount !== null && attemptCount >= effectiveAttemptLimit) {
     return { error: 'Attempt limit reached', status: 403 };
   }
 
   // RLS grants students no SELECT on questions (answer-key protection), so
   // question content is read via the service-role client after the
   // authorization checks above have passed.
-  const admin = createAdminClient();
+  // (admin client is already created above for exception checks)
 
   // Questions are authored with status 'active' (addQuestion/saveGeneratedQuestions)
   // and become 'approved' only if a reviewer flips them; accept both so either
@@ -155,7 +199,7 @@ export async function startExamAttempt(
   }
 
   const attemptNumber = (attemptCount ?? 0) + 1;
-  const expiresAt = new Date(now.getTime() + deployment.duration_minutes * 60 * 1000);
+  const expiresAt = new Date(now.getTime() + effectiveDurationMinutes * 60 * 1000);
 
   // Attempt + manifest writes go through the service-role client:
   // exam_manifests has no student INSERT policy under RLS.

@@ -25,6 +25,21 @@ interface AssignmentRow {
   subject_offering: SubjectOfferingSummary | null;
 }
 
+interface SubjectGroup {
+  subjectId: string;
+  code: string;
+  title: string;
+  offerings: {
+    offeringId: string;
+    sectionName: string;
+    programCode: string;
+    yearLevel: string;
+    term: string;
+    enrolled: number;
+    status: string;
+  }[];
+}
+
 export default async function FacultySubjectsPage() {
   const supabase = await createClient();
 
@@ -47,22 +62,60 @@ export default async function FacultySubjectsPage() {
 
   const assignmentRows = (assignments ?? []) as unknown as AssignmentRow[];
 
-  const offeringIds = assignmentRows
+  // Group by subject
+  const subjectMap = new Map<string, SubjectGroup>();
+  for (const assignment of assignmentRows) {
+    const offering = assignment.subject_offering;
+    if (!offering?.subject) continue;
+
+    const subjectId = offering.subject.id;
+    if (!subjectMap.has(subjectId)) {
+      subjectMap.set(subjectId, {
+        subjectId,
+        code: offering.subject.code,
+        title: offering.subject.title,
+        offerings: [],
+      });
+    }
+
+    const group = subjectMap.get(subjectId)!;
+    group.offerings.push({
+      offeringId: offering.id,
+      sectionName: offering.section?.name ?? '—',
+      programCode: offering.section?.program?.code ?? '—',
+      yearLevel: offering.section?.year_level?.name ?? '—',
+      term: offering.semester?.name ?? '—',
+      enrolled: 0,
+      status: offering.status,
+    });
+  }
+
+  // Get enrollment counts
+  const allOfferingIds = assignmentRows
     .map((a) => a.subject_offering?.id)
     .filter((id): id is string => Boolean(id));
 
-  const enrollmentCounts: Record<string, number> = {};
-  if (offeringIds.length > 0) {
+  if (allOfferingIds.length > 0) {
     const { data: enrollments } = await supabase
       .from('enrollments')
       .select('subject_offering_id')
-      .in('subject_offering_id', offeringIds)
+      .in('subject_offering_id', allOfferingIds)
       .eq('status', 'enrolled');
 
+    const enrollmentCounts: Record<string, number> = {};
     (enrollments ?? []).forEach((e: { subject_offering_id: string }) => {
       enrollmentCounts[e.subject_offering_id] = (enrollmentCounts[e.subject_offering_id] ?? 0) + 1;
     });
+
+    // Update enrollment counts in groups
+    for (const group of subjectMap.values()) {
+      for (const offering of group.offerings) {
+        offering.enrolled = enrollmentCounts[offering.offeringId] ?? 0;
+      }
+    }
   }
+
+  const subjects = Array.from(subjectMap.values());
 
   return (
     <div>
@@ -75,64 +128,70 @@ export default async function FacultySubjectsPage() {
         description="Subject offerings you are assigned to"
       />
 
-      {assignmentRows.length > 0 ? (
-        <Card>
-          <Table caption="Subject offerings you are assigned to">
-            <THead>
-              <TR>
-                <TH>Code</TH>
-                <TH>Subject</TH>
-                <TH>Section</TH>
-                <TH>Program / Year</TH>
-                <TH>Term</TH>
-                <TH align="right">Enrolled</TH>
-                <TH>Status</TH>
-              </TR>
-            </THead>
-            <TBody>
-              {assignmentRows.map((a) => {
-                const offering = a.subject_offering;
-                const subject = offering?.subject;
-                const section = offering?.section;
-                const semester = offering?.semester;
-                const studentCount = offering ? enrollmentCounts[offering.id] ?? 0 : 0;
+      {subjects.length > 0 ? (
+        <div className="space-y-4">
+          {subjects.map((subject) => (
+            <Card key={subject.subjectId}>
+              <div className="p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <Link
+                    href={`/faculty/subjects/subject/${subject.subjectId}`}
+                    className="text-lg font-semibold text-[var(--color-primary)] hover:underline"
+                  >
+                    {subject.code} - {subject.title}
+                  </Link>
+                  <Badge variant="info">
+                    {subject.offerings.length} section{subject.offerings.length !== 1 ? 's' : ''}
+                  </Badge>
+                </div>
 
-                return (
-                  <TR key={a.id} className="hover:bg-[var(--color-surface-hover)]">
-                    <TD className="font-mono text-xs text-[var(--color-muted)]">
-                      {subject?.code ?? '—'}
-                    </TD>
-                    <TD>
-                      <Link
-                        href={`/faculty/subjects/${offering?.id}`}
-                        className="font-medium text-[var(--color-primary)] hover:underline"
-                      >
-                        {subject?.title ?? 'Untitled offering'}
-                      </Link>
-                    </TD>
-                    <TD className="text-[var(--color-muted)]">{section?.name ?? '—'}</TD>
-                    <TD className="text-[var(--color-muted)]">
-                      {section?.program?.code ?? '—'}
-                      {section?.year_level?.name ? ` · ${section.year_level.name}` : ''}
-                    </TD>
-                    <TD className="text-[var(--color-muted)]">
-                      {semester?.name ?? '—'}
-                      {semester?.academic_year?.name ? ` (${semester.academic_year.name})` : ''}
-                    </TD>
-                    <TD numeric className="text-[var(--color-foreground)]">
-                      {studentCount}
-                    </TD>
-                    <TD>
-                      <Badge variant={offering?.status === 'active' ? 'success' : 'default'}>
-                        {offering?.status ?? 'unknown'}
-                      </Badge>
-                    </TD>
-                  </TR>
-                );
-              })}
-            </TBody>
-          </Table>
-        </Card>
+                <Table caption={`Sections for ${subject.code}`}>
+                  <THead>
+                    <TR>
+                      <TH>Section</TH>
+                      <TH>Program / Year</TH>
+                      <TH>Term</TH>
+                      <TH align="right">Enrolled</TH>
+                      <TH>Status</TH>
+                      <TH align="right">Actions</TH>
+                    </TR>
+                  </THead>
+                  <TBody>
+                    {subject.offerings.map((offering) => (
+                      <TR key={offering.offeringId}>
+                        <TD className="font-medium text-[var(--color-foreground)]">
+                          {offering.sectionName}
+                        </TD>
+                        <TD className="text-[var(--color-muted)]">
+                          {offering.programCode} · {offering.yearLevel}
+                        </TD>
+                        <TD className="text-[var(--color-muted)]">
+                          {offering.term}
+                        </TD>
+                        <TD numeric className="text-[var(--color-foreground)]">
+                          {offering.enrolled}
+                        </TD>
+                        <TD>
+                          <Badge variant={offering.status === 'active' ? 'success' : 'default'}>
+                            {offering.status}
+                          </Badge>
+                        </TD>
+                        <TD className="whitespace-nowrap text-right">
+                          <Link
+                            href={`/faculty/subjects/${offering.offeringId}`}
+                            className="text-sm font-medium text-[var(--color-primary)] hover:underline"
+                          >
+                            Manage
+                          </Link>
+                        </TD>
+                      </TR>
+                    ))}
+                  </TBody>
+                </Table>
+              </div>
+            </Card>
+          ))}
+        </div>
       ) : (
         <EmptyState
           title="No subjects assigned"

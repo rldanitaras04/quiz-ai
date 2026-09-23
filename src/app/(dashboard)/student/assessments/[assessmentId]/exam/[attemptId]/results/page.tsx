@@ -1,6 +1,6 @@
 import { redirect, notFound } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
-import { getAttemptBreakdown } from './actions';
+import { getAttemptBreakdown } from '@/app/(dashboard)/student/assessments/[assessmentId]/exam/actions';
 import PageHeader from '@/components/ui/PageHeader';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import Badge from '@/components/ui/Badge';

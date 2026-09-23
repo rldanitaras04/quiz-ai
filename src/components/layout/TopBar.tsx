@@ -7,6 +7,14 @@ import { useSupabase } from '@/lib/hooks';
 import { signOut } from '@/app/actions/auth';
 import type { UserRole } from '@/lib/types';
 import { ROLE_LABELS } from '@/lib/constants';
+import {
+  List,
+  Bell,
+  User,
+  SignOut,
+  CaretDown,
+  CaretUp,
+} from '@phosphor-icons/react';
 
 interface TopBarProps {
   title: string;
@@ -16,6 +24,8 @@ interface TopBarProps {
   onNavToggle: () => void;
   /** Whether the navigation is currently open (mobile) or expanded (desktop). */
   navExpanded: boolean;
+  /** Optional notification badge count. */
+  notificationCount?: number;
 }
 
 const roleBadgeColors: Record<UserRole, string> = {
@@ -31,6 +41,7 @@ export default function TopBar({
   avatarUrl,
   onNavToggle,
   navExpanded,
+  notificationCount,
 }: TopBarProps): JSX.Element {
   const router = useRouter();
   const supabase = useSupabase();
@@ -70,8 +81,6 @@ export default function TopBar({
     setMenuOpen(false);
     setLoggingOut(true);
     try {
-      // Server action clears the auth cookies; belt-and-braces client signOut
-      // clears any residual local session state.
       await signOut();
       await supabase.auth.signOut();
       router.push('/login');
@@ -91,27 +100,25 @@ export default function TopBar({
         aria-label="Toggle navigation"
         aria-expanded={navExpanded}
       >
-        <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <line x1="3" y1="6" x2="21" y2="6" />
-          <line x1="3" y1="12" x2="21" y2="12" />
-          <line x1="3" y1="18" x2="21" y2="18" />
-        </svg>
+        <List className="h-6 w-6" weight="regular" />
       </button>
 
       <h1 className="text-lg font-semibold text-[var(--color-foreground)] truncate">{title}</h1>
 
       <div className="ml-auto flex items-center">
-        {/* Notifications bell → shared notifications page */}
+        {/* Notifications bell with badge */}
         <Link
           href="/notifications"
-          className="p-2 rounded-[var(--radius-md)] text-[var(--color-muted)] hover:text-[var(--color-foreground)] hover:bg-[var(--color-surface-hover)] transition-colors"
-          aria-label="Notifications"
+          className="relative p-2 rounded-[var(--radius-md)] text-[var(--color-muted)] hover:text-[var(--color-foreground)] hover:bg-[var(--color-surface-hover)] transition-colors"
+          aria-label={`Notifications${notificationCount ? ` (${notificationCount} unread)` : ''}`}
           title="Notifications"
         >
-          <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9" />
-            <path d="M13.73 21a2 2 0 01-3.46 0" />
-          </svg>
+          <Bell className="h-5 w-5" weight="regular" />
+          {notificationCount != null && notificationCount > 0 && (
+            <span className="absolute -top-0.5 -right-0.5 flex items-center justify-center min-w-[18px] h-[18px] px-1 text-[10px] font-bold text-white bg-[var(--color-danger)] rounded-full">
+              {notificationCount > 99 ? '99+' : notificationCount}
+            </span>
+          )}
         </Link>
 
         {/* Vertical divider */}
@@ -141,17 +148,11 @@ export default function TopBar({
             <span className="hidden md:block text-sm font-medium text-[var(--color-foreground)] truncate max-w-[120px]">
               {userName}
             </span>
-            <svg
-              className={`h-4 w-4 text-[var(--color-muted)] transition-transform ${menuOpen ? 'rotate-180' : ''}`}
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <polyline points="6 9 12 15 18 9" />
-            </svg>
+            {menuOpen ? (
+              <CaretUp className="h-4 w-4 text-[var(--color-muted)]" weight="regular" />
+            ) : (
+              <CaretDown className="h-4 w-4 text-[var(--color-muted)]" weight="regular" />
+            )}
           </button>
 
           {/* Dropdown */}
@@ -194,10 +195,7 @@ export default function TopBar({
                   onClick={() => setMenuOpen(false)}
                   className="flex items-center gap-3 px-4 py-2.5 text-sm text-[var(--color-foreground)] hover:bg-[var(--color-surface-hover)] transition-colors"
                 >
-                  <svg className="h-5 w-5 text-[var(--color-muted)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" />
-                    <circle cx="12" cy="7" r="4" />
-                  </svg>
+                  <User className="h-5 w-5 text-[var(--color-muted)]" weight="regular" />
                   Profile
                 </Link>
                 <button
@@ -206,11 +204,7 @@ export default function TopBar({
                   disabled={loggingOut}
                   className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-[var(--color-foreground)] hover:bg-[var(--color-surface-hover)] transition-colors disabled:opacity-60"
                 >
-                  <svg className="h-5 w-5 text-[var(--color-muted)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4" />
-                    <polyline points="16 17 21 12 16 7" />
-                    <line x1="21" y1="12" x2="9" y2="12" />
-                  </svg>
+                  <SignOut className="h-5 w-5 text-[var(--color-muted)]" weight="regular" />
                   {loggingOut ? 'Signing out…' : 'Logout'}
                 </button>
               </div>

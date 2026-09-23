@@ -228,6 +228,106 @@ export async function POST(request: Request) {
       });
     }
 
+    // ------------------------------------------------------------------
+    // create_test_student: Creates a ready-to-use test student account
+    // ------------------------------------------------------------------
+    if (action === 'create_test_student') {
+      const supabase = createAdminClient();
+      const email = 'student@test.com';
+      const password = 'Student123!';
+      const fullName = 'Test Student';
+
+      // Check if test student already exists
+      const { data: existingUsers } = await supabase.auth.admin.listUsers();
+      const existing = existingUsers?.users?.find((u) => u.email === email);
+      if (existing) {
+        return NextResponse.json({
+          success: true,
+          message: 'Test student already exists',
+          credentials: { email, password },
+          userId: existing.id,
+        });
+      }
+
+      // Create auth user
+      const { data: userData, error: createError } = await supabase.auth.admin.createUser({
+        email,
+        password,
+        email_confirm: true,
+        user_metadata: { full_name: fullName },
+      });
+
+      if (createError || !userData.user) {
+        return NextResponse.json({ error: createError?.message || 'User creation failed' }, { status: 500 });
+      }
+
+      const userId = userData.user.id;
+
+      // Create profile
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .insert({ id: userId, email, full_name: fullName, status: 'active' });
+
+      if (profileError) {
+        await supabase.auth.admin.deleteUser(userId);
+        return NextResponse.json({ error: profileError.message }, { status: 500 });
+      }
+
+      // Create student role
+      await supabase.from('user_roles').insert({ user_id: userId, role: 'student' });
+
+      // Get BSIT program and 2nd Year level
+      const [{ data: program }, { data: yearLevel }] = await Promise.all([
+        supabase.from('programs').select('id').eq('code', 'BSIT').maybeSingle(),
+        supabase.from('year_levels').select('id').eq('name', '2nd Year').maybeSingle(),
+      ]);
+
+      // Get or create a section
+      let sectionId = null;
+      if (program && yearLevel) {
+        const { data: section } = await supabase
+          .from('sections')
+          .select('id')
+          .eq('program_id', program.id)
+          .eq('year_level_id', yearLevel.id)
+          .maybeSingle();
+        sectionId = section?.id ?? null;
+      }
+
+      // Create student profile
+      await supabase.from('student_profiles').insert({
+        user_id: userId,
+        student_number: '2024-TEST-001',
+        program_id: program?.id ?? null,
+        year_level_id: yearLevel?.id ?? null,
+        section_id: sectionId,
+        verification_status: 'verified',
+      });
+
+      // Enroll in all active subject offerings for OOP1
+      const { data: offerings } = await supabase
+        .from('subject_offerings')
+        .select('id')
+        .eq('status', 'active');
+
+      if (offerings && offerings.length > 0) {
+        const enrollments = offerings.map((o) => ({
+          subject_offering_id: o.id,
+          student_id: userId,
+          status: 'enrolled' as const,
+          enrolled_at: new Date().toISOString(),
+        }));
+        await supabase.from('enrollments').insert(enrollments);
+      }
+
+      return NextResponse.json({
+        success: true,
+        message: 'Test student created successfully',
+        credentials: { email, password },
+        userId,
+      });
+    }
+
     return NextResponse.json({ error: 'Unknown action' }, { status: 400 });
   } catch (error) {
     return NextResponse.json(

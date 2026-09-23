@@ -36,6 +36,7 @@ interface GeneratedQuestionPayload {
   choices?: GeneratedChoicePayload[];
   canonicalAnswer?: string;
   canonical_answer?: string;
+  sourceChunkIds?: string[];
 }
 
 /** Convert the AI API's GeneratedQuestion shape to the wizard's DraftQuestion shape. */
@@ -67,6 +68,7 @@ function mapGeneratedQuestion(raw: GeneratedQuestionPayload, position: number): 
       is_correct: c.isCorrect ?? c.is_correct ?? false,
     })),
     canonical_answer: raw.canonicalAnswer ?? raw.canonical_answer,
+    sourceChunkIds: raw.sourceChunkIds ?? [],
   };
 }
 import type { WizardState } from '@/app/(dashboard)/faculty/subjects/[offeringId]/assessments/new/page';
@@ -95,6 +97,7 @@ export default function StepGenerate({
   ]);
   const [currentPhase, setCurrentPhase] = useState(-1);
   const [generationError, setGenerationError] = useState<string | null>(null);
+  const [generationProgress, setGenerationProgress] = useState({ current: 0, total: 0 });
 
   const updatePhase = useCallback(
     (index: number, status: GenerationPhase['status']) => {
@@ -166,6 +169,7 @@ export default function StepGenerate({
       // Generate questions for each type via the AI API
       const allGeneratedQuestions: DraftQuestion[] = [];
       const errors: string[] = [];
+      let questionIndex = 0;
 
       for (const questionType of state.questionTypes) {
         const count = state.countPerType[questionType] || 0;
@@ -178,6 +182,8 @@ export default function StepGenerate({
         for (let i = 0; i < count; i++) {
           const difficulty = difficulties[i % difficulties.length];
           const bloomLevel = blooms[i % blooms.length];
+          questionIndex++;
+          setGenerationProgress({ current: questionIndex, total: totalQ });
 
           try {
             const response = await fetch('/api/ai/generate', {
@@ -335,6 +341,29 @@ export default function StepGenerate({
           </div>
         ))}
       </div>
+
+      {/* Progress bar during AI generation */}
+      {state.isGenerating && generationProgress.total > 0 && (
+        <div className="space-y-2">
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-[var(--color-foreground)] font-medium">
+              Generating questions...
+            </span>
+            <span className="text-[var(--color-muted)]">
+              {generationProgress.current} / {generationProgress.total}
+            </span>
+          </div>
+          <div className="w-full h-2.5 bg-[var(--color-border)] rounded-full overflow-hidden">
+            <div
+              className="h-full bg-[var(--color-primary)] rounded-full transition-all duration-300 ease-out"
+              style={{ width: `${(generationProgress.current / generationProgress.total) * 100}%` }}
+            />
+          </div>
+          <p className="text-xs text-[var(--color-muted)]">
+            {Math.round((generationProgress.current / generationProgress.total) * 100)}% complete
+          </p>
+        </div>
+      )}
 
       {generationError && (
         <div className="p-4 rounded-[var(--radius-md)] bg-[var(--color-danger-light)] border border-[var(--color-danger)]/20">

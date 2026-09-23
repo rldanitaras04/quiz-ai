@@ -28,6 +28,7 @@ export default async function AIConfigPage() {
 
   const openaiConfigured = !!process.env.OPENAI_API_KEY;
   const groqConfigured = !!process.env.GROQ_API_KEY;
+  const huggingfaceConfigured = !!process.env.HUGGINGFACE_API_KEY;
 
   return (
     <div>
@@ -55,9 +56,24 @@ export default async function AIConfigPage() {
             <div className="flex items-center justify-between p-3 rounded-lg border border-[var(--color-border)]">
               <div>
                 <p className="text-sm font-medium text-[var(--color-foreground)]">Groq</p>
-                <p className="text-xs text-[var(--color-muted)]">llama-3.3-70b-versatile for generation</p>
+                <p className="text-xs text-[var(--color-muted)]">openai/gpt-oss-120b for generation</p>
               </div>
               {groqConfigured ? (
+                <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-[var(--color-success-light)] text-[var(--color-success)]">
+                  Configured
+                </span>
+              ) : (
+                <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-[var(--color-surface-hover)] text-[var(--color-muted)]">
+                  Not configured
+                </span>
+              )}
+            </div>
+            <div className="flex items-center justify-between p-3 rounded-lg border border-[var(--color-border)]">
+              <div>
+                <p className="text-sm font-medium text-[var(--color-foreground)]">Hugging Face</p>
+                <p className="text-xs text-[var(--color-muted)]">all-MiniLM-L6-v2 for embeddings (free)</p>
+              </div>
+              {huggingfaceConfigured ? (
                 <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-[var(--color-success-light)] text-[var(--color-success)]">
                   Configured
                 </span>
@@ -81,6 +97,12 @@ export default async function AIConfigPage() {
               <p className="text-sm text-[var(--color-muted)]">Active Provider</p>
               <p className="text-sm font-medium text-[var(--color-foreground)]">
                 {groqConfigured ? 'Groq (preferred)' : openaiConfigured ? 'OpenAI' : 'None configured'}
+              </p>
+            </div>
+            <div>
+              <p className="text-sm text-[var(--color-muted)]">Embedding Provider</p>
+              <p className="text-sm font-medium text-[var(--color-foreground)]">
+                {huggingfaceConfigured ? 'Hugging Face (free)' : openaiConfigured ? 'OpenAI' : 'None configured'}
               </p>
             </div>
           </CardContent>

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, type JSX } from 'react';
+import { useState, useEffect, type JSX } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import Button from '@/components/ui/Button';
@@ -20,14 +20,19 @@ import {
 } from '@/lib/constants';
 import {
   addQuestion,
+  createNewVersion,
   deleteQuestion,
   publishAssessment,
   updateAssessment,
   updateQuestion,
+  getSourceForQuestion,
   type AssessmentDetail,
   type AssessmentDetailQuestion,
+  type QuestionSourceInfo,
 } from '@/app/(dashboard)/faculty/subjects/[offeringId]/assessments/actions';
-import type { DraftQuestion, DraftQuestionChoice } from '@/lib/types';
+import { getTopicsForOffering } from '@/app/(dashboard)/faculty/subjects/[offeringId]/topics/actions';
+import { saveAssessmentQuestionToBank } from '@/app/(dashboard)/faculty/subjects/[offeringId]/question-bank/actions';
+import type { DraftQuestion, DraftQuestionChoice, Topic } from '@/lib/types';
 
 interface AssessmentDetailClientProps {
   detail: AssessmentDetail;
@@ -84,6 +89,8 @@ function toDraft(question: AssessmentDetailQuestion, versionId: string): DraftQu
     generation_metadata: null,
     created_at: '',
     updated_at: '',
+    topic_id: (question as any).topicId ?? null,
+    topic_title: (question as any).topicTitle ?? undefined,
     question_choices: question.choices.map((choice, index) => ({
       id: choice.id,
       question_id: question.id,
@@ -138,7 +145,26 @@ export default function AssessmentDetailClient({
   const [instructions, setInstructions] = useState(detail.instructions ?? '');
   const [savingDetails, setSavingDetails] = useState(false);
   const [publishing, setPublishing] = useState(false);
+  const [creatingVersion, setCreatingVersion] = useState(false);
 
+  const [sourceModalOpen, setSourceModalOpen] = useState(false);
+  const [sourceQuestionText, setSourceQuestionText] = useState('');
+  const [sourceInfo, setSourceInfo] = useState<QuestionSourceInfo[]>([]);
+  const [loadingSource, setLoadingSource] = useState(false);
+  const [topics, setTopics] = useState<Topic[]>([]);
+  const [savingToBankId, setSavingToBankId] = useState<string | null>(null);
+
+  // Load topics for picker and bank save
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const t = await getTopicsForOffering(detail.subjectOfferingId);
+        if (!cancelled) setTopics(t);
+      } catch { /* ignore if topics table missing */ }
+    })();
+    return () => { cancelled = true; };
+  }, [detail.subjectOfferingId]);
   const versionId = detail.version?.id ?? '';
   const statusLabel =
     ASSESSMENT_STATUS_LABELS[detail.status as keyof typeof ASSESSMENT_STATUS_LABELS] ??
@@ -189,6 +215,7 @@ export default function AssessmentDetailClient({
       difficulty: draft.difficulty,
       bloom_level: draft.bloom_level,
       points: draft.points,
+      topic_id: (draft as any).topic_id ?? null,
       // An empty list clears choices when a question switches to identification.
       choices: isMultipleChoice ? filledChoices.map(choicePayload) : [],
       correct_choice_key: isMultipleChoice
@@ -297,6 +324,66 @@ export default function AssessmentDetailClient({
     }
   };
 
+  const handleCreateNewVersion = async () => {
+    const confirmed = await confirmAction({
+      title: 'Create a new version?',
+      text: 'This creates a blank draft version you can fill with new questions. Existing deployments are unaffected.',
+      confirmText: 'Create version',
+    });
+    if (!confirmed) return;
+
+    setCreatingVersion(true);
+    try {
+      const result = await createNewVersion(detail.id);
+      if (!result.success) {
+        throw new Error(result.error);
+      }
+      notifySuccess('New version created', 'You can now add or generate questions for this version.');
+      router.refresh();
+    } catch (error) {
+      notifyError(
+        'Could not create new version',
+        error instanceof Error ? error.message : 'Unknown error'
+      );
+    } finally {
+      setCreatingVersion(false);
+    }
+  };
+
+  const handleViewSource = async (question: AssessmentDetailQuestion) => {
+    setSourceModalOpen(true);
+    setSourceQuestionText(question.question_text);
+    setSourceInfo([]);
+    setLoadingSource(true);
+
+    const result = await getSourceForQuestion(question.id);
+    setLoadingSource(false);
+
+    if (result.error) {
+      notifyError('Failed to load source', result.error);
+    } else {
+      setSourceInfo(result.data ?? []);
+    }
+  };
+
+  const handleSaveToBank = async (question: AssessmentDetailQuestion) => {
+    const confirmed = await confirmAction({
+      title: 'Save to question bank?',
+      text: `Add "${question.question_text.slice(0, 80)}..." to this subject's reusable pool? It will be categorized by topic.`,
+      confirmText: 'Save to bank',
+    });
+    if (!confirmed) return;
+    setSavingToBankId(question.id);
+    try {
+      const res = await saveAssessmentQuestionToBank(question.id);
+      notifySuccess('Saved to question bank', 'Reusable from the Question Bank tab, grouped by topic.');
+    } catch (e) {
+      notifyError('Could not save to bank', e instanceof Error ? e.message : 'Unknown error');
+    } finally {
+      setSavingToBankId(null);
+    }
+  };
+
   const summary: { label: string; value: string }[] = [
     { label: 'Status', value: statusLabel },
     { label: 'Version', value: detail.version ? `v${detail.version.versionNumber}` : '—' },
@@ -340,6 +427,16 @@ export default function AssessmentDetailClient({
                 Deploy
               </Button>
             </Link>
+            {detail.questionsLocked && (
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => void handleCreateNewVersion()}
+                loading={creatingVersion}
+              >
+                New version
+              </Button>
+            )}
           </div>
         </CardHeader>
 
@@ -370,6 +467,103 @@ export default function AssessmentDetailClient({
         </CardContent>
       </Card>
 
+      {/* Version history */}
+      {detail.versions.length > 0 && (
+        <Card>
+          <CardHeader>
+            <h2 className="text-base font-semibold text-[var(--color-foreground)]">
+              Version history ({detail.versions.length})
+            </h2>
+          </CardHeader>
+          <Table caption="All versions of this assessment">
+            <THead>
+              <TR>
+                <TH align="right">Version</TH>
+                <TH>Status</TH>
+                <TH align="right">Items</TH>
+                <TH align="right">Points</TH>
+              </TR>
+            </THead>
+            <TBody>
+              {detail.versions.map((v) => (
+                <TR
+                  key={v.id}
+                  className={v.id === detail.version?.id ? 'bg-[var(--color-primary-light)]' : ''}
+                >
+                  <TD numeric className="font-medium text-[var(--color-foreground)]">
+                    v{v.versionNumber}
+                    {v.id === detail.version?.id && (
+                      <span className="ml-1.5 text-xs text-[var(--color-primary)]">(current)</span>
+                    )}
+                  </TD>
+                  <TD>
+                    <Badge variant={v.status === 'published' ? 'success' : v.status === 'approved' ? 'info' : 'warning'}>
+                      {ASSESSMENT_STATUS_LABELS[v.status as keyof typeof ASSESSMENT_STATUS_LABELS] ?? v.status}
+                    </Badge>
+                  </TD>
+                  <TD numeric className="text-[var(--color-foreground)]">
+                    {v.totalItems}
+                  </TD>
+                  <TD numeric className="text-[var(--color-foreground)]">
+                    {v.totalPoints}
+                  </TD>
+                </TR>
+              ))}
+            </TBody>
+          </Table>
+        </Card>
+      )}
+
+      {/* Deployment status */}
+      {detail.deployments.length > 0 && (
+        <Card>
+          <CardHeader>
+            <h2 className="text-base font-semibold text-[var(--color-foreground)]">
+              Deployments ({detail.deployments.length})
+            </h2>
+          </CardHeader>
+          <Table caption="Deployments for this assessment">
+            <THead>
+              <TR>
+                <TH>Status</TH>
+                <TH align="right">Version</TH>
+                <TH align="right">Items</TH>
+                <TH align="right">Duration</TH>
+                <TH>Window</TH>
+                <TH align="right">Attempts</TH>
+              </TR>
+            </THead>
+            <TBody>
+              {detail.deployments.map((d) => (
+                <TR key={d.id}>
+                  <TD>
+                    <Badge variant={d.status === 'active' ? 'success' : d.status === 'scheduled' ? 'info' : 'default'}>
+                      {d.status}
+                    </Badge>
+                  </TD>
+                  <TD numeric className="text-[var(--color-foreground)]">
+                    v{d.version_number}
+                  </TD>
+                  <TD numeric className="text-[var(--color-foreground)]">
+                    {d.total_items}
+                  </TD>
+                  <TD numeric className="text-[var(--color-muted)]">
+                    {d.duration_minutes} min
+                  </TD>
+                  <TD className="text-xs text-[var(--color-muted)]">
+                    {new Date(d.opens_at).toLocaleString()}
+                    <span className="block">→ {new Date(d.closes_at).toLocaleString()}</span>
+                  </TD>
+                  <TD numeric className="text-[var(--color-muted)]">
+                    {d.attempt_limit}
+                  </TD>
+                </TR>
+              ))}
+            </TBody>
+          </Table>
+        </Card>
+      )}
+
       <Card>
         <CardHeader className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-base font-semibold text-[var(--color-foreground)]">
@@ -397,6 +591,7 @@ export default function AssessmentDetailClient({
               <TR>
                 <TH align="right">#</TH>
                 <TH>Question</TH>
+                <TH>Topic</TH>
                 <TH>Type</TH>
                 <TH>Difficulty</TH>
                 <TH>Bloom</TH>
@@ -408,6 +603,8 @@ export default function AssessmentDetailClient({
             <TBody>
               {detail.questions.map((question, index) => {
                 const answer = answerSummary(question);
+                const qTopic = (question as any).topicTitle as string | null;
+                const qTopicId = (question as any).topicId as string | null;
                 return (
                   <TR key={question.id} className="align-top">
                     <TD numeric className="text-[var(--color-muted)]">
@@ -417,10 +614,18 @@ export default function AssessmentDetailClient({
                       <span className="line-clamp-2 text-[var(--color-foreground)]">
                         {question.question_text}
                       </span>
-                      {question.is_ai_generated && (
-                        <Badge variant="info" className="mt-1">
-                          AI generated
-                        </Badge>
+                      <div className="flex gap-1 mt-1 flex-wrap">
+                        {question.is_ai_generated && (
+                          <Badge variant="info">AI</Badge>
+                        )}
+                        {qTopic ? <Badge variant="default">{qTopic}</Badge> : <Badge variant="outline">No topic</Badge>}
+                      </div>
+                    </TD>
+                    <TD className="text-[var(--color-muted)] whitespace-nowrap">
+                      {qTopic ? (
+                        <Badge variant="default" className="max-w-[120px] truncate">{qTopic}</Badge>
+                      ) : (
+                        <span className="text-xs text-[var(--color-muted-light)]">—</span>
                       )}
                     </TD>
                     <TD className="text-[var(--color-muted)]">
@@ -446,23 +651,42 @@ export default function AssessmentDetailClient({
                       {detail.questionsLocked ? (
                         <span className="text-sm text-[var(--color-muted)]">—</span>
                       ) : (
-                        <>
+                        <div className="flex flex-col items-end gap-1">
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => void handleViewSource(question)}
+                              className="text-xs font-medium text-[var(--color-muted)] hover:underline"
+                              title="View source material"
+                            >
+                              Source
+                            </button>
+                            <span className="text-[var(--color-border)]">|</span>
+                            <button
+                              type="button"
+                              onClick={() => openQuestion(question)}
+                              className="text-xs font-medium text-[var(--color-primary)] hover:underline"
+                            >
+                              Edit
+                            </button>
+                            <span className="text-[var(--color-border)]">|</span>
+                            <button
+                              type="button"
+                              onClick={() => void removeQuestion(question)}
+                              className="text-xs font-medium text-[var(--color-danger)] hover:underline"
+                            >
+                              Delete
+                            </button>
+                          </div>
                           <button
                             type="button"
-                            onClick={() => openQuestion(question)}
-                            className="text-sm font-medium text-[var(--color-primary)] hover:underline"
+                            onClick={() => void handleSaveToBank(question)}
+                            disabled={savingToBankId === question.id}
+                            className="text-xs font-medium text-[var(--color-primary)] hover:underline disabled:opacity-50"
                           >
-                            Edit
+                            {savingToBankId === question.id ? 'Saving…' : 'Save to Bank'}
                           </button>
-                          <span className="mx-2 text-[var(--color-border)]">|</span>
-                          <button
-                            type="button"
-                            onClick={() => void removeQuestion(question)}
-                            className="text-sm font-medium text-[var(--color-danger)] hover:underline"
-                          >
-                            Delete
-                          </button>
-                        </>
+                        </div>
                       )}
                     </TD>
                   </TR>
@@ -505,16 +729,31 @@ export default function AssessmentDetailClient({
         }
       >
         {draft && (
-          <QuestionEditor
-            question={draft}
-            index={0}
-            total={1}
-            onUpdate={(updates) => setDraft((current) => (current ? { ...current, ...updates } : current))}
-            onDelete={() => void handleEditorDelete()}
-            onNavigate={() => undefined}
-            deleteTitle="Delete this question?"
-            deleteText="The question and its choices are removed from this assessment."
-          />
+          <div className="space-y-4">
+            {topics.length > 0 && (
+              <div className="flex items-center gap-3 p-3 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-hover)]">
+                <label className="text-xs font-semibold uppercase tracking-wide text-[var(--color-muted)] whitespace-nowrap">Topic</label>
+                <select
+                  value={(draft as any).topic_id ?? ''}
+                  onChange={(e) => setDraft((cur) => cur ? ({ ...cur, topic_id: e.target.value || null } as any) : cur)}
+                  className="flex-1 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1.5 text-sm"
+                >
+                  <option value="">— Uncategorized —</option>
+                  {topics.map((t) => <option key={t.id} value={t.id}>{t.title}</option>)}
+                </select>
+              </div>
+            )}
+            <QuestionEditor
+              question={draft}
+              index={0}
+              total={1}
+              onUpdate={(updates) => setDraft((current) => (current ? { ...current, ...updates } : current))}
+              onDelete={() => void handleEditorDelete()}
+              onNavigate={() => undefined}
+              deleteTitle="Delete this question?"
+              deleteText="The question and its choices are removed from this assessment."
+            />
+          </div>
         )}
       </Modal>
 
@@ -561,6 +800,58 @@ export default function AssessmentDetailClient({
               className="w-full resize-none rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-foreground)] placeholder:text-[var(--color-muted-light)] transition-colors focus:border-[var(--color-primary)] focus:ring-2 focus:ring-[var(--color-focus-ring)] focus:outline-none"
             />
           </div>
+        </div>
+      </Modal>
+
+      {/* Source Material Modal */}
+      <Modal
+        open={sourceModalOpen}
+        onClose={() => setSourceModalOpen(false)}
+        title="Source Material"
+      >
+        <div className="space-y-4">
+          <div className="p-3 rounded-[var(--radius-md)] bg-[var(--color-surface-hover)]">
+            <p className="text-xs font-medium text-[var(--color-muted)] uppercase tracking-wide mb-1">Question</p>
+            <p className="text-sm text-[var(--color-foreground)] line-clamp-3">{sourceQuestionText}</p>
+          </div>
+
+          {loadingSource ? (
+            <div className="flex justify-center py-6">
+              <div className="h-6 w-6 animate-spin rounded-full border-2 border-[var(--color-primary)] border-t-transparent" />
+            </div>
+          ) : sourceInfo.length === 0 ? (
+            <div className="text-center py-6">
+              <p className="text-sm text-[var(--color-muted)]">No source material linked to this question.</p>
+              <p className="text-xs text-[var(--color-muted)] mt-1">This may be a manually created question.</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <p className="text-xs font-medium text-[var(--color-muted)] uppercase tracking-wide">
+                {sourceInfo.length} source chunk{sourceInfo.length !== 1 ? 's' : ''} linked
+              </p>
+              {sourceInfo.map((source, idx) => (
+                <div
+                  key={source.source_chunk_id}
+                  className="p-3 rounded-[var(--radius-md)] border border-[var(--color-border)]"
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-medium text-[var(--color-primary)]">
+                      {source.source_material_title}
+                      {source.is_primary && (
+                        <span className="ml-1 text-[var(--color-muted)]">(primary)</span>
+                      )}
+                    </span>
+                    <span className="text-xs text-[var(--color-muted)]">
+                      Relevance: {(source.relevance_score * 100).toFixed(0)}%
+                    </span>
+                  </div>
+                  <p className="text-xs text-[var(--color-foreground)] line-clamp-4 whitespace-pre-wrap">
+                    {source.chunk_content}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </Modal>
     </div>

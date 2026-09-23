@@ -5,44 +5,52 @@ import type {
   EmbeddingResult,
   SimilarityCheckResult,
 } from '@/lib/ai/types';
-import { generateQuestions as groqGenerate, generateEmbedding as groqEmbedding } from '@/lib/ai/providers/groq';
+import { generateQuestions as groqGenerate } from '@/lib/ai/providers/groq';
 import { generateQuestions as openaiGenerate, generateEmbedding as openaiEmbedding } from '@/lib/ai/providers/openai';
+import { generateEmbedding as hfEmbedding } from '@/lib/ai/providers/huggingface';
 import { chunkText, extractText } from '@/lib/ai/text-extraction';
 import { cosineSimilarity, findSimilarQuestions, detectDuplicateWithinAssessment } from '@/lib/ai/similarity';
 import { getSettings } from '@/lib/settings';
 
-type Provider = 'groq' | 'openai';
+type ChatProvider = 'groq' | 'openai';
 
-function getProvider(provider?: Provider) {
+function getChatProvider(provider?: ChatProvider) {
   const selected = provider || (process.env.GROQ_API_KEY ? 'groq' : 'openai');
 
   return {
     name: selected,
     generateQuestions: selected === 'groq' ? groqGenerate : openaiGenerate,
-    generateEmbedding: selected === 'groq' ? groqEmbedding : openaiEmbedding,
   };
+}
+
+// Prefer HuggingFace (free), fall back to OpenAI for embeddings
+async function getEmbeddingProvider() {
+  if (process.env.HUGGINGFACE_API_KEY) {
+    return { name: 'huggingface', generateEmbedding: hfEmbedding };
+  }
+  if (process.env.OPENAI_API_KEY) {
+    return { name: 'openai', generateEmbedding: openaiEmbedding };
+  }
+  throw new Error('No embedding provider configured. Set HUGGINGFACE_API_KEY or OPENAI_API_KEY.');
 }
 
 export async function generateQuestions(
   params: GenerateQuestionsParams,
-  provider?: Provider
+  provider?: ChatProvider
 ): Promise<GenerationResult> {
-  const p = getProvider(provider);
+  const p = getChatProvider(provider);
   return p.generateQuestions(params);
 }
 
-export async function generateEmbedding(text: string, provider?: Provider): Promise<EmbeddingResult> {
-  const p = getProvider(provider);
+export async function generateEmbedding(text: string): Promise<EmbeddingResult> {
+  const p = await getEmbeddingProvider();
   return p.generateEmbedding(text);
 }
 
-export async function generateEmbeddings(
-  texts: string[],
-  provider?: Provider
-): Promise<EmbeddingResult[]> {
+export async function generateEmbeddings(texts: string[]): Promise<EmbeddingResult[]> {
   const results: EmbeddingResult[] = [];
   for (const text of texts) {
-    const result = await generateEmbedding(text, provider);
+    const result = await generateEmbedding(text);
     results.push(result);
   }
   return results;
@@ -149,4 +157,3 @@ export async function extractAndStoreSource(
 }
 
 export { cosineSimilarity, findSimilarQuestions, detectDuplicateWithinAssessment };
-export type { Provider };

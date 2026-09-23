@@ -36,11 +36,57 @@ export function chunkText(
   return chunks.filter((chunk) => chunk.length > 0);
 }
 
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)
+    ),
+  ]);
+}
+
 export async function extractFromPDF(buffer: Buffer): Promise<string> {
-  const { PDFParse } = await import('pdf-parse');
-  const parser = new PDFParse({ data: new Uint8Array(buffer) });
-  const result = await parser.getText();
-  return normalizeText(result.text);
+  try {
+    const { PDFParse } = await import('pdf-parse');
+    const parser = new PDFParse({ data: new Uint8Array(buffer) });
+    const result = await withTimeout(parser.getText(), 30_000, 'pdf-parse getText');
+    await parser.destroy();
+    if (result.text && result.text.trim().length > 10) {
+      return normalizeText(result.text);
+    }
+  } catch {
+    // pdf-parse failed (likely worker issue) — fall through to raw extraction
+  }
+
+  // Fallback: extract readable text from the PDF binary using multiple strategies
+  const buf = buffer.toString('latin1');
+  const parts: string[] = [];
+
+  // Strategy 1: Extract text between BT/ET text operators (PDF text blocks)
+  const btEtMatches = buf.match(/BT[\s\S]*?ET/g) || [];
+  for (const block of btEtMatches) {
+    const strings = block.match(/\(([^)]+)\)/g) || [];
+    for (const s of strings) {
+      const cleaned = s.slice(1, -1)
+        .replace(/\\n/g, ' ')
+        .replace(/\\r/g, ' ')
+        .replace(/\\\(/g, '(')
+        .replace(/\\\)/g, ')')
+        .replace(/\\\\/g, '\\');
+      if (cleaned.trim().length > 0) parts.push(cleaned);
+    }
+  }
+
+  // Strategy 2: If nothing found, try broader string extraction
+  if (parts.length === 0) {
+    const allStrings = buf.match(/\(([^)]{3,})\)/g) || [];
+    for (const s of allStrings) {
+      const cleaned = s.slice(1, -1).replace(/\\\(/g, '(').replace(/\\\)/g, ')');
+      if (/[\x20-\x7E]{3,}/.test(cleaned)) parts.push(cleaned);
+    }
+  }
+
+  return normalizeText(parts.join(' '));
 }
 
 export async function extractFromDOCX(buffer: Buffer): Promise<string> {

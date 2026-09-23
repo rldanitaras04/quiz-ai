@@ -26,7 +26,9 @@ export default async function AssessmentDetailPage({ params }: Props) {
       title,
       assessment_type,
       status,
-      subject:subjects(id, code, title)
+      subject_offering:subject_offerings(
+        subject:subjects(id, code, title)
+      )
     `)
     .eq('id', assessmentId)
     .single();
@@ -36,8 +38,9 @@ export default async function AssessmentDetailPage({ params }: Props) {
   const a = assessment as Record<string, unknown> & {
     title?: string;
     assessment_type?: string;
-    subject?: { id?: string; code?: string; title?: string };
+    subject_offering?: { subject?: { id?: string; code?: string; title?: string } };
   };
+  const subject = a.subject_offering?.subject;
 
   const { data: enrollments } = await supabase
     .from('enrollments')
@@ -142,7 +145,7 @@ export default async function AssessmentDetailPage({ params }: Props) {
           { label: a.title ?? '' },
         ]}
         title={a.title ?? ''}
-        description={`${a.subject?.code} - ${a.subject?.title}`}
+        description={`${subject?.code} - ${subject?.title}`}
         actions={
           resumableDeployment && resumeAttemptId ? (
             <Link
@@ -172,7 +175,7 @@ export default async function AssessmentDetailPage({ params }: Props) {
               </div>
               <div className="flex justify-between text-sm">
                 <span className="text-[var(--color-muted)]">Subject</span>
-                <span className="font-medium">{a.subject?.code}</span>
+                <span className="font-medium">{subject?.code}</span>
               </div>
             </CardContent>
           </Card>

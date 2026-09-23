@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/admin';
 import { notifyOfferingStudents } from '@/lib/notifications';
 import { recordAuditLog } from '@/lib/audit';
 import {
@@ -143,6 +144,69 @@ export async function getSourceMaterials(offeringId: string) {
   return data || [];
 }
 
+export async function retrySourceMaterial(sourceId: string) {
+  const { supabase, userId } = await requireUser();
+
+  const { data: source, error: fetchError } = await supabase
+    .from('source_materials')
+    .select('id, subject_offering_id, storage_path, mime_type, processing_status')
+    .eq('id', sourceId)
+    .single();
+
+  if (fetchError || !source) throw new Error('Source material not found');
+  if (source.processing_status !== 'failed') throw new Error('Only failed materials can be retried');
+
+  if (!(await isFacultyOfOffering(supabase, userId, source.subject_offering_id))) {
+    throw new Error('Not authorized');
+  }
+
+  if (!source.storage_path) throw new Error('No storage path found');
+
+  const { data: fileData, error: downloadError } = await supabase.storage
+    .from('source-materials')
+    .download(source.storage_path);
+
+  if (downloadError || !fileData) throw new Error('Failed to download file from storage');
+
+  const arrayBuffer = await fileData.arrayBuffer();
+  const buffer = Buffer.from(arrayBuffer);
+
+  const { extractAndStoreSource } = await import('@/lib/ai');
+  extractAndStoreSource(source.id, buffer, source.mime_type).catch((error) => {
+    console.error('Background reprocessing error:', error);
+  });
+
+  return { success: true };
+}
+
+export async function deleteSourceMaterial(sourceId: string) {
+  const { supabase, userId } = await requireUser();
+
+  const { data: source, error: fetchError } = await supabase
+    .from('source_materials')
+    .select('id, subject_offering_id, storage_path')
+    .eq('id', sourceId)
+    .single();
+
+  if (fetchError || !source) throw new Error('Source material not found');
+
+  if (!(await isFacultyOfOffering(supabase, userId, source.subject_offering_id))) {
+    throw new Error('Not authorized');
+  }
+
+  if (source.storage_path) {
+    await supabase.storage.from('source-materials').remove([source.storage_path]);
+  }
+
+  const { error } = await supabase
+    .from('source_materials')
+    .delete()
+    .eq('id', sourceId);
+
+  if (error) throw new Error(error.message);
+  return { success: true };
+}
+
 // ---------------------------------------------------------------------------
 // Detail loader
 // ---------------------------------------------------------------------------
@@ -162,6 +226,8 @@ export interface AssessmentDetailQuestion {
   bloom_level: BloomLevel;
   points: number;
   is_ai_generated: boolean;
+  topicId: string | null;
+  topicTitle: string | null;
   choices: AssessmentDetailChoice[];
   correctChoiceId: string | null;
   canonicalAnswer: string | null;
@@ -187,6 +253,16 @@ export interface AssessmentDetail {
     totalPoints: number;
   } | null;
   questions: AssessmentDetailQuestion[];
+  /** All versions of this assessment (newest first). */
+  versions: {
+    id: string;
+    versionNumber: number;
+    status: string;
+    totalItems: number;
+    totalPoints: number;
+  }[];
+  /** Deployments attached to this assessment. */
+  deployments: AssessmentDeploymentSummary[];
 }
 
 /**
@@ -233,7 +309,7 @@ export async function getAssessmentDetail(
     const { data: questionRows } = await supabase
       .from('questions')
       .select(`
-        id, position, question_type, question_text, difficulty, bloom_level, points, is_ai_generated,
+        id, position, question_type, question_text, difficulty, bloom_level, points, is_ai_generated, topic_id, topic:topics(id, title),
         question_choices(id, choice_key, choice_text, position),
         answer_key:answer_keys(correct_choice_id, canonical_answer, accepted_answers)
       `)
@@ -267,6 +343,7 @@ export async function getAssessmentDetail(
           choice_text: choice.choice_text,
         }));
 
+      const topic = (row.topic as { id: string; title: string } | null) ?? null;
       return {
         id: row.id as string,
         position: (row.position as number | null) ?? null,
@@ -276,6 +353,8 @@ export async function getAssessmentDetail(
         bloom_level: row.bloom_level as BloomLevel,
         points: (row.points as number) ?? 0,
         is_ai_generated: Boolean(row.is_ai_generated),
+        topicId: (row.topic_id as string | null) ?? topic?.id ?? null,
+        topicTitle: topic?.title ?? null,
         choices,
         correctChoiceId: answerKey?.correct_choice_id ?? null,
         canonicalAnswer: answerKey?.canonical_answer ?? null,
@@ -283,6 +362,55 @@ export async function getAssessmentDetail(
       };
     });
   }
+
+  // Fetch all versions for the version history display.
+  const { data: versionRows } = await supabase
+    .from('assessment_versions')
+    .select('id, version_number, status, total_items, total_points')
+    .eq('assessment_id', assessmentId)
+    .order('version_number', { ascending: false });
+
+  const allVersions = (versionRows ?? []).map((v: Record<string, unknown>) => ({
+    id: v.id as string,
+    versionNumber: v.version_number as number,
+    status: v.status as string,
+    totalItems: (v.total_items as number) ?? 0,
+    totalPoints: (v.total_points as number) ?? 0,
+  }));
+
+  // Fetch deployments for the deploy status display.
+  const { data: deploymentRows } = await supabase
+    .from('assessment_deployments')
+    .select(`
+      id,
+      status,
+      opens_at,
+      closes_at,
+      duration_minutes,
+      attempt_limit,
+      assessment_version:assessment_versions(version_number, total_items, total_points)
+    `)
+    .eq('assessment_id', assessmentId)
+    .order('created_at', { ascending: false });
+
+  const assessmentDeployments: AssessmentDeploymentSummary[] = (deploymentRows ?? []).map(
+    (d: Record<string, unknown>) => {
+      const ver = d.assessment_version as
+        | { version_number?: number; total_items?: number; total_points?: number }
+        | null;
+      return {
+        id: d.id as string,
+        status: d.status as string,
+        opens_at: d.opens_at as string,
+        closes_at: d.closes_at as string,
+        duration_minutes: d.duration_minutes as number,
+        attempt_limit: d.attempt_limit as number,
+        version_number: ver?.version_number ?? 0,
+        total_items: ver?.total_items ?? 0,
+        total_points: ver?.total_points ?? 0,
+      };
+    }
+  );
 
   return {
     id: assessment.id,
@@ -293,6 +421,8 @@ export async function getAssessmentDetail(
     questionsLocked,
     version,
     questions,
+    versions: allVersions,
+    deployments: assessmentDeployments,
   };
 }
 
@@ -442,6 +572,7 @@ export async function addQuestion(
     difficulty: Difficulty;
     bloom_level: BloomLevel;
     points: number;
+    topic_id?: string | null;
     choices?: { choice_key: string; choice_text: string }[];
     canonical_answer?: string;
     accepted_answers?: string[];
@@ -487,6 +618,7 @@ export async function addQuestion(
       status: 'active',
       created_by: userId,
       is_ai_generated: false,
+      topic_id: data.topic_id ?? null,
     })
     .select()
     .single();
@@ -551,6 +683,7 @@ export async function updateQuestion(
     difficulty?: Difficulty;
     bloom_level?: BloomLevel;
     points?: number;
+    topic_id?: string | null;
     choices?: { id?: string; choice_key: string; choice_text: string }[];
     correct_choice_key?: string;
     canonical_answer?: string;
@@ -578,6 +711,7 @@ export async function updateQuestion(
   if (data.difficulty !== undefined) updateFields.difficulty = data.difficulty;
   if (data.bloom_level !== undefined) updateFields.bloom_level = data.bloom_level;
   if (data.points !== undefined) updateFields.points = data.points;
+  if (data.topic_id !== undefined) updateFields.topic_id = data.topic_id;
 
   if (Object.keys(updateFields).length > 1) {
     const { data: updated, error } = await supabase
@@ -814,9 +948,11 @@ export async function saveGeneratedQuestions(
     bloom_level: BloomLevel;
     points: number;
     is_ai_generated?: boolean;
+    topic_id?: string | null;
     question_choices?: { choice_key: string; choice_text: string; is_correct?: boolean }[];
     canonical_answer?: string;
     accepted_answers?: string[];
+    sourceChunkIds?: string[];
   }[]
 ): Promise<{ success: boolean; saved?: number; error?: string }> {
   if (!assessmentId) return { success: false, error: 'Missing assessment' };
@@ -855,6 +991,7 @@ export async function saveGeneratedQuestions(
         position: i + 1,
         status: 'active',
         is_ai_generated: q.is_ai_generated ?? false,
+        topic_id: q.topic_id ?? null,
         created_by: userId,
       })
       .select('id')
@@ -895,6 +1032,17 @@ export async function saveGeneratedQuestions(
         accepted_answers: q.accepted_answers ?? [],
         updated_by: userId,
       });
+    }
+
+    // Persist source traceability: link question to source chunks
+    if (q.sourceChunkIds && q.sourceChunkIds.length > 0) {
+      const sourceLinks = q.sourceChunkIds.map((chunkId, idx) => ({
+        question_id: question.id,
+        source_chunk_id: chunkId,
+        relevance_score: 1.0 - (idx * 0.1), // First chunk is most relevant
+        is_primary: idx === 0,
+      }));
+      await supabase.from('question_sources').insert(sourceLinks);
     }
 
     saved++;
@@ -953,4 +1101,231 @@ export async function triggerGeneration(
   });
 
   return job;
+}
+
+// ---------------------------------------------------------------------------
+// Version management
+// ---------------------------------------------------------------------------
+
+/**
+ * Creates a new draft version of an assessment. Used when the current version
+ * is published or deployed and faculty want to revise questions without
+ * affecting existing deployments.
+ *
+ * The new version inherits the previous version's instructions and generation
+ * config but starts with zero questions. The assessment status resets to
+ * `draft` so it flows through the wizard again.
+ */
+export async function createNewVersion(
+  assessmentId: string
+): Promise<{ success: boolean; versionId?: string; error?: string }> {
+  try {
+    const { supabase, userId } = await requireUser();
+
+    const assessment = await getFacultyAssessment(supabase, userId, assessmentId);
+    if (!assessment) {
+      return { success: false, error: 'Assessment not found or you are not assigned to its offering' };
+    }
+
+    // Determine the next version number.
+    const { data: existingVersions } = await supabase
+      .from('assessment_versions')
+      .select('version_number')
+      .eq('assessment_id', assessmentId)
+      .order('version_number', { ascending: false })
+      .limit(1);
+
+    const nextVersionNumber = (existingVersions?.[0]?.version_number ?? 0) + 1;
+
+    // Copy instructions and generation config from the current version.
+    let instructions: string | null = null;
+    let generationConfig: Record<string, unknown> | null = null;
+
+    if (assessment.currentVersionId) {
+      const { data: currentVersion } = await supabase
+        .from('assessment_versions')
+        .select('instructions, generation_config')
+        .eq('id', assessment.currentVersionId)
+        .maybeSingle();
+
+      instructions = currentVersion?.instructions ?? null;
+      generationConfig = (currentVersion?.generation_config as Record<string, unknown>) ?? null;
+    }
+
+    // Create the new version.
+    const { data: newVersion, error: verErr } = await supabase
+      .from('assessment_versions')
+      .insert({
+        assessment_id: assessmentId,
+        version_number: nextVersionNumber,
+        status: 'draft',
+        instructions,
+        generation_config: generationConfig,
+        total_items: 0,
+        total_points: 0,
+      })
+      .select('id')
+      .single();
+
+    if (verErr || !newVersion) {
+      return { success: false, error: verErr?.message ?? 'Failed to create version' };
+    }
+
+    // Point the assessment at the new version and reset status to draft.
+    const { error: updateErr } = await supabase
+      .from('assessments')
+      .update({
+        current_version_id: newVersion.id,
+        status: 'draft',
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', assessmentId);
+
+    if (updateErr) {
+      return { success: false, error: updateErr.message };
+    }
+
+    await recordAuditLog({
+      actorUserId: userId,
+      action: 'create',
+      entityType: 'assessment_version',
+      entityId: newVersion.id,
+      metadata: {
+        assessment_id: assessmentId,
+        version_number: nextVersionNumber,
+        copied_from: assessment.currentVersionId,
+      },
+    });
+
+    revalidateAssessment(assessment.subjectOfferingId, assessmentId);
+    return { success: true, versionId: newVersion.id };
+  } catch {
+    return { success: false, error: 'Failed to create new version' };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Deployment status for assessment detail
+// ---------------------------------------------------------------------------
+
+export interface AssessmentDeploymentSummary {
+  id: string;
+  status: string;
+  opens_at: string;
+  closes_at: string;
+  duration_minutes: number;
+  attempt_limit: number;
+  version_number: number;
+  total_items: number;
+  total_points: number;
+}
+
+/**
+ * Fetches deployments attached to an assessment, for display on the detail page.
+ */
+export async function getAssessmentDeployments(
+  assessmentId: string
+): Promise<AssessmentDeploymentSummary[]> {
+  const { supabase, userId } = await requireUser();
+
+  const assessment = await getFacultyAssessment(supabase, userId, assessmentId);
+  if (!assessment) return [];
+
+  const { data: deployments } = await supabase
+    .from('assessment_deployments')
+    .select(`
+      id,
+      status,
+      opens_at,
+      closes_at,
+      duration_minutes,
+      attempt_limit,
+      assessment_version:assessment_versions(version_number, total_items, total_points)
+    `)
+    .eq('assessment_id', assessmentId)
+    .order('created_at', { ascending: false });
+
+  return (deployments ?? []).map((d: Record<string, unknown>) => {
+    const version = d.assessment_version as
+      | { version_number?: number; total_items?: number; total_points?: number }
+      | null;
+    return {
+      id: d.id as string,
+      status: d.status as string,
+      opens_at: d.opens_at as string,
+      closes_at: d.closes_at as string,
+      duration_minutes: d.duration_minutes as number,
+      attempt_limit: d.attempt_limit as number,
+      version_number: version?.version_number ?? 0,
+      total_items: version?.total_items ?? 0,
+      total_points: version?.total_points ?? 0,
+    };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Source traceability
+// ---------------------------------------------------------------------------
+
+export interface QuestionSourceInfo {
+  question_id: string;
+  source_chunk_id: string;
+  source_material_id: string;
+  source_material_title: string;
+  chunk_content: string;
+  relevance_score: number;
+  is_primary: boolean;
+}
+
+/**
+ * Fetch source material references for a question. Faculty can view which
+ * source material and chunks grounded a particular question.
+ */
+export async function getSourceForQuestion(
+  questionId: string
+): Promise<{ data: QuestionSourceInfo[] | null; error?: string }> {
+  const { supabase, userId } = await requireUser();
+
+  // Verify the question belongs to an assessment the faculty owns
+  const assessment = await getFacultyAssessmentForQuestion(supabase, userId, questionId);
+  if (!assessment) return { data: null, error: 'Not authorized' };
+
+  const admin = createAdminClient();
+  const { data: sources, error: srcErr } = await admin
+    .from('question_sources')
+    .select(`
+      question_id,
+      source_chunk_id,
+      relevance_score,
+      is_primary,
+      source_chunks!inner (
+        id,
+        content,
+        source_material_id,
+        source_materials!inner (
+          id,
+          title
+        )
+      )
+    `)
+    .eq('question_id', questionId);
+
+  if (srcErr) return { data: null, error: srcErr.message };
+  if (!sources || sources.length === 0) return { data: [] };
+
+  const result: QuestionSourceInfo[] = sources.map((s: Record<string, unknown>) => {
+    const chunk = s.source_chunks as { content: string; source_material_id: string } | null;
+    const material = (s.source_chunks as Record<string, unknown>)?.source_materials as { id: string; title: string } | null;
+    return {
+      question_id: s.question_id as string,
+      source_chunk_id: s.source_chunk_id as string,
+      source_material_id: material?.id ?? '',
+      source_material_title: material?.title ?? 'Unknown',
+      chunk_content: chunk?.content ?? '',
+      relevance_score: s.relevance_score as number,
+      is_primary: s.is_primary as boolean,
+    };
+  });
+
+  return { data: result };
 }

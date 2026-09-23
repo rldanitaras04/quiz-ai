@@ -3,9 +3,11 @@
 import { useState, useCallback, type JSX } from 'react';
 import Button from '@/components/ui/Button';
 import Badge from '@/components/ui/Badge';
+import Modal from '@/components/ui/Modal';
 import QuestionNavigator from './QuestionNavigator';
 import QuestionEditor from './QuestionEditor';
-import type { DraftQuestion } from '@/lib/types';
+import StepQuestionBank from './StepQuestionBank';
+import type { DraftQuestion, Topic } from '@/lib/types';
 
 interface StepReviewProps {
   state: {
@@ -15,17 +17,27 @@ interface StepReviewProps {
   onUpdate: (updates: {
     generatedQuestions?: DraftQuestion[];
   }) => void;
+  onRegenerate?: () => void;
+  onSaveDraft?: () => void;
+  onSaveFinal?: () => void;
   offeringId: string;
   errors: Record<string, string>;
+  topics?: Topic[];
 }
 
 export default function StepReview({
   state,
   onUpdate,
+  onRegenerate,
+  onSaveDraft,
+  onSaveFinal,
   errors,
+  offeringId,
+  topics,
 }: StepReviewProps): JSX.Element {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [bankOpen, setBankOpen] = useState(false);
 
   const questions = state.generatedQuestions;
   const currentQuestion = questions[selectedIndex];
@@ -95,12 +107,29 @@ export default function StepReview({
             Review & Edit Questions
           </h2>
           <p className="text-sm text-[var(--color-muted)]">
-            No questions generated yet. Go back to generate questions.
+            No questions yet. Add manually or import from the question bank.
           </p>
         </div>
         {errors.review && (
           <p className="text-sm text-[var(--color-danger)]">{errors.review}</p>
         )}
+        <div className="flex gap-2">
+          <Button size="sm" variant="primary" onClick={handleAddQuestion}>Add question manually</Button>
+          <Button size="sm" variant="secondary" onClick={() => setBankOpen(true)}>Add from Question Bank</Button>
+        </div>
+        <Modal open={bankOpen} onClose={() => setBankOpen(false)} title="Import from Question Bank">
+          <StepQuestionBank
+            offeringId={offeringId}
+            topics={topics ?? []}
+            existingCount={questions.length}
+            onImport={(drafts) => {
+              const next = [...questions, ...drafts];
+              onUpdate({ generatedQuestions: next.map((q, i) => ({ ...q, position: i + 1 })) });
+              setBankOpen(false);
+              if (drafts.length > 0) setSelectedIndex(questions.length);
+            }}
+          />
+        </Modal>
       </div>
     );
   }
@@ -116,13 +145,23 @@ export default function StepReview({
             {questions.length} questions &middot; Review and edit before approving
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Badge variant="success">
             {questions.filter((q) => getQuestionStatus(q) === 'complete').length} complete
           </Badge>
           <Badge variant="warning">
             {questions.filter((q) => getQuestionStatus(q) === 'incomplete').length} incomplete
           </Badge>
+          <Button variant="secondary" size="sm" onClick={() => setBankOpen(true)}>Add from Bank</Button>
+          <Button variant="outline" size="sm" onClick={handleAddQuestion}>Add manually</Button>
+          {onRegenerate && (
+            <Button variant="outline" size="sm" onClick={onRegenerate}>
+              <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M15.312 11.424a5.5 5.5 0 01-9.201 2.466l-.311-.311h1.68a.75.75 0 000-1.5H4.598a.75.75 0 00-.75.75v3.634a.75.75 0 001.5 0v-1.34l.311.311a7 7 0 0011.712-3.138.75.75 0 00-1.449-.39zm1.23-8.424a5.5 5.5 0 00-9.201-2.466l-.311.311h1.68a.75.75 0 010 1.5H2.752a.75.75 0 01-.75-.75V4.356a.75.75 0 011.5 0v1.34l.311-.311A7 7 0 0014.263 8.78a.75.75 0 111.449.39z" clipRule="evenodd" />
+              </svg>
+              Regenerate
+            </Button>
+          )}
           <Button
             variant="outline"
             size="sm"
@@ -186,7 +225,25 @@ export default function StepReview({
         )}
 
         {/* Question editor */}
-        <div className="flex-1 min-w-0">
+        <div className="flex-1 min-w-0 space-y-4">
+          {currentQuestion && topics && topics.length > 0 && (
+            <div className="flex items-center gap-3 p-3 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-hover)]">
+              <label className="text-xs font-semibold uppercase tracking-wide text-[var(--color-muted)] whitespace-nowrap">Topic</label>
+              <select
+                value={(currentQuestion as any).topic_id ?? ''}
+                onChange={(e) => handleUpdateQuestion(selectedIndex, { topic_id: e.target.value || null, topic_title: topics.find(t => t.id === e.target.value)?.title } as any)}
+                className="flex-1 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1.5 text-sm"
+              >
+                <option value="">— Uncategorized —</option>
+                {topics.map((t) => (
+                  <option key={t.id} value={t.id}>{t.title}</option>
+                ))}
+              </select>
+              {(currentQuestion as any).topic_id && (
+                <Badge variant="info" className="hidden sm:inline">{topics.find(t => t.id === (currentQuestion as any).topic_id)?.title}</Badge>
+              )}
+            </div>
+          )}
           {currentQuestion && (
             <QuestionEditor
               question={currentQuestion}
@@ -201,6 +258,46 @@ export default function StepReview({
                 }
               }}
             />
+          )}
+        </div>
+      </div>
+
+      <Modal open={bankOpen} onClose={() => setBankOpen(false)} title="Import from Question Bank">
+        <StepQuestionBank
+          offeringId={offeringId}
+          topics={topics ?? []}
+          existingCount={questions.length}
+          onImport={(drafts) => {
+            const next = [...questions, ...drafts];
+            onUpdate({ generatedQuestions: next.map((q, i) => ({ ...q, position: i + 1 })) });
+            setBankOpen(false);
+            if (drafts.length > 0) setSelectedIndex(questions.length);
+          }}
+        />
+      </Modal>
+
+      {/* Action buttons */}
+      <div className="flex items-center justify-between pt-4 border-t border-[var(--color-border)]">
+        <p className="text-sm text-[var(--color-muted)]">
+          Save your progress or finalize for approval.
+        </p>
+        <div className="flex gap-3">
+          {onSaveDraft && (
+            <Button variant="outline" onClick={onSaveDraft}>
+              <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
+                <path d="M2.75 14A1.75 1.75 0 011 12.25v-2.5a.75.75 0 011.5 0v2.5c0 .138.112.25.25.25h12.5a.25.25 0 00.25-.25v-2.5a.75.75 0 011.5 0v2.5A1.75 1.75 0 0115.25 14H2.75z" />
+                <path fillRule="evenodd" d="M3.5 6.75a.75.75 0 01.75-.75h8.5a.75.75 0 010 1.5h-8.5a.75.75 0 01-.75-.75zm.75 2.25a.75.75 0 000 1.5h5.5a.75.75 0 000-1.5h-5.5z" clipRule="evenodd" />
+              </svg>
+              Save as Draft
+            </Button>
+          )}
+          {onSaveFinal && (
+            <Button variant="primary" onClick={onSaveFinal}>
+              <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z" clipRule="evenodd" />
+              </svg>
+              Save as Final
+            </Button>
           )}
         </div>
       </div>

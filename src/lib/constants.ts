@@ -5,6 +5,7 @@ import type {
   BloomLevel,
   AssessmentStatus,
   AttemptStatus,
+  ExceptionType,
 } from '@/lib/types';
 
 // ============================================================================
@@ -107,6 +108,13 @@ export const ATTEMPT_STATUS_LABELS: Record<AttemptStatus, string> = {
   auto_submitted: 'Auto-Submitted',
   expired: 'Expired',
   invalidated: 'Invalidated',
+};
+
+export const EXCEPTION_TYPE_LABELS: Record<ExceptionType, string> = {
+  extended_time: 'Extended Time',
+  additional_attempt: 'Additional Attempt',
+  schedule_override: 'Schedule Override',
+  accessibility: 'Accessibility',
 };
 
 // ============================================================================

@@ -1,13 +1,19 @@
+'use client';
+
+import { useEffect, useState } from 'react';
 import { redirect } from 'next/navigation';
-import { createClient } from '@/lib/supabase/server';
+import { createClient } from '@/lib/supabase/client';
+import type { JSX } from 'react';
 import PageHeader from '@/components/ui/PageHeader';
 import { Card } from '@/components/ui/Card';
 import Badge from '@/components/ui/Badge';
 import EmptyState from '@/components/ui/EmptyState';
 import { Table, THead, TBody, TR, TH, TD } from '@/components/ui/Table';
-import SourceUpload from '@/components/sources/SourceUpload';
+import SourceUploadSimple from '@/components/sources/SourceUploadSimple';
 import { getSettings } from '@/lib/settings';
 import DeleteSourceButton from './DeleteSourceButton';
+import { FileText, Article, ClipboardText } from '@phosphor-icons/react';
+import { notifyError } from '@/components/ui/alerts';
 
 interface Props {
   params: Promise<{ offeringId: string }>;
@@ -37,32 +43,73 @@ function formatFileSize(bytes: number | null): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export default async function SourcesPage({ params }: Props) {
-  const { offeringId } = await params;
-  const supabase = await createClient();
+const TypeIcon = ({ sourceType }: { sourceType: 'file' | 'text' | 'url' | string }): JSX.Element => {
+  switch (sourceType) {
+    case 'file': return <FileText className="h-5 w-5 text-[var(--color-muted)]" weight="regular" />;
+    case 'text': return <Article className="h-5 w-5 text-[var(--color-muted)]" weight="regular" />;
+    case 'url': return <FileText className="h-5 w-5 text-[var(--color-muted)]" weight="regular" />;
+    default: return <FileText className="h-5 w-5 text-[var(--color-muted)]" weight="regular" />;
+  };
+};
 
-  const { data: { user }, error: authError } = await supabase.auth.getUser();
-  if (authError || !user) redirect('/login');
+export default function SourcesPage({ params }: Props) {
+  const [offeringId, setOfferingId] = useState<string>('');
+  const supabase = createClient();
+  const [sources, setSources] = useState<SourceMaterialRow[]>([]);
+  const [offering, setOffering] = useState<OfferingHeading | null>(null);
+  const [maxSizeMb, setMaxSizeMb] = useState(50);
+  const [loading, setLoading] = useState(true);
 
-  const { data: offering } = await supabase
-    .from('subject_offerings')
-    .select('id, subject:subjects(id, code, title), section:sections(id, name)')
-    .eq('id', offeringId)
-    .single();
+  useEffect(() => {
+    async function load() {
+      try {
+        const resolvedParams = await params;
+        const offeringIdValue = resolvedParams.offeringId;
+        setOfferingId(offeringIdValue);
 
-  if (!offering) redirect('/faculty/subjects');
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+          redirect('/login');
+          return;
+        }
 
-  const o = offering as unknown as OfferingHeading;
+        const { data: offeringData } = await supabase
+          .from('subject_offerings')
+          .select('id, subject:subjects(id, code, title), section:sections(id, name)')
+          .eq('id', offeringIdValue)
+          .single();
 
-  // Administrator-configured upload ceiling, so the client hint and the
-  // pre-check agree with what /api/sources/upload will accept.
-  const { max_upload_size_mb } = await getSettings();
+        if (!offeringData) {
+          redirect('/faculty/subjects');
+          return;
+        }
 
-  const { data: sources } = await supabase
-    .from('source_materials')
-    .select('id, title, source_type, processing_status, file_size, original_filename, mime_type, created_at')
-    .eq('subject_offering_id', offeringId)
-    .order('created_at', { ascending: false });
+        setOffering(offeringData as unknown as OfferingHeading);
+
+        const { data: settings } = await supabase
+          .from('system_settings')
+          .select('max_upload_size_mb')
+          .single();
+        if (settings?.max_upload_size_mb) {
+          setMaxSizeMb(settings.max_upload_size_mb);
+        }
+
+        const { data: sourcesData } = await supabase
+          .from('source_materials')
+          .select('id, title, source_type, processing_status, file_size, original_filename, mime_type, created_at')
+          .eq('subject_offering_id', offeringIdValue)
+          .order('created_at', { ascending: false });
+
+        setSources(sourcesData as unknown as SourceMaterialRow[]);
+      } catch (err) {
+        notifyError('Failed to load', err instanceof Error ? err.message : 'Unknown error');
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    load();
+  }, [params, supabase]);
 
   const statusVariant = (status: string): 'success' | 'warning' | 'danger' | 'info' => {
     switch (status) {
@@ -74,14 +121,15 @@ export default async function SourcesPage({ params }: Props) {
     }
   };
 
-  const typeIcon = (type: string) => {
-    switch (type) {
-      case 'file': return '📄';
-      case 'text': return '📝';
-      case 'url': return '🔗';
-      default: return '📄';
-    }
-  };
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[var(--color-primary)]" />
+      </div>
+    );
+  }
+
+  const o = offering as unknown as OfferingHeading | null;
 
   return (
     <div>
@@ -89,12 +137,12 @@ export default async function SourcesPage({ params }: Props) {
         breadcrumbs={[
           { label: 'Faculty', href: '/faculty' },
           { label: 'My Subjects', href: '/faculty/subjects' },
-          { label: `${o.subject?.code} - ${o.subject?.title}`, href: `/faculty/subjects/${offeringId}` },
+          { label: `${o?.subject?.code} - ${o?.subject?.title}`, href: `/faculty/subjects/${offeringId}` },
           { label: 'Source Materials' },
         ]}
         title="Source Materials"
         description="Upload and manage course materials for AI-powered question generation"
-        actions={<SourceUpload offeringId={offeringId} maxSizeMb={max_upload_size_mb} />}
+        actions={<SourceUploadSimple offeringId={offeringId} maxSizeMb={maxSizeMb} />}
       />
 
       {sources && sources.length > 0 ? (
@@ -115,8 +163,8 @@ export default async function SourcesPage({ params }: Props) {
                 <TR key={s.id} className="hover:bg-[var(--color-surface-hover)]">
                   <TD>
                     <span className="flex items-center gap-2">
-                      <span className="text-lg flex-shrink-0" aria-hidden="true">
-                        {typeIcon(s.source_type)}
+                      <span className="flex-shrink-0" aria-hidden="true">
+                        <TypeIcon sourceType={s.source_type} />
                       </span>
                       <span className="font-medium text-[var(--color-foreground)]">
                         {s.title}
@@ -154,7 +202,7 @@ export default async function SourcesPage({ params }: Props) {
       ) : (
         <EmptyState
           title="No source materials"
-          description="Upload course materials (PDF, DOCX, TXT) to enable AI-powered question generation."
+          description="Add course materials (PDF, DOCX, TXT, or direct text input) to enable AI-powered question generation."
         />
       )}
     </div>

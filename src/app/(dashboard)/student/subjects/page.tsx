@@ -5,6 +5,7 @@ import { Card } from '@/components/ui/Card';
 import Badge from '@/components/ui/Badge';
 import EmptyState from '@/components/ui/EmptyState';
 import { Table, THead, TBody, TR, TH, TD } from '@/components/ui/Table';
+import Link from 'next/link';
 
 export default async function StudentSubjectsPage() {
   const supabase = await createClient();
@@ -76,10 +77,20 @@ export default async function StudentSubjectsPage() {
                 return (
                   <TR key={e.id as string} className="hover:bg-[var(--color-surface-hover)]">
                     <TD className="font-mono text-xs text-[var(--color-muted)]">
-                      {(subject?.code as string) ?? '—'}
+                      <Link
+                        href={`/student/subjects/${offering?.id as string}`}
+                        className="hover:text-[var(--color-primary)] hover:underline"
+                      >
+                        {(subject?.code as string) ?? '—'}
+                      </Link>
                     </TD>
                     <TD className="font-medium text-[var(--color-foreground)]">
-                      {(subject?.title as string) ?? '—'}
+                      <Link
+                        href={`/student/subjects/${offering?.id as string}`}
+                        className="text-[var(--color-foreground)] hover:text-[var(--color-primary)] hover:underline"
+                      >
+                        {(subject?.title as string) ?? '—'}
+                      </Link>
                     </TD>
                     <TD className="text-[var(--color-muted)]">
                       {(section?.name as string) ?? '—'}
