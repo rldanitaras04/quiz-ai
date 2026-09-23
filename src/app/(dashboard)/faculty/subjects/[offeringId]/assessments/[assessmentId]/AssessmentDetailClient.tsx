@@ -58,6 +58,8 @@ function blankQuestion(versionId: string): DraftQuestion {
     generation_metadata: null,
     created_at: '',
     updated_at: '',
+    image_url: null,
+    image_storage_path: null,
     question_choices: ['A', 'B', 'C', 'D'].map((key, index) => ({
       id: `${id}-${key}`,
       question_id: id,
@@ -91,6 +93,8 @@ function toDraft(question: AssessmentDetailQuestion, versionId: string): DraftQu
     updated_at: '',
     topic_id: (question as any).topicId ?? null,
     topic_title: (question as any).topicTitle ?? undefined,
+    image_url: (question as any).imageUrl ?? null,
+    image_storage_path: (question as any).imageStoragePath ?? null,
     question_choices: question.choices.map((choice, index) => ({
       id: choice.id,
       question_id: question.id,
@@ -216,6 +220,8 @@ export default function AssessmentDetailClient({
       bloom_level: draft.bloom_level,
       points: draft.points,
       topic_id: (draft as any).topic_id ?? null,
+      image_url: (draft as any).image_url ?? null,
+      image_storage_path: (draft as any).image_storage_path ?? null,
       // An empty list clears choices when a question switches to identification.
       choices: isMultipleChoice ? filledChoices.map(choicePayload) : [],
       correct_choice_key: isMultipleChoice
@@ -614,11 +620,15 @@ export default function AssessmentDetailClient({
                       <span className="line-clamp-2 text-[var(--color-foreground)]">
                         {question.question_text}
                       </span>
+                      {(question as any).imageUrl && (
+                        <img src={(question as any).imageUrl as string} alt="" className="mt-2 h-16 w-auto rounded border object-cover" loading="lazy" />
+                      )}
                       <div className="flex gap-1 mt-1 flex-wrap">
                         {question.is_ai_generated && (
                           <Badge variant="info">AI</Badge>
                         )}
                         {qTopic ? <Badge variant="default">{qTopic}</Badge> : <Badge variant="outline">No topic</Badge>}
+                        {(question as any).imageUrl && <Badge variant="info">Image</Badge>}
                       </div>
                     </TD>
                     <TD className="text-[var(--color-muted)] whitespace-nowrap">
@@ -752,6 +762,7 @@ export default function AssessmentDetailClient({
               onNavigate={() => undefined}
               deleteTitle="Delete this question?"
               deleteText="The question and its choices are removed from this assessment."
+              offeringId={detail.subjectOfferingId}
             />
           </div>
         )}

@@ -60,6 +60,8 @@ function mapBankToDraft(bank: QuestionBankItem, position: number): DraftQuestion
     updated_at: new Date().toISOString(),
     topic_id: bank.topic_id,
     topic_title: (bank as any).topic?.title ?? undefined,
+    image_url: (bank as any).image_url ?? null,
+    image_storage_path: (bank as any).image_storage_path ?? null,
     question_choices: isMcq ? draftChoices : [],
     canonical_answer: bank.canonical_answer ?? ak?.canonical_answer ?? '',
     sourceChunkIds: [],
@@ -262,9 +264,13 @@ export default function StepQuestionBank({ offeringId, topics, onImport, existin
                         return c ? `${c.choice_key}. ${c.choice_text}` : '—';
                       })()
                     : (ak?.canonical_answer ?? (item as any).canonical_answer ?? '—');
+                  const itemImage = (item as any).image_url as string | null;
                   return (
                     <label key={item.id} className={`flex gap-3 p-4 cursor-pointer transition-colors ${isSelected ? 'bg-[var(--color-primary)]/5' : 'hover:bg-[var(--color-surface-hover)]'}`}>
                       <input type="checkbox" checked={isSelected} onChange={() => toggle(item.id)} className="mt-1 h-4 w-4 rounded border-[var(--color-border)] text-[var(--color-primary)]" />
+                      {itemImage && (
+                        <img src={itemImage} alt="" className="h-16 w-16 rounded object-cover border border-[var(--color-border)] shrink-0" loading="lazy" />
+                      )}
                       <div className="flex-1 min-w-0">
                         <p className="text-sm text-[var(--color-foreground)] line-clamp-2">{item.question_text}</p>
                         <div className="flex flex-wrap gap-1.5 mt-2">
@@ -273,6 +279,7 @@ export default function StepQuestionBank({ offeringId, topics, onImport, existin
                           <Badge variant="outline">{item.bloom_level}</Badge>
                           <Badge variant="default">{item.points} pt{item.points === 1 ? '' : 's'}</Badge>
                           {item.usage_count > 0 && <Badge variant="outline">Used {item.usage_count}×</Badge>}
+                          {itemImage && <Badge variant="info">Image</Badge>}
                         </div>
                         <p className="text-xs text-[var(--color-muted)] mt-1 truncate">Answer: <span className="text-[var(--color-foreground)]">{answer}</span></p>
                       </div>

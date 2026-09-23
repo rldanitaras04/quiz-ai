@@ -1,12 +1,14 @@
 'use client';
 
-import { useState, type JSX } from 'react';
+import { useState, useRef, type JSX } from 'react';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import Select from '@/components/ui/Select';
 import Badge from '@/components/ui/Badge';
-import { confirmAction } from '@/components/ui/alerts';
-import { QUESTION_TYPE_LABELS, DIFFICULTY_LABELS, BLOOM_LABELS } from '@/lib/constants';
+import Spinner from '@/components/ui/Spinner';
+import { confirmAction, notifyError } from '@/components/ui/alerts';
+import { QUESTION_TYPE_LABELS, DIFFICULTY_LABELS, BLOOM_LABELS, SUPPORTED_QUESTION_IMAGE_TYPES, MAX_QUESTION_IMAGE_SIZE_MB } from '@/lib/constants';
+import { createClient } from '@/lib/supabase/client';
 import type {
   DraftQuestion,
   QuestionType,
@@ -27,6 +29,8 @@ interface QuestionEditorProps {
    */
   deleteTitle?: string;
   deleteText?: string;
+  /** Offering id for image upload scoping (optional — falls back to user folder). */
+  offeringId?: string;
 }
 
 export default function QuestionEditor({
@@ -38,8 +42,13 @@ export default function QuestionEditor({
   onNavigate,
   deleteTitle = 'Delete this question?',
   deleteText = 'The question and its choices are removed from this draft.',
+  offeringId,
 }: QuestionEditorProps): JSX.Element {
   const [isDirty, setIsDirty] = useState(false);
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const [imageError, setImageError] = useState<string | null>(null);
+  const [dragActive, setDragActive] = useState(false);
+  const imageInputRef = useRef<HTMLInputElement>(null);
 
   const handleTextChange = (value: string) => {
     onUpdate({ question_text: value });
@@ -104,6 +113,56 @@ export default function QuestionEditor({
     if (confirmed) onDelete();
   };
 
+  const handleImageFile = async (file: File) => {
+    setImageError(null);
+    if (!SUPPORTED_QUESTION_IMAGE_TYPES.includes(file.type as typeof SUPPORTED_QUESTION_IMAGE_TYPES[number])) {
+      setImageError('Unsupported image type. Use JPEG, PNG, WebP, GIF or SVG.');
+      return;
+    }
+    if (file.size > MAX_QUESTION_IMAGE_SIZE_MB * 1024 * 1024) {
+      setImageError(`Image too large. Maximum size: ${MAX_QUESTION_IMAGE_SIZE_MB} MB`);
+      return;
+    }
+    setUploadingImage(true);
+    try {
+      const supabase = createClient();
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      if (!token) throw new Error('Session expired. Please sign in again.');
+      const form = new FormData();
+      form.append('file', file);
+      if (offeringId) form.append('offeringId', offeringId);
+      const res = await fetch('/api/questions/upload-image', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: form,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Upload failed');
+      onUpdate({ image_url: data.url, image_storage_path: data.storagePath } as Partial<DraftQuestion>);
+      setIsDirty(true);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Upload failed';
+      setImageError(msg);
+      notifyError('Image upload failed', msg);
+    } finally {
+      setUploadingImage(false);
+    }
+  };
+
+  const handleImageDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragActive(false);
+    const f = e.dataTransfer.files?.[0];
+    if (f) void handleImageFile(f);
+  };
+
+  const removeImage = () => {
+    onUpdate({ image_url: null, image_storage_path: null } as Partial<DraftQuestion>);
+    setIsDirty(true);
+    setImageError(null);
+  };
+
   const isComplete = () => {
     if (!question.question_text.trim()) return false;
     if (question.question_type === 'multiple_choice') {
@@ -163,6 +222,62 @@ export default function QuestionEditor({
           placeholder="Enter the question text..."
           className="w-full rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-foreground)] placeholder:text-[var(--color-muted-light)] transition-colors focus:border-[var(--color-primary)] focus:ring-2 focus:ring-[var(--color-focus-ring)] focus:outline-none resize-none"
         />
+      </div>
+
+      {/* Question Image (optional) */}
+      <div className="space-y-2">
+        <label className="text-sm font-medium text-[var(--color-foreground)]">
+          Question Image <span className="text-[var(--color-muted)] font-normal">(optional — diagram, figure, or illustration)</span>
+        </label>
+        {(question as any).image_url ? (
+          <div className="relative rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-hover)] p-2">
+            <img
+              src={(question as any).image_url as string}
+              alt="Question illustration"
+              className="max-h-64 w-auto mx-auto rounded object-contain"
+              loading="lazy"
+            />
+            <div className="flex items-center justify-between mt-2">
+              <span className="text-xs text-[var(--color-muted)] truncate max-w-[60%]">{(question as any).image_url}</span>
+              <div className="flex gap-2">
+                <Button variant="ghost" size="sm" onClick={() => imageInputRef.current?.click()} disabled={uploadingImage}>Replace</Button>
+                <Button variant="danger" size="sm" onClick={removeImage}>Remove</Button>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div
+            onDragOver={(e) => { e.preventDefault(); setDragActive(true); }}
+            onDragLeave={(e) => { e.preventDefault(); setDragActive(false); }}
+            onDrop={handleImageDrop}
+            onClick={() => imageInputRef.current?.click()}
+            className={`flex flex-col items-center justify-center gap-2 rounded-[var(--radius-md)] border-2 border-dashed p-6 text-center cursor-pointer transition-colors ${
+              dragActive ? 'border-[var(--color-primary)] bg-[var(--color-primary)]/5' : 'border-[var(--color-border)] hover:border-[var(--color-primary)]/40 bg-[var(--color-surface)]'
+            }`}
+          >
+            <svg className="w-8 h-8 text-[var(--color-muted-light)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+            </svg>
+            <div>
+              <p className="text-sm font-medium text-[var(--color-foreground)]">{uploadingImage ? 'Uploading…' : 'Click to upload or drag & drop'}</p>
+              <p className="text-xs text-[var(--color-muted)] mt-1">PNG, JPG, WebP, GIF, SVG • max {MAX_QUESTION_IMAGE_SIZE_MB} MB</p>
+            </div>
+            {uploadingImage && <Spinner size="sm" />}
+          </div>
+        )}
+        <input
+          ref={imageInputRef}
+          type="file"
+          accept={SUPPORTED_QUESTION_IMAGE_TYPES.join(',')}
+          className="hidden"
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) void handleImageFile(f);
+            e.target.value = '';
+          }}
+        />
+        {imageError && <p className="text-xs text-[var(--color-danger)]">{imageError}</p>}
+        <p className="text-xs text-[var(--color-muted)]">Images are stored per question and shown to students during the exam. They are also saved to the Question Bank when you save items there.</p>
       </div>
 
       {/* Type / Difficulty / Bloom / Points */}

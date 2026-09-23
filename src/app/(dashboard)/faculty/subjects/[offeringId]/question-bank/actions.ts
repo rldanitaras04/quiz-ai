@@ -46,7 +46,7 @@ export async function getQuestionBank(
   let query = supabase
     .from('question_bank')
     .select(`
-      id, subject_id, topic_id, question_type, question_text, difficulty, bloom_level, points, source_question_id, source_metadata, created_by, status, usage_count, last_used_at, created_at, updated_at,
+      id, subject_id, topic_id, question_type, question_text, difficulty, bloom_level, points, image_url, image_storage_path, source_question_id, source_metadata, created_by, status, usage_count, last_used_at, created_at, updated_at,
       topic:topics(id, title, description),
       question_bank_choices(id, bank_question_id, choice_key, choice_text, position),
       question_bank_answer_keys(id, bank_question_id, correct_choice_id, canonical_answer, accepted_answers)
@@ -75,6 +75,8 @@ export async function getQuestionBank(
     difficulty: row.difficulty,
     bloom_level: row.bloom_level,
     points: row.points,
+    image_url: row.image_url,
+    image_storage_path: row.image_storage_path,
     source_question_id: row.source_question_id,
     source_metadata: row.source_metadata,
     created_by: row.created_by,
@@ -114,6 +116,8 @@ export async function createBankItem(
     difficulty: Difficulty;
     bloom_level: BloomLevel;
     points: number;
+    image_url?: string | null;
+    image_storage_path?: string | null;
     choices?: { choice_key: string; choice_text: string }[];
     correct_choice_key?: string;
     canonical_answer?: string;
@@ -142,6 +146,8 @@ export async function createBankItem(
       difficulty: data.difficulty,
       bloom_level: data.bloom_level,
       points: data.points,
+      image_url: data.image_url ?? null,
+      image_storage_path: data.image_storage_path ?? null,
       created_by: userId,
       status: 'active',
     })
@@ -202,6 +208,8 @@ export async function updateBankItem(
     difficulty?: Difficulty;
     bloom_level?: BloomLevel;
     points?: number;
+    image_url?: string | null;
+    image_storage_path?: string | null;
   }
 ) {
   const { supabase, userId } = await requireUser();
@@ -214,6 +222,8 @@ export async function updateBankItem(
   if (data.difficulty !== undefined) updates.difficulty = data.difficulty;
   if (data.bloom_level !== undefined) updates.bloom_level = data.bloom_level;
   if (data.points !== undefined) updates.points = data.points;
+  if (data.image_url !== undefined) updates.image_url = data.image_url;
+  if (data.image_storage_path !== undefined) updates.image_storage_path = data.image_storage_path;
 
   const { error } = await supabase.from('question_bank').update(updates).eq('id', bankItemId);
   if (error) throw new Error(error.message);
@@ -265,7 +275,7 @@ export async function saveAssessmentQuestionToBank(
   // Resolve question → version → assessment → subject
   const { data: q } = await supabase
     .from('questions')
-    .select('id, assessment_version_id, question_type, question_text, difficulty, bloom_level, points, topic_id, question_choices(id, choice_key, choice_text, position), answer_keys:answer_keys(correct_choice_id, canonical_answer, accepted_answers)')
+    .select('id, assessment_version_id, question_type, question_text, difficulty, bloom_level, points, topic_id, image_url, image_storage_path, question_choices(id, choice_key, choice_text, position), answer_keys:answer_keys(correct_choice_id, canonical_answer, accepted_answers)')
     .eq('id', questionId)
     .single();
   if (!q) throw new Error('Question not found');
@@ -313,6 +323,8 @@ export async function saveAssessmentQuestionToBank(
       difficulty: q.difficulty,
       bloom_level: q.bloom_level,
       points: q.points,
+      image_url: (q as any).image_url ?? null,
+      image_storage_path: (q as any).image_storage_path ?? null,
       source_question_id: q.id,
       source_metadata: { copied_from_assessment: ver.assessment_id },
       created_by: userId,

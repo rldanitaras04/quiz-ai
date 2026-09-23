@@ -257,6 +257,7 @@ export default function StepReview({
                   setSelectedIndex(next);
                 }
               }}
+              offeringId={offeringId}
             />
           )}
         </div>

@@ -37,6 +37,16 @@ export default function ExamQuestion({
             </span>
           </div>
           <p className="text-foreground whitespace-pre-wrap">{question.question_text}</p>
+          {(question as any).image_url && (
+            <div className="mt-3">
+              <img
+                src={(question as any).image_url as string}
+                alt="Question illustration"
+                className="max-h-80 w-auto mx-auto rounded border border-[var(--color-border)] object-contain bg-white"
+                loading="lazy"
+              />
+            </div>
+          )}
         </div>
 
         <button

@@ -106,7 +106,7 @@ const STEP_CONFIG: Record<AssessmentCreationMode, { ids: StepId[]; labels: strin
   },
   mixed: {
     ids: ['mode', 'basic', 'manual', 'bank', 'review', 'approve'],
-    labels: ['Creation Mode', 'Basic Info', 'Manual', 'Question Bank', 'Review & Edit', 'Approve'],
+    labels: ['Creation Mode', 'Basic Info', 'Manual Questions', 'Question Bank', 'Review & Edit', 'Approve & Schedule'],
   },
 };
 
@@ -210,7 +210,8 @@ export default function NewAssessmentPage({
           break;
         }
         case 'manual':
-          if (state.generatedQuestions.length === 0) errors.manual = 'Add at least one question. You can also import from the Question Bank in the next step.';
+          // In mixed mode manual is optional — you may add only from bank; Review is the gate.
+          if (state.creationMode !== 'mixed' && state.generatedQuestions.length === 0) errors.manual = 'Add at least one question. You can also import from the Question Bank in the next step.';
           break;
         case 'bank':
           // Bank selection is optional here — Review validates that something was chosen
@@ -277,6 +278,7 @@ export default function NewAssessmentPage({
             onChange={(next) => updateState({ generatedQuestions: next })}
             topics={topics}
             onCreateTopic={handleCreateTopic}
+            offeringId={offeringId}
           />
         );
       case 'bank':
@@ -342,8 +344,10 @@ export default function NewAssessmentPage({
           state.creationMode === 'ai'
             ? 'AI-assisted generation from your source materials'
             : state.creationMode === 'manual'
-              ? 'Manually encode each item — categorized by topic'
-              : 'Pick reusable items from your question bank — grouped by topic'
+              ? 'Manually encode each item — categorized by topic, with optional images'
+              : state.creationMode === 'bank'
+                ? 'Pick reusable items from your question bank — grouped by topic'
+                : 'Combine manual encoding and bank imports — no source files needed, with optional images'
         }
       />
 
@@ -418,7 +422,7 @@ export default function NewAssessmentPage({
           </Button>
 
           <div className="text-sm text-[var(--color-muted)]">
-            Step {currentStep + 1} of {labels.length} · {state.creationMode === 'ai' ? 'AI' : state.creationMode === 'manual' ? 'Manual' : 'Bank'} mode
+            Step {currentStep + 1} of {labels.length} · {state.creationMode === 'ai' ? 'AI' : state.creationMode === 'manual' ? 'Manual' : state.creationMode === 'bank' ? 'Bank' : 'Mixed'} mode
           </div>
 
           {!isLastStep && !isGenerateStep && !isReviewStep && !isApproveStep && (

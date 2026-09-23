@@ -299,6 +299,8 @@ export interface Question {
   created_by: string;
   is_ai_generated: boolean;
   topic_id?: string | null;
+  image_url?: string | null;
+  image_storage_path?: string | null;
   generation_metadata: Record<string, unknown> | null;
   created_at: string;
   updated_at: string;
@@ -310,6 +312,8 @@ export interface QuestionChoice {
   choice_key: string;
   choice_text: string;
   position: number;
+  image_url?: string | null;
+  image_storage_path?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -556,6 +560,8 @@ export interface DraftQuestion extends QuestionWithChoices {
   sourceChunkIds?: string[];
   topic_id?: string | null;
   topic_title?: string;
+  image_url?: string | null;
+  image_storage_path?: string | null;
 }
 
 export interface QuestionBankChoice {
@@ -564,6 +570,8 @@ export interface QuestionBankChoice {
   choice_key: string;
   choice_text: string;
   position: number;
+  image_url?: string | null;
+  image_storage_path?: string | null;
   created_at: string;
 }
 
@@ -589,6 +597,8 @@ export interface QuestionBankItem {
   difficulty: Difficulty;
   bloom_level: BloomLevel;
   points: number;
+  image_url?: string | null;
+  image_storage_path?: string | null;
   source_question_id: string | null;
   source_metadata: Record<string, unknown> | null;
   created_by: string | null;

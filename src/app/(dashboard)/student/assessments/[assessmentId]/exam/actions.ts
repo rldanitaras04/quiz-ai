@@ -74,7 +74,7 @@ export async function getAttemptDetails(
   const admin = createAdminClient();
   const { data: questions, error: questionsError } = await admin
     .from('questions')
-    .select('id, question_type, question_text, difficulty, bloom_level, points, position, question_choices(id, choice_key, choice_text, position)')
+    .select('id, question_type, question_text, difficulty, bloom_level, points, position, image_url, image_storage_path, question_choices(id, choice_key, choice_text, position)')
     .in('id', manifest.question_order)
     .order('position', { ascending: true });
 
@@ -261,6 +261,7 @@ export interface BreakdownResponse {
   questionText: string;
   questionType: string;
   points: number;
+  imageUrl?: string | null;
   selectedChoiceId: string | null;
   textAnswer: string | null;
   earnedPoints: number | null;
@@ -306,7 +307,7 @@ export async function getAttemptBreakdown(
 
   const { data: questions } = await admin
     .from('questions')
-    .select('id, question_text, question_type, points, position, question_choices(id, choice_key, choice_text), answer_key:answer_keys(correct_choice_id, canonical_answer)')
+    .select('id, question_text, question_type, points, position, image_url, question_choices(id, choice_key, choice_text), answer_key:answer_keys(correct_choice_id, canonical_answer)')
     .in('id', questionIds)
     .order('position', { ascending: true });
 
@@ -318,6 +319,7 @@ export async function getAttemptBreakdown(
     question_type: string;
     points: number;
     position: number | null;
+    image_url?: string | null;
     question_choices:
       | { id: string; choice_key: string; choice_text: string }[]
       | null;
@@ -330,6 +332,7 @@ export async function getAttemptBreakdown(
     questionText: q.question_text,
     questionType: q.question_type,
     points: q.points,
+    imageUrl: q.image_url ?? null,
     selectedChoiceId: responses.find((r) => r.question_id === q.id)?.selected_choice_id ?? null,
     textAnswer: responses.find((r) => r.question_id === q.id)?.text_answer ?? null,
     earnedPoints: responses.find((r) => r.question_id === q.id)?.earned_points ?? null,

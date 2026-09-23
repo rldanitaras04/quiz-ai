@@ -12,6 +12,7 @@ interface Props {
   onChange: (next: DraftQuestion[]) => void;
   topics: Topic[];
   onCreateTopic?: (title: string) => Promise<Topic | null>;
+  offeringId?: string;
 }
 
 function blankDraft(pos: number, topics: Topic[]): DraftQuestion {
@@ -41,7 +42,7 @@ function blankDraft(pos: number, topics: Topic[]): DraftQuestion {
   };
 }
 
-export default function StepManualEntry({ questions, onChange, topics, onCreateTopic }: Props): JSX.Element {
+export default function StepManualEntry({ questions, onChange, topics, onCreateTopic, offeringId }: Props): JSX.Element {
   const [selected, setSelected] = useState(0);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [newTopicTitle, setNewTopicTitle] = useState('');
@@ -189,6 +190,7 @@ export default function StepManualEntry({ questions, onChange, topics, onCreateT
                   const nxt = selected + dir;
                   if (nxt >= 0 && nxt < questions.length) setSelected(nxt);
                 }}
+                offeringId={offeringId}
               />
             </div>
           ) : null}

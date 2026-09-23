@@ -77,7 +77,7 @@ export default function StepApprove({
         onUpdate({ assessmentId });
       }
 
-      // 1. Persist the reviewed questions (questions + choices + answer keys), including topic assignment.
+      // 1. Persist the reviewed questions (questions + choices + answer keys), including topic and image.
       const saveResult = await saveGeneratedQuestions(assessmentId,
         questions.map((q) => ({
           question_type: q.question_type,
@@ -87,6 +87,8 @@ export default function StepApprove({
           points: q.points,
           is_ai_generated: q.is_ai_generated ?? false,
           topic_id: (q as any).topic_id ?? null,
+          image_url: (q as any).image_url ?? null,
+          image_storage_path: (q as any).image_storage_path ?? null,
           question_choices: q.question_choices?.map((c) => ({
             choice_key: c.choice_key,
             choice_text: c.choice_text,

@@ -42,6 +42,16 @@ const MODES: Array<{ id: AssessmentCreationMode; title: string; description: str
       </svg>
     ),
   },
+  {
+    id: 'mixed',
+    title: 'Mixed (Manual + Bank)',
+    description: 'Combine hand-authored items and bank imports — no source files needed. Ideal for flexible reuse + custom stems.',
+    icon: (
+      <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" />
+      </svg>
+    ),
+  },
 ];
 
 export default function StepCreationMode({ value, onChange }: Props): JSX.Element {
@@ -52,7 +62,7 @@ export default function StepCreationMode({ value, onChange }: Props): JSX.Elemen
         <p className="text-sm text-[var(--color-muted)]">Pick a starting point — you can always mix methods later in Review.</p>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {MODES.map((m) => {
           const active = value === m.id;
           return (

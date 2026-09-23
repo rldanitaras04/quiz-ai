@@ -249,6 +249,18 @@ export const SUPPORTED_SOURCE_FILE_TYPES = [
 
 export const SUPPORTED_SOURCE_EXTENSIONS = ['.pdf', '.docx', '.txt', '.md'] as const;
 
+export const SUPPORTED_QUESTION_IMAGE_TYPES = [
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'image/gif',
+  'image/svg+xml',
+] as const;
+
+export const MAX_QUESTION_IMAGE_SIZE_MB = 10;
+
+export const SUPPORTED_QUESTION_IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.svg'] as const;
+
 export const EXAM_WARNING_THRESHOLDS_MINUTES = [10, 5, 1] as const;
 
 export const ITEMS_PER_PAGE = 20;

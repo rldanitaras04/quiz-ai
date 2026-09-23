@@ -228,6 +228,8 @@ export interface AssessmentDetailQuestion {
   is_ai_generated: boolean;
   topicId: string | null;
   topicTitle: string | null;
+  imageUrl: string | null;
+  imageStoragePath: string | null;
   choices: AssessmentDetailChoice[];
   correctChoiceId: string | null;
   canonicalAnswer: string | null;
@@ -309,7 +311,7 @@ export async function getAssessmentDetail(
     const { data: questionRows } = await supabase
       .from('questions')
       .select(`
-        id, position, question_type, question_text, difficulty, bloom_level, points, is_ai_generated, topic_id, topic:topics(id, title),
+        id, position, question_type, question_text, difficulty, bloom_level, points, is_ai_generated, topic_id, image_url, image_storage_path, topic:topics(id, title),
         question_choices(id, choice_key, choice_text, position),
         answer_key:answer_keys(correct_choice_id, canonical_answer, accepted_answers)
       `)
@@ -355,6 +357,8 @@ export async function getAssessmentDetail(
         is_ai_generated: Boolean(row.is_ai_generated),
         topicId: (row.topic_id as string | null) ?? topic?.id ?? null,
         topicTitle: topic?.title ?? null,
+        imageUrl: (row.image_url as string | null) ?? null,
+        imageStoragePath: (row.image_storage_path as string | null) ?? null,
         choices,
         correctChoiceId: answerKey?.correct_choice_id ?? null,
         canonicalAnswer: answerKey?.canonical_answer ?? null,
@@ -573,6 +577,8 @@ export async function addQuestion(
     bloom_level: BloomLevel;
     points: number;
     topic_id?: string | null;
+    image_url?: string | null;
+    image_storage_path?: string | null;
     choices?: { choice_key: string; choice_text: string }[];
     canonical_answer?: string;
     accepted_answers?: string[];
@@ -619,6 +625,8 @@ export async function addQuestion(
       created_by: userId,
       is_ai_generated: false,
       topic_id: data.topic_id ?? null,
+      image_url: data.image_url ?? null,
+      image_storage_path: data.image_storage_path ?? null,
     })
     .select()
     .single();
@@ -684,6 +692,8 @@ export async function updateQuestion(
     bloom_level?: BloomLevel;
     points?: number;
     topic_id?: string | null;
+    image_url?: string | null;
+    image_storage_path?: string | null;
     choices?: { id?: string; choice_key: string; choice_text: string }[];
     correct_choice_key?: string;
     canonical_answer?: string;
@@ -712,6 +722,8 @@ export async function updateQuestion(
   if (data.bloom_level !== undefined) updateFields.bloom_level = data.bloom_level;
   if (data.points !== undefined) updateFields.points = data.points;
   if (data.topic_id !== undefined) updateFields.topic_id = data.topic_id;
+  if (data.image_url !== undefined) updateFields.image_url = data.image_url;
+  if (data.image_storage_path !== undefined) updateFields.image_storage_path = data.image_storage_path;
 
   if (Object.keys(updateFields).length > 1) {
     const { data: updated, error } = await supabase
@@ -949,6 +961,8 @@ export async function saveGeneratedQuestions(
     points: number;
     is_ai_generated?: boolean;
     topic_id?: string | null;
+    image_url?: string | null;
+    image_storage_path?: string | null;
     question_choices?: { choice_key: string; choice_text: string; is_correct?: boolean }[];
     canonical_answer?: string;
     accepted_answers?: string[];
@@ -992,6 +1006,8 @@ export async function saveGeneratedQuestions(
         status: 'active',
         is_ai_generated: q.is_ai_generated ?? false,
         topic_id: q.topic_id ?? null,
+        image_url: q.image_url ?? null,
+        image_storage_path: q.image_storage_path ?? null,
         created_by: userId,
       })
       .select('id')
