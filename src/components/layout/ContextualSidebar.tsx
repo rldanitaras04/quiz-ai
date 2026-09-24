@@ -32,7 +32,8 @@ export default function ContextualSidebar({
   const isActive = (item: NavigationItem): boolean => {
     if (!item.href) return false;
     if (item.exact) return effectivePath === item.href;
-    return effectivePath.startsWith(item.href);
+    if (item.href.includes('#')) return effectivePath === item.href;
+    return effectivePath.split('#')[0].startsWith(item.href);
   };
 
   return (

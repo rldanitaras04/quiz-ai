@@ -189,7 +189,6 @@ export async function submitExam(
     }
 
     const rawScore = (responses ?? []).reduce((sum, r) => sum + (r.earned_points ?? 0), 0);
-    const percentage = possibleScore > 0 ? (rawScore / possibleScore) * 100 : 0;
 
     const { data: existing } = await admin
       .from('assessment_results')
@@ -202,8 +201,7 @@ export async function submitExam(
         .from('assessment_results')
         .update({
           raw_score: rawScore,
-          possible_score: possibleScore,
-          percentage,
+          possible_score: possibleScore || 1,
           updated_at: now,
         })
         .eq('id', existing.id);
@@ -214,7 +212,6 @@ export async function submitExam(
         deployment_id: deploymentId,
         raw_score: rawScore,
         possible_score: possibleScore || 1, // CHECK possible_score > 0
-        percentage,
         status: 'pending',
       });
     }

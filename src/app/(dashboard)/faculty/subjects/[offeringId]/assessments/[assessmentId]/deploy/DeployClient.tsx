@@ -49,7 +49,7 @@ export default function DeployClient({
   const [closesAt, setClosesAt] = useState('');
   const [durationMinutes, setDurationMinutes] = useState(60);
   const [attemptLimit, setAttemptLimit] = useState(1);
-  const [questionOrderMode, setQuestionOrderMode] = useState<QuestionOrderMode>('fixed');
+  const [questionOrderMode, setQuestionOrderMode] = useState<QuestionOrderMode>('shuffled');
   const [choiceOrderMode, setChoiceOrderMode] = useState<ChoiceOrderMode>('fixed');
   const [scoreReleaseMode, setScoreReleaseMode] = useState<ScoreReleaseMode>('immediate');
   const [showRawScore, setShowRawScore] = useState(true);

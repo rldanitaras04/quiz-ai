@@ -17,8 +17,13 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "MiMo — AI-Assisted Assessment",
+  title: "SEAMS AI — AI-Assisted Assessment",
   description: "AI-Assisted Secure Assessment System",
+  icons: {
+    icon: "/seams_ai_ico.png",
+    shortcut: "/seams_ai_ico.png",
+    apple: "/seams_ai_ico.png",
+  },
 };
 
 export default function RootLayout({ children }: { children: ReactNode }): JSX.Element {

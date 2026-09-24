@@ -90,8 +90,7 @@ export async function POST(request: Request) {
         .from('assessment_results')
         .update({
           raw_score: rawScore,
-          possible_score: possibleScore,
-          percentage,
+          possible_score: possibleScore || 1,
           updated_at: new Date().toISOString(),
         })
         .eq('id', existingResult.id);
@@ -101,8 +100,7 @@ export async function POST(request: Request) {
         student_id: attempt.student_id,
         deployment_id: attempt.deployment_id,
         raw_score: rawScore,
-        possible_score: possibleScore,
-        percentage,
+        possible_score: possibleScore || 1,
         status: 'pending',
       });
     }

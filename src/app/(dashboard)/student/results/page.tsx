@@ -28,7 +28,7 @@ export default async function StudentResultsPage() {
         id,
         assessment_version:assessment_versions(
           id,
-          assessment:assessments(id, title, assessment_type)
+          assessment:assessments!assessment_versions_assessment_id_fkey(id, title, assessment_type)
         )
       )
     `)

@@ -85,15 +85,18 @@ export function TD({
   align = 'left',
   numeric = false,
   className = '',
+  colSpan,
 }: {
   children?: ReactNode;
   align?: Align;
   /** Right-aligns and uses tabular figures (counts, scores, percentages). */
   numeric?: boolean;
   className?: string;
+  colSpan?: number;
 }): JSX.Element {
   return (
     <td
+      colSpan={colSpan}
       className={`px-4 py-3 ${numeric ? 'text-right tabular-nums' : ALIGN[align]} ${className}`}
     >
       {children}

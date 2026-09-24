@@ -24,7 +24,7 @@ interface TOSBuilderProps {
   onCancel: () => void;
 }
 
-const QUESTION_TYPES: QuestionType[] = ['multiple_choice', 'identification'];
+const QUESTION_TYPES: QuestionType[] = ['multiple_choice', 'identification', 'true_false'];
 const DIFFICULTIES: Difficulty[] = ['easy', 'moderate', 'difficult'];
 const BLOOM_LEVELS: BloomLevel[] = ['remember', 'understand', 'apply', 'analyze', 'evaluate', 'create'];
 
@@ -140,7 +140,11 @@ export default function TOSBuilder({
                   <TR key={index}>
                     <TD className="text-sm">{row.topic}</TD>
                     <TD className="text-sm">
-                      {row.question_type === 'multiple_choice' ? 'MCQ' : 'ID'}
+                      {row.question_type === 'multiple_choice'
+                        ? 'MCQ'
+                        : row.question_type === 'true_false'
+                          ? 'TF'
+                          : 'ID'}
                     </TD>
                     <TD className="text-sm">
                       {DIFFICULTY_LABELS[row.difficulty]}

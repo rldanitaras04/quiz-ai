@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation';
+import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
 import PageHeader from '@/components/ui/PageHeader';
 import { Card, CardContent } from '@/components/ui/Card';
@@ -23,7 +24,7 @@ export default async function StudentDashboardPage() {
   // permanently hid every exam from students. Filter on the window instead.
   const { data: deployments } = await supabase
     .from('assessment_deployments')
-    .select('id, opens_at, closes_at, status, assessment_version:assessment_versions(id, assessment:assessments(id, title))')
+    .select('id, opens_at, closes_at, status, assessment_version:assessment_versions(id, assessment:assessments!assessment_versions_assessment_id_fkey(id, title))')
     .in('subject_offering_id', (enrollments ?? []).map((e: Record<string, unknown>) => (e.subject_offering as Record<string, unknown>)?.id as string).filter(Boolean))
     .in('status', ['active', 'scheduled'])
     .gte('closes_at', new Date().toISOString())
@@ -32,10 +33,17 @@ export default async function StudentDashboardPage() {
 
   const { data: results } = await supabase
     .from('assessment_results')
-    .select('id, raw_score, possible_score, percentage, status, released_at, deployment:assessment_deployments(id, assessment_version:assessment_versions(id, assessment:assessments(id, title)))')
+    .select('id, raw_score, possible_score, percentage, status, released_at, deployment:assessment_deployments(id, assessment_version:assessment_versions(id, assessment:assessments!assessment_versions_assessment_id_fkey(id, title)))')
     .eq('student_id', user.id)
     .eq('status', 'released')
     .order('released_at', { ascending: false })
+    .limit(5);
+
+  const { data: notifications } = await supabase
+    .from('notifications')
+    .select('id, type, title, body, data, read_at, created_at')
+    .eq('user_id', user.id)
+    .order('created_at', { ascending: false })
     .limit(5);
 
   const enrolledCount = enrollments?.length ?? 0;
@@ -100,6 +108,55 @@ export default async function StudentDashboardPage() {
             <EmptyState
               title="No upcoming assessments"
               description="When assessments are published, they will appear here."
+            />
+          )}
+        </div>
+
+        <div>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold text-[var(--color-foreground)]">Notifications</h2>
+            <Link href="/notifications" className="text-sm font-medium text-[var(--color-primary)] hover:underline">
+              View all
+            </Link>
+          </div>
+          {notifications && notifications.length > 0 ? (
+            <div className="space-y-3">
+              {notifications.map((n) => {
+                const data = (n.data ?? null) as Record<string, unknown> | null;
+                const assessmentId = typeof data?.assessment_id === 'string' ? data.assessment_id : null;
+                const href = assessmentId
+                  ? typeof data?.attempt_id === 'string'
+                    ? `/student/assessments/${assessmentId}/exam/${data.attempt_id}/results`
+                    : `/student/assessments/${assessmentId}`
+                  : '/notifications';
+
+                return (
+                  <Card key={n.id} className={!n.read_at ? 'border-l-4 border-l-[var(--color-primary)]' : ''}>
+                    <CardContent className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="font-medium text-[var(--color-foreground)]">{n.title}</p>
+                          <Badge variant={n.type === 'result_released' || n.type === 'submission_confirmed' ? 'success' : n.type === 'assessment_closed' || n.type === 'reminder' ? 'warning' : 'info'}>
+                            {n.type.replace(/_/g, ' ')}
+                          </Badge>
+                        </div>
+                        <p className="text-sm text-[var(--color-muted)] mt-1">{n.body}</p>
+                        <p className="text-xs text-[var(--color-muted-light)] mt-1">
+                          {new Date(n.created_at).toLocaleString()}
+                        </p>
+                        <Link href={href} className="mt-2 inline-block text-sm font-medium text-[var(--color-primary)] hover:underline">
+                          View
+                        </Link>
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+          ) : (
+            <EmptyState
+              title="No notifications"
+              description="Exam schedules, releases, and other updates will appear here."
             />
           )}
         </div>

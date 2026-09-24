@@ -2,6 +2,7 @@
 
 import { useEffect } from 'react';
 import PageHeader from '@/components/ui/PageHeader';
+import Button from '@/components/ui/Button';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import Badge from '@/components/ui/Badge';
 import Link from 'next/link';
@@ -77,6 +78,11 @@ export default function FacultySubjectWorkspaceClient({
         ]}
         title={`${subject?.code} - ${subject?.title}`}
         description={`${section?.name} | ${semester?.name} ${semester?.academic_year?.name}`}
+        actions={
+          <Link href={`/faculty/subjects/${offeringId}/students`}>
+            <Button variant="secondary">Manage Students</Button>
+          </Link>
+        }
       />
 
       {/* Contextual tabs - shown on mobile and as fallback */}
@@ -97,12 +103,15 @@ export default function FacultySubjectWorkspaceClient({
       </nav>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-        <Card>
-          <CardContent>
-            <p className="text-sm font-medium text-[var(--color-muted)]">Enrolled Students</p>
-            <p className="mt-1 text-3xl font-bold text-[var(--color-foreground)]">{enrollmentsCount}</p>
-          </CardContent>
-        </Card>
+        <Link href={`/faculty/subjects/${offeringId}/students`} className="block">
+          <Card className="h-full hover:shadow-md transition-shadow cursor-pointer">
+            <CardContent>
+              <p className="text-sm font-medium text-[var(--color-muted)]">Enrolled Students</p>
+              <p className="mt-1 text-3xl font-bold text-[var(--color-foreground)]">{enrollmentsCount}</p>
+              <p className="mt-1 text-xs font-medium text-[var(--color-primary)]">Manage roster →</p>
+            </CardContent>
+          </Card>
+        </Link>
         <Card>
           <CardContent>
             <p className="text-sm font-medium text-[var(--color-muted)]">Assessments</p>

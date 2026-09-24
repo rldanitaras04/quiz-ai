@@ -7,7 +7,7 @@ import Select from '@/components/ui/Select';
 import Badge from '@/components/ui/Badge';
 import Spinner from '@/components/ui/Spinner';
 import { confirmAction, notifyError } from '@/components/ui/alerts';
-import { QUESTION_TYPE_LABELS, DIFFICULTY_LABELS, BLOOM_LABELS, SUPPORTED_QUESTION_IMAGE_TYPES, MAX_QUESTION_IMAGE_SIZE_MB } from '@/lib/constants';
+import { QUESTION_TYPE_LABELS, DIFFICULTY_LABELS, BLOOM_LABELS, SUPPORTED_QUESTION_IMAGE_TYPES, MAX_QUESTION_IMAGE_SIZE_MB, TRUE_FALSE_CHOICES } from '@/lib/constants';
 import { createClient } from '@/lib/supabase/client';
 import type {
   DraftQuestion,
@@ -59,7 +59,27 @@ export default function QuestionEditor({
     const updates: Partial<DraftQuestion> = { question_type: type };
     if (type === 'identification') {
       updates.question_choices = [];
+    } else if (type === 'true_false') {
+      updates.canonical_answer = '';
+      updates.question_choices = TRUE_FALSE_CHOICES.map((c, idx) => ({
+        id: `tf-${question.id}-${c.choice_key}`,
+        question_id: question.id,
+        choice_key: c.choice_key,
+        choice_text: c.choice_text,
+        position: idx,
+        created_at: '',
+        updated_at: '',
+        is_correct: c.is_correct,
+      }));
     } else if (type === 'multiple_choice' && question.question_choices.length === 0) {
+      updates.question_choices = [
+        { id: `nc-${Date.now()}-a`, question_id: question.id, choice_key: 'A', choice_text: '', position: 0, created_at: '', updated_at: '' },
+        { id: `nc-${Date.now()}-b`, question_id: question.id, choice_key: 'B', choice_text: '', position: 1, created_at: '', updated_at: '' },
+        { id: `nc-${Date.now()}-c`, question_id: question.id, choice_key: 'C', choice_text: '', position: 2, created_at: '', updated_at: '' },
+        { id: `nc-${Date.now()}-d`, question_id: question.id, choice_key: 'D', choice_text: '', position: 3, created_at: '', updated_at: '' },
+      ];
+    } else if (type === 'multiple_choice' && question.question_type === 'true_false') {
+      // Leaving True/False: reset to a blank 4-choice MCQ.
       updates.question_choices = [
         { id: `nc-${Date.now()}-a`, question_id: question.id, choice_key: 'A', choice_text: '', position: 0, created_at: '', updated_at: '' },
         { id: `nc-${Date.now()}-b`, question_id: question.id, choice_key: 'B', choice_text: '', position: 1, created_at: '', updated_at: '' },
@@ -166,7 +186,13 @@ export default function QuestionEditor({
   const isComplete = () => {
     if (!question.question_text.trim()) return false;
     if (question.question_type === 'multiple_choice') {
-      return question.question_choices.filter((c) => c.choice_text.trim()).length >= 2;
+      return (
+        question.question_choices.filter((c) => c.choice_text.trim()).length >= 2 &&
+        question.question_choices.some((c) => c.is_correct)
+      );
+    }
+    if (question.question_type === 'true_false') {
+      return question.question_choices.some((c) => c.is_correct);
     }
     return true;
   };
@@ -287,7 +313,7 @@ export default function QuestionEditor({
           value={question.question_type}
           onChange={(e) => handleTypeChange(e.target.value as QuestionType)}
         >
-          {(['multiple_choice', 'identification'] as const).map((t) => (
+          {(['multiple_choice', 'identification', 'true_false'] as const).map((t) => (
             <option key={t} value={t}>
               {QUESTION_TYPE_LABELS[t]}
             </option>
@@ -411,6 +437,50 @@ export default function QuestionEditor({
             </svg>
             Add Choice
           </Button>
+        </div>
+      )}
+
+      {/* True / False (incl. Modified True or False statements) */}
+      {question.question_type === 'true_false' && (
+        <div className="space-y-3">
+          <label className="text-sm font-medium text-[var(--color-foreground)]">
+            Correct answer{' '}
+            <span className="text-[var(--color-muted)] font-normal">
+              (mark True or False for this statement)
+            </span>
+          </label>
+          <div className="grid grid-cols-2 gap-3">
+            {question.question_choices.map((choice, ci) => {
+              const isCorrect = choice.is_correct;
+              return (
+                <button
+                  key={choice.id}
+                  type="button"
+                  onClick={() => {
+                    const next = question.question_choices.map((c, i) => ({
+                      ...c,
+                      is_correct: i === ci,
+                    }));
+                    onUpdate({ question_choices: next });
+                    setIsDirty(true);
+                  }}
+                  className={`flex items-center justify-center gap-2 p-4 rounded-[var(--radius-md)] border-2 text-sm font-semibold transition-colors ${
+                    isCorrect
+                      ? 'border-[var(--color-success)] bg-[var(--color-success)]/10 text-[var(--color-success)]'
+                      : 'border-[var(--color-border)] text-[var(--color-muted)] hover:border-[var(--color-primary)]/40'
+                  }`}
+                  aria-pressed={isCorrect}
+                >
+                  {isCorrect && (
+                    <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                    </svg>
+                  )}
+                  {choice.choice_text}
+                </button>
+              );
+            })}
+          </div>
         </div>
       )}
 

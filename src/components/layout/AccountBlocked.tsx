@@ -1,4 +1,5 @@
 import type { JSX } from 'react';
+import { redirect } from 'next/navigation';
 import { signOut } from '@/app/actions/auth';
 
 interface AccountBlockedProps {
@@ -8,7 +9,7 @@ interface AccountBlockedProps {
 /**
  * Rendered in place of a section's pages when an administrator has suspended or
  * deactivated the account. Signing out happens through a server action (the
- * only place auth cookies can be cleared) so the user can reach /login again.
+ * only place auth cookies can be cleared) so the user reaches the landing page.
  */
 export default function AccountBlocked({ reason }: AccountBlockedProps): JSX.Element {
   const message =
@@ -27,6 +28,7 @@ export default function AccountBlocked({ reason }: AccountBlockedProps): JSX.Ele
           action={async () => {
             'use server';
             await signOut();
+            redirect('/');
           }}
         >
           <button

@@ -150,6 +150,21 @@ export default async function FacultyDashboardPage() {
                 </CardContent>
               </Card>
             </Link>
+            <Link href="/faculty/subjects">
+              <Card className="hover:shadow-md transition-shadow cursor-pointer">
+                <CardContent className="flex items-center gap-4">
+                  <div className="flex-shrink-0 w-10 h-10 rounded-lg bg-[var(--color-primary-light)] flex items-center justify-center">
+                    <svg className="w-5 h-5 text-[var(--color-primary)]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm8-2v6m3-3h-6" />
+                    </svg>
+                  </div>
+                  <div>
+                    <p className="font-medium text-[var(--color-foreground)]">Enroll Students</p>
+                    <p className="text-sm text-[var(--color-muted)]">Add students to a subject offering</p>
+                  </div>
+                </CardContent>
+              </Card>
+            </Link>
           </div>
         </div>
       </div>

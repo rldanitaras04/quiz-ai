@@ -5,6 +5,7 @@ import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import { Card, CardHeader, CardContent } from '@/components/ui/Card';
 import Badge from '@/components/ui/Badge';
+import { Brand } from '@/components/brand';
 
 interface SetupStep {
   id: string;
@@ -90,10 +91,17 @@ export default function SetupPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'create_test_student' }),
       });
+      const contentType = res.headers.get('content-type') ?? '';
+      if (!contentType.includes('application/json')) {
+        const preview = (await res.text()).slice(0, 80);
+        throw new Error(
+          `Server returned non-JSON (${res.status}): ${preview}… — is the dev server running the latest code?`
+        );
+      }
       const data = await res.json();
       if (data.success) {
         setStudentResult(
-          `Test student created! Email: ${data.credentials.email} | Password: ${data.credentials.password}`
+          `Test student ready (verified)! Email: ${data.credentials.email} | Password: ${data.credentials.password}`
         );
       } else {
         setStudentResult(`Error: ${data.error}`);
@@ -106,9 +114,12 @@ export default function SetupPage() {
   return (
     <div className="min-h-screen bg-[var(--color-background)] p-4 md:p-8">
       <div className="max-w-2xl mx-auto space-y-6">
-        <div className="text-center">
+        <div className="text-center space-y-2">
+          <div className="flex justify-center">
+            <Brand />
+          </div>
           <h1 className="text-2xl font-bold text-[var(--color-foreground)]">
-            MiMo Setup
+            SEAMS AI Setup
           </h1>
           <p className="text-[var(--color-muted)] mt-1">
             Follow these steps to configure your assessment system
@@ -256,7 +267,9 @@ export default function SetupPage() {
           </CardHeader>
           <CardContent className="space-y-3">
             <p className="text-sm text-[var(--color-muted)]">
-              Creates a ready-to-use student account for testing. Enrolled in all active subject offerings.
+              Creates a ready-to-use student account for testing. Email is confirmed and{' '}
+              <strong>verification_status is set to verified</strong>, enrolled in all active
+              subject offerings. Safe to re-run: an existing account is upgraded to verified.
             </p>
             <div className="p-3 rounded-[var(--radius-md)] bg-[var(--color-surface-hover)] text-sm">
               <p><strong>Email:</strong> student@test.com</p>

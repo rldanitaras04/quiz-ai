@@ -46,7 +46,7 @@ export default async function ExamResultsPage({ params }: Props) {
         id,
         total_items,
         total_points,
-        assessment:assessments(id, title)
+        assessment:assessments!assessment_versions_assessment_id_fkey(id, title)
       )
     `)
     .eq('id', attempt.deployment_id)
@@ -67,8 +67,13 @@ export default async function ExamResultsPage({ params }: Props) {
 
   // Breakdown (questions + answer keys) is fetched via a server action using
   // the service-role client; students have no direct SELECT on questions.
+  // Shown for any submitted attempt so students can review their answers.
   let responses: Awaited<ReturnType<typeof getAttemptBreakdown>>['data'] = [];
-  if (d?.show_item_correctness) {
+  const canReview =
+    attempt.status === 'submitted' ||
+    attempt.status === 'auto_submitted' ||
+    attempt.status === 'expired';
+  if (canReview) {
     const breakdown = await getAttemptBreakdown(attemptId);
     responses = breakdown.data ?? [];
   }
@@ -136,7 +141,10 @@ export default async function ExamResultsPage({ params }: Props) {
           {responses.length > 0 && (
             <Card>
               <CardHeader>
-                <h2 className="text-lg font-semibold">Question Breakdown</h2>
+                <h2 className="text-lg font-semibold">Question Review</h2>
+                <p className="text-sm text-[var(--color-muted)]">
+                  Your answers for this attempt. Correct items are highlighted green; incorrect in red.
+                </p>
               </CardHeader>
               <CardContent className="p-0">
                 <Table caption="Your answers, item by item">
@@ -153,15 +161,22 @@ export default async function ExamResultsPage({ params }: Props) {
                   <TBody>
                     {responses.map((r, i) => {
                       const isCorrect = r.earnedPoints !== null && r.earnedPoints === r.points;
+                      const isChoiceBased =
+                        r.questionType === 'multiple_choice' || r.questionType === 'true_false';
                       const selectedChoice = r.choices.find((c) => c.id === r.selectedChoiceId);
                       const correctChoice = r.choices.find((c) => c.id === r.correctChoiceId);
-                      const givenAnswer =
-                        r.questionType === 'multiple_choice'
-                          ? selectedChoice?.choice_text
-                          : r.textAnswer;
+                      const givenAnswer = isChoiceBased
+                        ? selectedChoice?.choice_text
+                        : r.textAnswer;
+                      const correctAnswer = isChoiceBased
+                        ? correctChoice?.choice_text
+                        : r.canonicalAnswer;
+                      const rowTint = isCorrect
+                        ? 'bg-[var(--color-success-light)]'
+                        : 'bg-[var(--color-danger-light)]';
 
                       return (
-                        <TR key={r.questionId} className="align-top">
+                        <TR key={r.questionId} className={`align-top ${rowTint}`}>
                           <TD numeric className="text-[var(--color-muted)]">
                             {r.position ?? i + 1}
                           </TD>
@@ -169,16 +184,14 @@ export default async function ExamResultsPage({ params }: Props) {
                           <TD
                             className={
                               isCorrect
-                                ? 'text-[var(--color-success)]'
-                                : 'text-[var(--color-danger)]'
+                                ? 'font-medium text-[var(--color-success)]'
+                                : 'font-medium text-[var(--color-danger)]'
                             }
                           >
                             {givenAnswer || 'No answer'}
                           </TD>
                           <TD className="text-[var(--color-muted)]">
-                            {d?.show_correct_answers && correctChoice
-                              ? correctChoice.choice_text
-                              : '—'}
+                            {correctAnswer ?? '—'}
                           </TD>
                           <TD>
                             <Badge variant={isCorrect ? 'success' : 'danger'}>
@@ -197,11 +210,11 @@ export default async function ExamResultsPage({ params }: Props) {
             </Card>
           )}
 
-          {responses.length === 0 && d?.show_item_correctness && (
+          {responses.length === 0 && canReview && (
             <Card>
               <CardContent>
                 <p className="text-sm text-[var(--color-muted)] text-center py-4">
-                  Detailed breakdown is not available for this exam.
+                  Question review is not available for this exam.
                 </p>
               </CardContent>
             </Card>

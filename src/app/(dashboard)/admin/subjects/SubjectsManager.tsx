@@ -12,6 +12,7 @@ import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { confirmAction, notifyError, notifySuccess } from '@/components/ui/alerts';
 import type { AdminReferenceData } from '../actions';
 import type { SubjectOverview, OfferingWithFaculty } from './actions';
+import ManageStudentsModal from './ManageStudentsModal';
 import {
   createSubject,
   updateSubject,
@@ -60,6 +61,7 @@ export default function SubjectsManager({
   const [search, setSearch] = useState('');
   const [subjectForm, setSubjectForm] = useState<SubjectFormState | null>(null);
   const [offeringForm, setOfferingForm] = useState<OfferingFormState | null>(null);
+  const [rosterOfferingId, setRosterOfferingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -150,6 +152,12 @@ export default function SubjectsManager({
 
   return (
     <>
+      <ManageStudentsModal
+        offeringId={rosterOfferingId ?? ''}
+        open={rosterOfferingId !== null}
+        onClose={() => setRosterOfferingId(null)}
+      />
+
       <div className="flex flex-wrap items-center gap-2 mb-4">
         <Button
           size="sm"
@@ -395,6 +403,7 @@ export default function SubjectsManager({
                             offering={offering}
                             facultyOptions={reference.faculty}
                             onChanged={() => router.refresh()}
+                            onManageStudents={() => setRosterOfferingId(offering.id)}
                           />
                         ))}
                       </tbody>
@@ -418,10 +427,12 @@ function OfferingRow({
   offering,
   facultyOptions,
   onChanged,
+  onManageStudents,
 }: {
   offering: OfferingWithFaculty;
   facultyOptions: AdminReferenceData['faculty'];
   onChanged: () => void;
+  onManageStudents: () => void;
 }): JSX.Element {
   const assignedIds = new Set(offering.faculty.map((f) => f.facultyId));
   const unassigned = facultyOptions.filter((f) => !assignedIds.has(f.id));
@@ -486,6 +497,14 @@ function OfferingRow({
       </td>
       <td className="py-2 px-3">
         <div className="flex flex-col gap-1">
+          <Button
+            size="sm"
+            variant="outline"
+            className="!h-7 !px-2 !text-xs"
+            onClick={onManageStudents}
+          >
+            Students ({offering.enrolledCount})
+          </Button>
           <Select
             aria-label="Offering status"
             value={offering.status}

@@ -4,8 +4,11 @@ import PageHeader from '@/components/ui/PageHeader';
 import { Card } from '@/components/ui/Card';
 import Badge from '@/components/ui/Badge';
 import EmptyState from '@/components/ui/EmptyState';
+import WorkspaceNavSetter from '@/components/layout/WorkspaceNavSetter';
 import AddStudentButton from './AddStudentButton';
+import EnrollBulkButton from './EnrollBulkButton';
 import RemoveStudentButton from './RemoveStudentButton';
+import ReenrollStudentButton from './ReenrollStudentButton';
 
 interface Props {
   params: Promise<{ offeringId: string }>;
@@ -23,11 +26,29 @@ interface EnrollmentRow {
   status: string;
   enrolled_at: string;
   student: {
-    id: string;
-    full_name: string;
-    email: string | null;
-    student_profiles: { student_number: string } | { student_number: string }[] | null;
+    student_number: string | null;
+    profiles:
+      | { id: string; full_name: string | null; email: string | null }
+      | { id: string; full_name: string | null; email: string | null }[]
+      | null;
   } | null;
+}
+
+const statusBadge: Record<string, { label: string; variant: 'success' | 'warning' | 'danger' | 'info' | 'default' }> = {
+  enrolled: { label: 'Enrolled', variant: 'success' },
+  withdrawn: { label: 'Withdrawn', variant: 'warning' },
+  dropped: { label: 'Dropped', variant: 'danger' },
+  completed: { label: 'Completed', variant: 'info' },
+};
+
+function studentDisplay(student: EnrollmentRow['student']): { number: string; name: string; email: string | null } {
+  const profileRaw = student?.profiles ?? null;
+  const profile = Array.isArray(profileRaw) ? profileRaw[0] : profileRaw;
+  return {
+    number: student?.student_number || 'N/A',
+    name: profile?.full_name || '(unknown)',
+    email: profile?.email ?? null,
+  };
 }
 
 export default async function StudentsPage({ params }: Props) {
@@ -54,17 +75,22 @@ export default async function StudentsPage({ params }: Props) {
       student_id,
       status,
       enrolled_at,
-      student:profiles(id, full_name, email, student_profiles(student_number))
+      student:student_profiles(student_number, profiles(id, full_name, email))
     `)
     .eq('subject_offering_id', offeringId)
     .order('enrolled_at', { ascending: true });
 
-  const activeEnrollments = ((enrollments ?? []) as unknown as EnrollmentRow[]).filter(
-    (e) => e.status === 'enrolled'
-  );
+  // Every status is shown: withdrawn/dropped students stay visible with a
+  // re-enroll action instead of silently disappearing from the roster.
+  const rows = ((enrollments ?? []) as unknown as EnrollmentRow[]);
+  const activeCount = rows.filter((e) => e.status === 'enrolled').length;
 
   return (
     <div>
+      <WorkspaceNavSetter
+        offeringId={offeringId}
+        currentPath={`/faculty/subjects/${offeringId}/students`}
+      />
       <PageHeader
         breadcrumbs={[
           { label: 'Faculty', href: '/faculty' },
@@ -73,11 +99,19 @@ export default async function StudentsPage({ params }: Props) {
           { label: 'Students' },
         ]}
         title="Student Enrollment"
-        description={`${o.subject?.code} - ${o.section?.name}`}
-        actions={<AddStudentButton offeringId={offeringId} />}
+        description={`${o.subject?.code} - ${o.section?.name} · ${activeCount} enrolled · ${rows.length} total`}
+        actions={
+          <>
+            <EnrollBulkButton
+              offeringId={offeringId}
+              sectionName={o.section?.name ?? 'this section'}
+            />
+            <AddStudentButton offeringId={offeringId} />
+          </>
+        }
       />
 
-      {activeEnrollments.length > 0 ? (
+      {rows.length > 0 ? (
         <Card>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -92,30 +126,41 @@ export default async function StudentsPage({ params }: Props) {
                 </tr>
               </thead>
               <tbody>
-                {activeEnrollments.map((e) => {
-                  const studentProfile = e.student?.student_profiles;
-                  const studentNumber = Array.isArray(studentProfile) && studentProfile.length > 0
-                    ? studentProfile[0].student_number
-                    : 'N/A';
+                {rows.map((e) => {
+                  const display = studentDisplay(e.student);
+                  const badge = statusBadge[e.status] ?? { label: e.status, variant: 'default' as const };
 
                   return (
-                    <tr key={e.id} className="border-b border-[var(--color-border)] last:border-0 hover:bg-[var(--color-surface-hover)]">
-                      <td className="px-6 py-3 font-mono text-[var(--color-foreground)]">{studentNumber}</td>
-                      <td className="px-6 py-3 text-[var(--color-foreground)]">{e.student?.full_name}</td>
-                      <td className="px-6 py-3 text-[var(--color-muted)]">{e.student?.email}</td>
+                    <tr
+                      key={e.id}
+                      className={`border-b border-[var(--color-border)] last:border-0 hover:bg-[var(--color-surface-hover)] ${
+                        e.status !== 'enrolled' ? 'opacity-80' : ''
+                      }`}
+                    >
+                      <td className="px-6 py-3 font-mono text-[var(--color-foreground)]">{display.number}</td>
+                      <td className="px-6 py-3 text-[var(--color-foreground)]">{display.name}</td>
+                      <td className="px-6 py-3 text-[var(--color-muted)]">{display.email}</td>
                       <td className="px-6 py-3">
-                        <Badge variant="success">Enrolled</Badge>
+                        <Badge variant={badge.variant}>{badge.label}</Badge>
                       </td>
                       <td className="px-6 py-3 text-[var(--color-muted)]">
                         {new Date(e.enrolled_at).toLocaleDateString()}
                       </td>
                       <td className="px-6 py-3">
                         <div className="flex justify-end">
-                          <RemoveStudentButton
-                            offeringId={offeringId}
-                            studentId={e.student_id}
-                            studentName={e.student?.full_name ?? 'this student'}
-                          />
+                          {e.status === 'enrolled' ? (
+                            <RemoveStudentButton
+                              offeringId={offeringId}
+                              studentId={e.student_id}
+                              studentName={display.name}
+                            />
+                          ) : (
+                            <ReenrollStudentButton
+                              offeringId={offeringId}
+                              studentId={e.student_id}
+                              studentName={display.name}
+                            />
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -128,7 +173,7 @@ export default async function StudentsPage({ params }: Props) {
       ) : (
         <EmptyState
           title="No students enrolled"
-          description="Students will appear here once they enroll in this offering."
+          description="Add students by student number, paste a list in bulk, or enroll everyone assigned to this section."
         />
       )}
     </div>

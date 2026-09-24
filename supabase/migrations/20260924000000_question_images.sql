@@ -81,7 +81,7 @@ CREATE POLICY "Faculty can update question images"
   ON storage.objects FOR UPDATE TO authenticated
   USING (
     bucket_id = 'question-images'
-    AND (is_super_admin(auth.uid()) OR auth.uid()::text = (storage.owner)::text OR is_faculty_of_offering(auth.uid(), ((storage.foldername(name))[1])::uuid))
+    AND (is_super_admin(auth.uid()) OR auth.uid()::text = owner::text OR is_faculty_of_offering(auth.uid(), ((storage.foldername(name))[1])::uuid))
   );
 
 DROP POLICY IF EXISTS "Faculty can delete question images" ON storage.objects;
@@ -89,5 +89,5 @@ CREATE POLICY "Faculty can delete question images"
   ON storage.objects FOR DELETE TO authenticated
   USING (
     bucket_id = 'question-images'
-    AND (is_super_admin(auth.uid()) OR auth.uid()::text = (storage.owner)::text OR is_faculty_of_offering(auth.uid(), ((storage.foldername(name))[1])::uuid))
+    AND (is_super_admin(auth.uid()) OR auth.uid()::text = owner::text OR is_faculty_of_offering(auth.uid(), ((storage.foldername(name))[1])::uuid))
   );

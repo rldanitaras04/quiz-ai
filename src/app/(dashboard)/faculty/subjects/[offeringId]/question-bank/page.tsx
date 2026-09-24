@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase/client';
 import PageHeader from '@/components/ui/PageHeader';
 import QuestionBankManager from '@/components/assessment/QuestionBankManager';
 import TopicManager from '@/components/assessment/TopicManager';
+import WorkspaceNavSetter from '@/components/layout/WorkspaceNavSetter';
 import { getTopicsForOffering } from '../topics/actions';
 import type { Topic } from '@/lib/types';
 
@@ -59,6 +60,10 @@ export default function QuestionBankPage({ params }: Props) {
 
   return (
     <div className="space-y-8">
+      <WorkspaceNavSetter
+        offeringId={offeringId}
+        currentPath={`/faculty/subjects/${offeringId}/question-bank`}
+      />
       <PageHeader
         breadcrumbs={[
           { label: 'Faculty', href: '/faculty' },

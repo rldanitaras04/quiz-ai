@@ -5,7 +5,8 @@ import { useRouter } from 'next/navigation';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import { useSupabase } from '@/lib/hooks';
-import { APP_NAME, APP_DESCRIPTION } from '@/lib/constants';
+import { APP_DESCRIPTION } from '@/lib/constants';
+import { Brand } from '@/components/brand';
 
 export default function LoginPage(): JSX.Element {
   const router = useRouter();
@@ -41,11 +42,8 @@ export default function LoginPage(): JSX.Element {
 
   return (
     <div className="flex flex-col items-center">
-      <div className="mb-8 flex items-center gap-3">
-        <div className="flex items-center justify-center h-10 w-10 rounded-[var(--radius-md)] bg-[var(--color-primary)] text-white text-lg font-bold">
-          M
-        </div>
-        <span className="text-2xl font-bold text-[var(--color-foreground)]">{APP_NAME}</span>
+      <div className="mb-8 flex items-center justify-center">
+        <Brand />
       </div>
 
       <h1 className="text-xl font-semibold text-[var(--color-foreground)] mb-1">Sign in</h1>

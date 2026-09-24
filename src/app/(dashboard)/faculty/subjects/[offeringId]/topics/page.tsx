@@ -5,6 +5,7 @@ import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import PageHeader from '@/components/ui/PageHeader';
 import TopicManager from '@/components/assessment/TopicManager';
+import WorkspaceNavSetter from '@/components/layout/WorkspaceNavSetter';
 import { getTopicsForOffering } from './actions';
 import type { Topic } from '@/lib/types';
 
@@ -58,6 +59,10 @@ export default function TopicsPage({ params }: Props) {
 
   return (
     <div>
+      <WorkspaceNavSetter
+        offeringId={offeringId}
+        currentPath={`/faculty/subjects/${offeringId}/topics`}
+      />
       <PageHeader
         breadcrumbs={[
           { label: 'Faculty', href: '/faculty' },

@@ -15,6 +15,8 @@ import {
   CaretDown,
   CaretUp,
 } from '@phosphor-icons/react';
+import { BrandIcon } from '@/components/brand';
+import { APP_NAME } from '@/lib/constants';
 
 interface TopBarProps {
   title: string;
@@ -83,7 +85,8 @@ export default function TopBar({
     try {
       await signOut();
       await supabase.auth.signOut();
-      router.push('/login');
+      // Land on the public homepage after logout (not /login).
+      router.push('/');
       router.refresh();
     } finally {
       setLoggingOut(false);
@@ -103,7 +106,12 @@ export default function TopBar({
         <List className="h-6 w-6" weight="regular" />
       </button>
 
-      <h1 className="text-lg font-semibold text-[var(--color-foreground)] truncate">{title}</h1>
+      <div className="flex items-center gap-2 min-w-0 mr-3 lg:hidden">
+        <BrandIcon className="h-6 w-6" alt={APP_NAME} />
+        <h1 className="text-lg font-semibold text-[var(--color-foreground)] truncate">{title}</h1>
+      </div>
+
+      <h1 className="hidden lg:block text-lg font-semibold text-[var(--color-foreground)] truncate">{title}</h1>
 
       <div className="ml-auto flex items-center">
         {/* Notifications bell with badge */}

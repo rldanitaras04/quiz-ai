@@ -7,6 +7,7 @@ import EmptyState from '@/components/ui/EmptyState';
 import { Table, THead, TBody, TR, TH, TD } from '@/components/ui/Table';
 import CancelDeploymentButton from './CancelDeploymentButton';
 import ReleaseResultsButton from './ReleaseResultsButton';
+import WorkspaceNavSetter from '@/components/layout/WorkspaceNavSetter';
 
 interface Props {
   params: Promise<{ offeringId: string }>;
@@ -33,6 +34,7 @@ interface DeploymentRow {
     total_items: number;
     total_points: number;
   } | null;
+  takers: number;
 }
 
 function deploymentVariant(status: string): 'success' | 'warning' | 'info' | 'default' {
@@ -76,10 +78,36 @@ export default async function DeploymentsPage({ params }: Props) {
     .eq('subject_offering_id', offeringId)
     .order('opens_at', { ascending: false });
 
-  const list = (deployments ?? []) as unknown as DeploymentRow[];
+  const rows = (deployments ?? []) as unknown as Omit<DeploymentRow, 'takers'>[];
+
+  // Distinct students with a real attempt (started or beyond) per deployment.
+  const deploymentIds = rows.map((d) => d.id);
+  const takersByDeployment = new Map<string, Set<string>>();
+  if (deploymentIds.length > 0) {
+    const { data: attempts } = await supabase
+      .from('exam_attempts')
+      .select('deployment_id, student_id, status')
+      .in('deployment_id', deploymentIds)
+      .neq('status', 'cancelled');
+
+    for (const attempt of (attempts ?? []) as Array<{ deployment_id: string; student_id: string }>) {
+      const set = takersByDeployment.get(attempt.deployment_id) ?? new Set<string>();
+      set.add(attempt.student_id);
+      takersByDeployment.set(attempt.deployment_id, set);
+    }
+  }
+
+  const list: DeploymentRow[] = rows.map((d) => ({
+    ...d,
+    takers: takersByDeployment.get(d.id)?.size ?? 0,
+  }));
 
   return (
     <div>
+      <WorkspaceNavSetter
+        offeringId={offeringId}
+        currentPath={`/faculty/subjects/${offeringId}/deployments`}
+      />
       <PageHeader
         breadcrumbs={[
           { label: 'Faculty', href: '/faculty' },
@@ -102,6 +130,7 @@ export default async function DeploymentsPage({ params }: Props) {
                 <TH align="right">Points</TH>
                 <TH align="right">Duration</TH>
                 <TH align="right">Attempts</TH>
+                <TH align="right">Takers</TH>
                 <TH>Window</TH>
                 <TH>Status</TH>
                 <TH align="right">Actions</TH>
@@ -133,6 +162,9 @@ export default async function DeploymentsPage({ params }: Props) {
                     </TD>
                     <TD numeric className="text-[var(--color-muted)]">
                       {d.attempt_limit}
+                    </TD>
+                    <TD numeric className="text-[var(--color-foreground)]">
+                      {d.takers}
                     </TD>
                     <TD className="text-xs text-[var(--color-muted)]">
                       {opensAt.toLocaleString()}

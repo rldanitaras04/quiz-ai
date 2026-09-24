@@ -6,8 +6,8 @@ import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import Badge from '@/components/ui/Badge';
 import EmptyState from '@/components/ui/EmptyState';
 import Button from '@/components/ui/Button';
-import { Table, THead, TBody, TR, TH, TD } from '@/components/ui/Table';
-import { ASSESSMENT_STATUS_LABELS } from '@/lib/constants';
+import AssessmentsTable from '@/app/(dashboard)/faculty/subjects/[offeringId]/assessments/AssessmentsTable';
+import type { AssessmentListRow } from '@/app/(dashboard)/faculty/subjects/[offeringId]/assessments/AssessmentsTable';
 
 interface Props {
   params: Promise<{ subjectId: string }>;
@@ -97,50 +97,40 @@ export default async function SubjectAssessmentsPage({ params }: Props) {
       status,
       created_at,
       subject_offering_id,
-      current_version:assessment_versions(id, total_items, total_points)
+      current_version:assessment_versions!assessments_current_version_id_fkey(id, total_items, total_points)
     `)
     .in('subject_offering_id', offeringIds)
     .order('created_at', { ascending: false });
 
   const assessmentRows = (assessments ?? []) as unknown as AssessmentRow[];
 
-  // Group assessments by title to show cross-section assessments
-  const assessmentMap = new Map<string, {
-    id: string;
-    title: string;
-    assessment_type: string;
-    status: string;
-    created_at: string;
-    offeringIds: string[];
-    version: { id: string; total_items: number; total_points: number } | null;
-  }>();
+  // List every assessment (do not collapse by title — separate drafts can share a title).
+  const offeringSectionById = new Map(offeringList.map((o) => [o.id, o.section?.name ?? '—']));
+  const uniqueAssessments = assessmentRows.map((assessment) => ({
+    id: assessment.id,
+    title: assessment.title,
+    assessment_type: assessment.assessment_type,
+    status: assessment.status,
+    created_at: assessment.created_at,
+    offeringIds: [assessment.subject_offering_id],
+    sectionLabel: offeringSectionById.get(assessment.subject_offering_id) ?? '—',
+    version: assessment.current_version,
+  }));
 
-  for (const assessment of assessmentRows) {
-    const key = assessment.title;
-    if (!assessmentMap.has(key)) {
-      assessmentMap.set(key, {
-        id: assessment.id,
-        title: assessment.title,
-        assessment_type: assessment.assessment_type,
-        status: assessment.status,
-        created_at: assessment.created_at,
-        offeringIds: [],
-        version: assessment.current_version,
-      });
-    }
-    assessmentMap.get(key)!.offeringIds.push(assessment.subject_offering_id);
-  }
-
-  const uniqueAssessments = Array.from(assessmentMap.values());
-
-  const statusVariant = (status: string): 'success' | 'warning' | 'info' | 'default' => {
-    switch (status) {
-      case 'published': return 'success';
-      case 'approved': return 'info';
-      case 'draft': return 'warning';
-      default: return 'default';
-    }
-  };
+  const listRows: AssessmentListRow[] = uniqueAssessments.map((assessment) => ({
+    id: assessment.id,
+    title: assessment.title,
+    assessment_type: assessment.assessment_type,
+    status: assessment.status,
+    created_at: assessment.created_at,
+    total_items: assessment.version?.total_items ?? null,
+    total_points: assessment.version?.total_points ?? null,
+    section_label: assessment.sectionLabel,
+    review_href: `/faculty/subjects/subject/${subjectId}/assessments/${assessment.id}`,
+    deploy_href: `/faculty/subjects/subject/${subjectId}/assessments/${assessment.id}/deploy`,
+    show_deploy: true,
+    single_redirect_to: `/faculty/subjects/subject/${subjectId}`,
+  }));
 
   return (
     <div>
@@ -176,72 +166,8 @@ export default async function SubjectAssessmentsPage({ params }: Props) {
       </Card>
 
       {/* Assessments */}
-      {uniqueAssessments.length > 0 ? (
-        <Card>
-          <CardHeader>
-            <h3 className="text-base font-semibold text-foreground">
-              Assessments ({uniqueAssessments.length})
-            </h3>
-          </CardHeader>
-          <Table caption="Assessments for this subject">
-            <THead>
-              <TR>
-                <TH>Assessment</TH>
-                <TH>Type</TH>
-                <TH align="right">Items</TH>
-                <TH align="right">Points</TH>
-                <TH>Sections</TH>
-                <TH>Created</TH>
-                <TH>Status</TH>
-                <TH align="right">Actions</TH>
-              </TR>
-            </THead>
-            <TBody>
-              {uniqueAssessments.map((assessment) => (
-                <TR key={assessment.id} className="hover:bg-[var(--color-surface-hover)]">
-                  <TD className="font-medium">
-                    <Link
-                      href={`/faculty/subjects/subject/${subjectId}/assessments/${assessment.id}`}
-                      className="text-[var(--color-foreground)] hover:text-[var(--color-primary)] hover:underline"
-                    >
-                      {assessment.title}
-                    </Link>
-                  </TD>
-                  <TD className="text-[var(--color-muted)]">
-                    {assessment.assessment_type === 'multiple_choice' ? 'MCQ' : 'ID'}
-                  </TD>
-                  <TD numeric className="text-[var(--color-foreground)]">
-                    {assessment.version?.total_items ?? '—'}
-                  </TD>
-                  <TD numeric className="text-[var(--color-foreground)]">
-                    {assessment.version?.total_points ?? '—'}
-                  </TD>
-                  <TD>
-                    <Badge variant="info">
-                      {assessment.offeringIds.length} section{assessment.offeringIds.length !== 1 ? 's' : ''}
-                    </Badge>
-                  </TD>
-                  <TD className="text-xs text-[var(--color-muted)]">
-                    {new Date(assessment.created_at).toLocaleDateString()}
-                  </TD>
-                  <TD>
-                    <Badge variant={statusVariant(assessment.status)}>
-                      {ASSESSMENT_STATUS_LABELS[assessment.status as keyof typeof ASSESSMENT_STATUS_LABELS] ?? assessment.status}
-                    </Badge>
-                  </TD>
-                  <TD className="whitespace-nowrap text-right">
-                    <Link
-                      href={`/faculty/subjects/subject/${subjectId}/assessments/${assessment.id}`}
-                      className="text-sm font-medium text-[var(--color-primary)] hover:underline"
-                    >
-                      Review
-                    </Link>
-                  </TD>
-                </TR>
-              ))}
-            </TBody>
-          </Table>
-        </Card>
+      {listRows.length > 0 ? (
+        <AssessmentsTable rows={listRows} />
       ) : (
         <EmptyState
           title="No assessments yet"

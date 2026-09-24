@@ -1,5 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { buildQuestionIdOrder } from '@/lib/exam-order';
+import { COUNTABLE_ATTEMPT_STATUSES } from '@/lib/attempt-limit';
 import type { ExamAttempt, ExamManifest, QuestionWithChoices, AssessmentException } from '@/lib/types';
 
 /**
@@ -150,14 +152,20 @@ export async function startExamAttempt(
     return { error: 'Not enrolled in this subject', status: 403 };
   }
 
-  const { count: attemptCount } = await supabase
+  // Count with the session client (own attempts are readable). Fail closed if
+  // the count cannot be read — never open an extra attempt on a null count.
+  const { count: attemptCount, error: countError } = await supabase
     .from('exam_attempts')
     .select('id', { count: 'exact', head: true })
     .eq('deployment_id', deploymentId)
     .eq('student_id', userId)
-    .in('status', ['created', 'in_progress', 'submitted', 'auto_submitted']);
+    .in('status', [...COUNTABLE_ATTEMPT_STATUSES]);
 
-  if (attemptCount !== null && attemptCount >= effectiveAttemptLimit) {
+  if (countError || attemptCount === null) {
+    return { error: 'Could not verify attempt limit', status: 403 };
+  }
+
+  if (attemptCount >= effectiveAttemptLimit) {
     return { error: 'Attempt limit reached', status: 403 };
   }
 
@@ -180,9 +188,12 @@ export async function startExamAttempt(
   }
 
   let orderedQuestions: QuestionWithChoices[] = [...(questions as QuestionWithChoices[])];
-  if (deployment.question_order_mode === 'shuffled') {
-    orderedQuestions = shuffleArray(orderedQuestions);
-  }
+  // Cluster by type (MCQ → ID → True/False) and, when shuffled, randomize
+  // only inside each type group so sections stay intact per student.
+  const shuffleWithin = deployment.question_order_mode === 'shuffled';
+  const idOrder = buildQuestionIdOrder(orderedQuestions, { shuffleWithinGroups: shuffleWithin });
+  const byId = new Map(orderedQuestions.map((q) => [q.id, q]));
+  orderedQuestions = idOrder.map((id) => byId.get(id)!).filter(Boolean);
 
   const questionOrder = orderedQuestions.map((q) => q.id);
   const choiceOrder: Record<string, string[]> = {};
@@ -198,7 +209,7 @@ export async function startExamAttempt(
     }
   }
 
-  const attemptNumber = (attemptCount ?? 0) + 1;
+  const attemptNumber = attemptCount + 1;
   const expiresAt = new Date(now.getTime() + effectiveDurationMinutes * 60 * 1000);
 
   // Attempt + manifest writes go through the service-role client:

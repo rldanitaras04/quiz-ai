@@ -33,6 +33,7 @@ export default function StepApprove({
   const questions = state.generatedQuestions;
   const mcqCount = questions.filter((q) => q.question_type === 'multiple_choice').length;
   const idCount = questions.filter((q) => q.question_type === 'identification').length;
+  const tfCount = questions.filter((q) => q.question_type === 'true_false').length;
   const totalPoints = questions.reduce((sum, q) => sum + q.points, 0);
 
   const difficultyCounts = {
@@ -50,6 +51,7 @@ export default function StepApprove({
     return Array.from(map.entries());
   })();
   const creationModeLabel = (state as any).creationMode === 'manual' ? 'Manual' : (state as any).creationMode === 'bank' ? 'Question Bank' : (state as any).creationMode === 'mixed' ? 'Mixed' : 'AI';
+  const isDraft = state.draftStatus === 'draft';
 
   const handleApprove = async () => {
     if (questions.length === 0) {
@@ -144,10 +146,12 @@ export default function StepApprove({
     <div className="space-y-6">
       <div>
         <h2 className="text-lg font-semibold text-[var(--color-foreground)] mb-1">
-          Approve & Schedule
+          {isDraft ? 'Approve Assessment' : 'Approve & Schedule'}
         </h2>
         <p className="text-sm text-[var(--color-muted)]">
-          Review the assessment summary, approve, and schedule when it opens.
+          {isDraft
+            ? 'Review the assessment summary and approve. Schedule later from the deploy page.'
+            : 'Review the assessment summary, approve, and schedule when it opens.'}
         </p>
       </div>
 
@@ -189,9 +193,10 @@ export default function StepApprove({
           <h4 className="text-xs font-semibold text-[var(--color-muted)] uppercase tracking-wide mb-2">
             Question Types
           </h4>
-          <div className="flex gap-3">
+          <div className="flex flex-wrap gap-3">
             <Badge variant="info">{mcqCount} Multiple Choice</Badge>
             <Badge variant="info">{idCount} Identification</Badge>
+            <Badge variant="info">{tfCount} True or False</Badge>
           </div>
         </div>
 
@@ -220,50 +225,52 @@ export default function StepApprove({
         </div>
       </div>
 
-      {/* Scheduling */}
-      <div className="p-5 rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface-hover)]">
-        <h3 className="text-base font-semibold text-[var(--color-foreground)] mb-4">
-          Schedule
-        </h3>
-        <p className="text-sm text-[var(--color-muted)] mb-4">
-          Set when the assessment opens and closes for students.
-        </p>
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Input
-            label="Opens at"
-            type="datetime-local"
-            value={state.opensAt ?? ''}
-            onChange={(e) => onUpdate({ opensAt: e.target.value })}
-            required
-          />
-          <Input
-            label="Closes at"
-            type="datetime-local"
-            value={state.closesAt ?? ''}
-            onChange={(e) => onUpdate({ closesAt: e.target.value })}
-            required
-          />
+      {/* Scheduling — skipped for draft saves; schedule later on Deploy */}
+      {!isDraft && (
+        <div className="p-5 rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface-hover)]">
+          <h3 className="text-base font-semibold text-[var(--color-foreground)] mb-4">
+            Schedule
+          </h3>
+          <p className="text-sm text-[var(--color-muted)] mb-4">
+            Set when the assessment opens and closes for students.
+          </p>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Input
+              label="Opens at"
+              type="datetime-local"
+              value={state.opensAt ?? ''}
+              onChange={(e) => onUpdate({ opensAt: e.target.value })}
+              required
+            />
+            <Input
+              label="Closes at"
+              type="datetime-local"
+              value={state.closesAt ?? ''}
+              onChange={(e) => onUpdate({ closesAt: e.target.value })}
+              required
+            />
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2 mt-4">
+            <Input
+              label="Duration (minutes)"
+              type="number"
+              min={1}
+              value={state.durationMinutes ?? 60}
+              onChange={(e) => onUpdate({ durationMinutes: parseInt(e.target.value) || 60 })}
+              required
+            />
+            <Input
+              label="Attempt limit"
+              type="number"
+              min={1}
+              max={10}
+              value={state.attemptLimit ?? 1}
+              onChange={(e) => onUpdate({ attemptLimit: parseInt(e.target.value) || 1 })}
+              required
+            />
+          </div>
         </div>
-        <div className="grid gap-4 sm:grid-cols-2 mt-4">
-          <Input
-            label="Duration (minutes)"
-            type="number"
-            min={1}
-            value={state.durationMinutes ?? 60}
-            onChange={(e) => onUpdate({ durationMinutes: parseInt(e.target.value) || 60 })}
-            required
-          />
-          <Input
-            label="Attempt limit"
-            type="number"
-            min={1}
-            max={10}
-            value={state.attemptLimit ?? 1}
-            onChange={(e) => onUpdate({ attemptLimit: parseInt(e.target.value) || 1 })}
-            required
-          />
-        </div>
-      </div>
+      )}
 
       {error && (
         <div className="p-4 rounded-[var(--radius-md)] bg-[var(--color-danger-light)] border border-[var(--color-danger)]/20">
@@ -275,13 +282,13 @@ export default function StepApprove({
         <Button
           variant="primary"
           onClick={handleApprove}
-          disabled={approving || !state.opensAt || !state.closesAt}
+          disabled={approving || (!isDraft && (!state.opensAt || !state.closesAt))}
           loading={approving}
         >
           <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
             <path fillRule="evenodd" d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z" clipRule="evenodd" />
           </svg>
-          Approve & Schedule
+          {isDraft ? 'Approve' : 'Approve & Schedule'}
         </Button>
       </div>
     </div>

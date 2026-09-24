@@ -30,9 +30,12 @@ function buildQuestionPrompt(params: GenerateQuestionsParams): string {
     ? 'Generate a mix of easy, moderate, and difficult questions.'
     : `Generate ${difficulty} difficulty questions.`;
 
-  const typeInstruction = questionType === 'multiple_choice'
-    ? `Each question must be multiple choice with exactly 4 choices (A, B, C, D), where exactly one is correct.`
-    : `Each question must be a theoretical identification/short-answer question. The answer MUST be a specific term, concept, or definition directly found in the source material. Questions should test knowledge of key terminology, definitions, or factual concepts.`;
+  const typeInstruction =
+    questionType === 'multiple_choice'
+      ? `Each question must be multiple choice with exactly 4 choices (A, B, C, D), where exactly one is correct.`
+      : questionType === 'true_false'
+        ? `Each question must be a True/False statement (including Modified True or False style statements that may be partially incorrect). Exactly one of the two fixed choices "True" or "False" is correct.`
+        : `Each question must be a theoretical identification/short-answer question. The answer MUST be a specific term, concept, or definition directly found in the source material. Questions should test knowledge of key terminology, definitions, or factual concepts.`;
 
   return `You are an expert assessment item writer for academic examinations.
 
@@ -57,7 +60,9 @@ OUTPUT FORMAT: Return a JSON array. Each element must be an object with:
 - "points" (number): point value (1-5 based on difficulty)
 ${questionType === 'multiple_choice'
   ? `- "choices" (array of 4 objects): each with "key" (A/B/C/D), "text" (string), "isCorrect" (boolean, exactly one true)`
-  : `- "canonicalAnswer" (string): a specific term, concept, or short phrase directly from the source material as the correct answer`}
+  : questionType === 'true_false'
+    ? `- "choices" (array of 2 objects): [{ "key": "T", "text": "True", "isCorrect": boolean }, { "key": "F", "text": "False", "isCorrect": boolean }] with exactly one true`
+    : `- "canonicalAnswer" (string): a specific term, concept, or short phrase directly from the source material as the correct answer`}
 - "sourceChunkIds" (array of strings): leave as empty array []
 
 GUIDELINES:

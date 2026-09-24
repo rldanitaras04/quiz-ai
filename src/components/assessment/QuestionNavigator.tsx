@@ -30,7 +30,12 @@ export default function QuestionNavigator({
         {questions.map((q, index) => {
           const status = getQuestionStatus(q);
           const isSelected = index === selectedIndex;
-          const typeIcon = q.question_type === 'multiple_choice' ? 'MC' : 'ID';
+          const typeIcon =
+            q.question_type === 'multiple_choice'
+              ? 'MC'
+              : q.question_type === 'true_false'
+                ? 'TF'
+                : 'ID';
 
           return (
             <button
@@ -48,7 +53,9 @@ export default function QuestionNavigator({
                     ? 'bg-white/20 text-white'
                     : q.question_type === 'multiple_choice'
                       ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
-                      : 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300'
+                      : q.question_type === 'true_false'
+                        ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
+                        : 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300'
                 }`}
               >
                 {typeIcon}

@@ -3,6 +3,7 @@ import Link from 'next/link';
 import PageHeader from '@/components/ui/PageHeader';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { APP_NAME, APP_DESCRIPTION } from '@/lib/constants';
+import { BrandIcon } from '@/components/brand';
 import { getSettings } from '@/lib/settings';
 import { requireAdminUser } from '../actions';
 import SettingsForm from './SettingsForm';
@@ -74,7 +75,10 @@ export default async function SystemSettingsPage(): Promise<JSX.Element> {
             <CardContent className="space-y-4">
               <div>
                 <p className="text-sm text-[var(--color-muted)]">Application</p>
-                <p className="text-sm font-medium text-[var(--color-foreground)]">{APP_NAME}</p>
+                <div className="flex items-center gap-2">
+                  <BrandIcon className="h-5 w-5" alt={APP_NAME} />
+                  <p className="text-sm font-medium text-[var(--color-foreground)]">{APP_NAME}</p>
+                </div>
                 <p className="text-xs text-[var(--color-muted)]">{APP_DESCRIPTION}</p>
               </div>
               <div>

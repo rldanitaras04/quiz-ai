@@ -51,6 +51,39 @@ export interface DistractorAnalysis {
   is_correct: boolean;
 }
 
+/**
+ * Upper/lower 27% discrimination index D = (RU/NU) − (RL/NL).
+ * Respondents are ranked by total percentage; the top and bottom 27% (at least
+ * 3 each when n allows) form the groups. Returns null when there are too few
+ * scored attempts to form meaningful groups, or when the item has no variance
+ * (everyone correct or everyone incorrect).
+ */
+function computeDiscriminationIndex(
+  items: { attemptId: string; correct: boolean }[],
+  totalByAttempt: Map<string, number>
+): number | null {
+  const scored = items.filter(i => totalByAttempt.has(i.attemptId));
+  const n = scored.length;
+  if (n < 6) return null;
+
+  const correctCount = scored.filter(i => i.correct).length;
+  if (correctCount === 0 || correctCount === n) return null;
+
+  const groupSize = Math.max(3, Math.ceil(n * 0.27));
+  if (groupSize * 2 > n) return null;
+
+  const sorted = scored
+    .slice()
+    .sort((a, b) => (totalByAttempt.get(b.attemptId) ?? 0) - (totalByAttempt.get(a.attemptId) ?? 0));
+
+  const upper = sorted.slice(0, groupSize);
+  const lower = sorted.slice(sorted.length - groupSize);
+
+  const ru = upper.filter(i => i.correct).length / upper.length;
+  const rl = lower.filter(i => i.correct).length / lower.length;
+  return ru - rl;
+}
+
 export async function getDeploymentAnalytics(
   deploymentId: string
 ): Promise<{ data: DeploymentAnalytics | null; error?: string }> {
@@ -72,7 +105,7 @@ export async function getDeploymentAnalytics(
   // Get assessment title
   const { data: version } = await admin
     .from('assessment_versions')
-    .select('id, assessment_id, assessment:assessments(title)')
+    .select('id, assessment_id, assessment:assessments!assessment_versions_assessment_id_fkey(title)')
     .eq('id', deployment.assessment_version_id)
     .single();
 
@@ -139,15 +172,34 @@ export async function getDeploymentAnalytics(
   // Item analysis
   const { data: questions } = await admin
     .from('questions')
-    .select('id, question_text, question_type, difficulty, bloom_level, points')
-    .eq('assessment_version_id', deployment.assessment_version_id);
+    .select('id, question_text, question_type, difficulty, bloom_level, points, position')
+    .eq('assessment_version_id', deployment.assessment_version_id)
+    .order('position', { ascending: true });
 
-  const { data: answerKeys } = await admin
-    .from('answer_keys')
-    .select('question_id, correct_choice_id, canonical_answer')
-    .in('question_id', (questions ?? []).map(q => q.id));
+  const questionIds = (questions ?? []).map(q => q.id);
+
+  const { data: answerKeys } = questionIds.length > 0
+    ? await admin
+        .from('answer_keys')
+        .select('question_id, correct_choice_id, canonical_answer, accepted_answers')
+        .in('question_id', questionIds)
+    : { data: [] };
 
   const answerKeyMap = new Map((answerKeys ?? []).map(ak => [ak.question_id, ak]));
+
+  const { data: allChoices } = questionIds.length > 0
+    ? await admin
+        .from('question_choices')
+        .select('id, question_id, choice_key, choice_text, position')
+        .in('question_id', questionIds)
+    : { data: [] };
+
+  const choicesByQuestion = new Map<string, { id: string; choice_key: string; choice_text: string; position: number | null }[]>();
+  for (const choice of (allChoices ?? [])) {
+    const list = choicesByQuestion.get(choice.question_id) ?? [];
+    list.push(choice);
+    choicesByQuestion.set(choice.question_id, list);
+  }
 
   const { data: allResponses } = attemptIds.length > 0
     ? await admin
@@ -156,27 +208,44 @@ export async function getDeploymentAnalytics(
         .in('attempt_id', attemptIds)
     : { data: [] };
 
+  // Total score per attempt, used as the criterion for the discrimination index.
+  const totalByAttempt = new Map<string, number>();
+  for (const r of (results ?? [])) totalByAttempt.set(r.attempt_id, r.percentage);
+
   const itemAnalysis: ItemAnalysis[] = [];
   for (const question of (questions ?? [])) {
     const questionResponses = (allResponses ?? []).filter(r => r.question_id === question.id);
     const answerKey = answerKeyMap.get(question.id);
     const totalResponses = questionResponses.length;
 
-    let correctCount = 0;
-    if (question.question_type === 'multiple_choice' && answerKey?.correct_choice_id) {
-      correctCount = questionResponses.filter(r => r.selected_choice_id === answerKey.correct_choice_id).length;
-    } else if (question.question_type === 'identification') {
-      correctCount = questionResponses.filter(r => r.earned_points !== null && r.earned_points > 0).length;
-    }
+    const isCorrect = (response: { selected_choice_id: string | null; earned_points: number | null }) => {
+      if (
+        (question.question_type === 'multiple_choice' || question.question_type === 'true_false') &&
+        answerKey?.correct_choice_id
+      ) {
+        return response.selected_choice_id === answerKey.correct_choice_id;
+      }
+      if (question.question_type === 'identification') {
+        return response.earned_points !== null && response.earned_points > 0;
+      }
+      return false;
+    };
 
+    const correctCount = questionResponses.filter(isCorrect).length;
     const difficultyIndex = totalResponses > 0 ? correctCount / totalResponses : 0;
+    const discriminationIndex = computeDiscriminationIndex(
+      questionResponses.map(r => ({
+        attemptId: r.attempt_id,
+        correct: isCorrect(r),
+      })),
+      totalByAttempt
+    );
 
     const distractorAnalysis: DistractorAnalysis[] = [];
-    if (question.question_type === 'multiple_choice') {
-      const { data: choices } = await admin
-        .from('question_choices')
-        .select('id, choice_key, choice_text')
-        .eq('question_id', question.id);
+    if (question.question_type === 'multiple_choice' || question.question_type === 'true_false') {
+      const choices = (choicesByQuestion.get(question.id) ?? [])
+        .slice()
+        .sort((a, b) => (a.position ?? 0) - (b.position ?? 0) || a.choice_key.localeCompare(b.choice_key));
 
       const selectionCounts = new Map<string, number>();
       for (const r of questionResponses) {
@@ -185,7 +254,7 @@ export async function getDeploymentAnalytics(
         }
       }
 
-      for (const choice of (choices ?? [])) {
+      for (const choice of choices) {
         const count = selectionCounts.get(choice.id) ?? 0;
         distractorAnalysis.push({
           choice_id: choice.id,
@@ -208,7 +277,7 @@ export async function getDeploymentAnalytics(
       total_responses: totalResponses,
       correct_count: correctCount,
       difficulty_index: difficultyIndex,
-      discrimination_index: null,
+      discrimination_index: discriminationIndex,
       distractor_analysis: distractorAnalysis,
     });
   }

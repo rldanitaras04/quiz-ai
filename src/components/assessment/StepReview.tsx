@@ -95,6 +95,11 @@ export default function StepReview({
     if (q.question_type === 'multiple_choice') {
       const filledChoices = q.question_choices.filter((c) => c.choice_text.trim());
       if (filledChoices.length < 2) return 'incomplete';
+      if (!filledChoices.some((c) => c.is_correct)) return 'incomplete';
+    } else if (q.question_type === 'true_false') {
+      if (!q.question_choices.some((c) => c.is_correct)) return 'incomplete';
+    } else if (!(q.canonical_answer ?? '').trim()) {
+      return 'incomplete';
     }
     return 'complete';
   };

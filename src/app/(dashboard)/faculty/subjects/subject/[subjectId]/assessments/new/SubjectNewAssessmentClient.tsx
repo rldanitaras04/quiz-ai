@@ -61,7 +61,7 @@ const INITIAL_STATE: WizardState = {
   selectedSourceIds: [],
   sourceMaterials: [],
   questionTypes: ['multiple_choice'],
-  countPerType: { multiple_choice: 10, identification: 0 },
+  countPerType: { multiple_choice: 10, identification: 0, true_false: 0 },
   difficultyDistribution: { easy: 4, moderate: 4, difficult: 2 },
   bloomDistribution: {
     remember: 2,

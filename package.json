@@ -6,13 +6,17 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:e2e": "node --env-file=.env.local scripts/e2e-enrollment.mjs",
+    "seed:reference": "node --env-file=.env.local scripts/seed-reference.mjs",
+    "seed:question-bank": "node --env-file=.env.local scripts/seed-question-bank.mjs"
   },
   "dependencies": {
     "@phosphor-icons/react": "^2.1.10",
     "@supabase/ssr": "^0.12.7",
     "@supabase/supabase-js": "^2.116.0",
     "chart.js": "^4.5.1",
+    "docx": "^9.7.2",
     "mammoth": "^1.12.3",
     "next": "16.3.5",
     "openai": "^7.17.0",

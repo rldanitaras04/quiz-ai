@@ -163,6 +163,193 @@ export async function POST(request: Request) {
     }
 
     // ------------------------------------------------------------------
+    // create_test_student: fixed ready-to-use student for local testing.
+    // Allowed without a session (same setup-wizard surface as check_env):
+    // credentials are fixed and shown on /setup, and the role is not
+    // privileged. Always leaves email confirmed + verification_status verified.
+    // ------------------------------------------------------------------
+    if (action === 'create_test_student') {
+      const supabase = createAdminClient();
+      const email = 'student@test.com';
+      const password = 'Student123!';
+      const fullName = 'Test Student';
+
+      const ensureVerifiedStudent = async (userId: string): Promise<void> => {
+        // Confirm email so password login works without a confirmation click.
+        const { data: authUser } = await supabase.auth.admin.getUserById(userId);
+        if (authUser?.user && !authUser.user.email_confirmed_at) {
+          await supabase.auth.admin.updateUserById(userId, { email_confirm: true });
+        }
+
+        await supabase.from('profiles').upsert(
+          { id: userId, email, full_name: fullName, status: 'active' },
+          { onConflict: 'id' }
+        );
+
+        const { data: roles } = await supabase
+          .from('user_roles')
+          .select('id')
+          .eq('user_id', userId)
+          .eq('role', 'student')
+          .maybeSingle();
+        if (!roles) {
+          await supabase.from('user_roles').insert({ user_id: userId, role: 'student' });
+        }
+
+        const [{ data: program }, { data: yearLevel }] = await Promise.all([
+          supabase.from('programs').select('id').eq('code', 'BSIT').maybeSingle(),
+          supabase.from('year_levels').select('id').eq('name', '2nd Year').maybeSingle(),
+        ]);
+
+        let sectionId: string | null = null;
+        if (program && yearLevel) {
+          // Deterministic pick: BSIT/2nd Year normally has several sections
+          // (AI/NT/WM) and a bare maybeSingle() errors on >1 row, which
+          // silently left section_id null. Order by name so re-runs agree.
+          const { data: section } = await supabase
+            .from('sections')
+            .select('id')
+            .eq('program_id', program.id)
+            .eq('year_level_id', yearLevel.id)
+            .order('name', { ascending: true })
+            .limit(1)
+            .maybeSingle();
+          sectionId = section?.id ?? null;
+        }
+
+        const { data: existingProfile } = await supabase
+          .from('student_profiles')
+          .select('user_id')
+          .eq('user_id', userId)
+          .maybeSingle();
+
+        if (existingProfile) {
+          await supabase
+            .from('student_profiles')
+            .update({
+              verification_status: 'verified',
+              program_id: program?.id ?? null,
+              year_level_id: yearLevel?.id ?? null,
+              section_id: sectionId,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('user_id', userId);
+        } else {
+          await supabase.from('student_profiles').insert({
+            user_id: userId,
+            student_number: '2024-TEST-001',
+            program_id: program?.id ?? null,
+            year_level_id: yearLevel?.id ?? null,
+            section_id: sectionId,
+            verification_status: 'verified',
+          });
+        }
+
+        // Section-scoped enrollment: the test student sees exactly their
+        // section's offerings. The old version enrolled into EVERY active
+        // offering, so one subject showed up once per section on My Subjects.
+        // This also normalizes previously-created rows on each re-run.
+        if (sectionId) {
+          const { data: offerings } = await supabase
+            .from('subject_offerings')
+            .select('id')
+            .eq('section_id', sectionId)
+            .eq('status', 'active');
+          const sectionOfferingIds = new Set((offerings ?? []).map((o) => o.id));
+
+          const { data: existingEnrollments } = await supabase
+            .from('enrollments')
+            .select('id, subject_offering_id, status')
+            .eq('student_id', userId);
+          const existing = existingEnrollments ?? [];
+          const byOffering = new Map(
+            existing.map((e) => [e.subject_offering_id, e] as const)
+          );
+          const now = new Date().toISOString();
+
+          const toInsert = [...sectionOfferingIds]
+            .filter((id) => !byOffering.has(id))
+            .map((id) => ({
+              subject_offering_id: id,
+              student_id: userId,
+              status: 'enrolled' as const,
+              enrolled_at: now,
+            }));
+          const toReenroll = existing
+            .filter((e) => sectionOfferingIds.has(e.subject_offering_id) && e.status !== 'enrolled')
+            .map((e) => e.id);
+          const toWithdraw = existing
+            .filter((e) => !sectionOfferingIds.has(e.subject_offering_id) && e.status === 'enrolled')
+            .map((e) => e.id);
+
+          if (toInsert.length > 0) {
+            await supabase.from('enrollments').insert(toInsert);
+          }
+          if (toReenroll.length > 0) {
+            await supabase
+              .from('enrollments')
+              .update({ status: 'enrolled', enrolled_at: now, updated_at: now })
+              .in('id', toReenroll);
+          }
+          if (toWithdraw.length > 0) {
+            await supabase
+              .from('enrollments')
+              .update({ status: 'withdrawn', updated_at: now })
+              .in('id', toWithdraw);
+          }
+        }
+      };
+
+      // Reuse an existing account and force it into a verified, usable state.
+      const { data: existingUsers } = await supabase.auth.admin.listUsers();
+      const existing = existingUsers?.users?.find(
+        (u) => u.email?.toLowerCase() === email
+      );
+      if (existing) {
+        await ensureVerifiedStudent(existing.id);
+        return NextResponse.json({
+          success: true,
+          message: 'Test student already exists (verified and ready to use)',
+          credentials: { email, password },
+          userId: existing.id,
+        });
+      }
+
+      const { data: userData, error: createError } = await supabase.auth.admin.createUser({
+        email,
+        password,
+        email_confirm: true,
+        user_metadata: { full_name: fullName },
+      });
+
+      if (createError || !userData.user) {
+        return NextResponse.json(
+          { error: createError?.message || 'User creation failed' },
+          { status: 500 }
+        );
+      }
+
+      const userId = userData.user.id;
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .insert({ id: userId, email, full_name: fullName, status: 'active' });
+
+      if (profileError) {
+        await supabase.auth.admin.deleteUser(userId);
+        return NextResponse.json({ error: profileError.message }, { status: 500 });
+      }
+
+      await ensureVerifiedStudent(userId);
+
+      return NextResponse.json({
+        success: true,
+        message: 'Test student created successfully (verified)',
+        credentials: { email, password },
+        userId,
+      });
+    }
+
+    // ------------------------------------------------------------------
     // All remaining actions require an authenticated super_admin
     // ------------------------------------------------------------------
     const auth = await requireSuperAdmin();
@@ -225,106 +412,6 @@ export async function POST(request: Request) {
         roles: rolesResult.data,
         rolesError: rolesResult.error?.message,
         adminClientUrl: process.env.NEXT_PUBLIC_SUPABASE_URL,
-      });
-    }
-
-    // ------------------------------------------------------------------
-    // create_test_student: Creates a ready-to-use test student account
-    // ------------------------------------------------------------------
-    if (action === 'create_test_student') {
-      const supabase = createAdminClient();
-      const email = 'student@test.com';
-      const password = 'Student123!';
-      const fullName = 'Test Student';
-
-      // Check if test student already exists
-      const { data: existingUsers } = await supabase.auth.admin.listUsers();
-      const existing = existingUsers?.users?.find((u) => u.email === email);
-      if (existing) {
-        return NextResponse.json({
-          success: true,
-          message: 'Test student already exists',
-          credentials: { email, password },
-          userId: existing.id,
-        });
-      }
-
-      // Create auth user
-      const { data: userData, error: createError } = await supabase.auth.admin.createUser({
-        email,
-        password,
-        email_confirm: true,
-        user_metadata: { full_name: fullName },
-      });
-
-      if (createError || !userData.user) {
-        return NextResponse.json({ error: createError?.message || 'User creation failed' }, { status: 500 });
-      }
-
-      const userId = userData.user.id;
-
-      // Create profile
-      const { error: profileError } = await supabase
-        .from('profiles')
-        .insert({ id: userId, email, full_name: fullName, status: 'active' });
-
-      if (profileError) {
-        await supabase.auth.admin.deleteUser(userId);
-        return NextResponse.json({ error: profileError.message }, { status: 500 });
-      }
-
-      // Create student role
-      await supabase.from('user_roles').insert({ user_id: userId, role: 'student' });
-
-      // Get BSIT program and 2nd Year level
-      const [{ data: program }, { data: yearLevel }] = await Promise.all([
-        supabase.from('programs').select('id').eq('code', 'BSIT').maybeSingle(),
-        supabase.from('year_levels').select('id').eq('name', '2nd Year').maybeSingle(),
-      ]);
-
-      // Get or create a section
-      let sectionId = null;
-      if (program && yearLevel) {
-        const { data: section } = await supabase
-          .from('sections')
-          .select('id')
-          .eq('program_id', program.id)
-          .eq('year_level_id', yearLevel.id)
-          .maybeSingle();
-        sectionId = section?.id ?? null;
-      }
-
-      // Create student profile
-      await supabase.from('student_profiles').insert({
-        user_id: userId,
-        student_number: '2024-TEST-001',
-        program_id: program?.id ?? null,
-        year_level_id: yearLevel?.id ?? null,
-        section_id: sectionId,
-        verification_status: 'verified',
-      });
-
-      // Enroll in all active subject offerings for OOP1
-      const { data: offerings } = await supabase
-        .from('subject_offerings')
-        .select('id')
-        .eq('status', 'active');
-
-      if (offerings && offerings.length > 0) {
-        const enrollments = offerings.map((o) => ({
-          subject_offering_id: o.id,
-          student_id: userId,
-          status: 'enrolled' as const,
-          enrolled_at: new Date().toISOString(),
-        }));
-        await supabase.from('enrollments').insert(enrollments);
-      }
-
-      return NextResponse.json({
-        success: true,
-        message: 'Test student created successfully',
-        credentials: { email, password },
-        userId,
       });
     }
 

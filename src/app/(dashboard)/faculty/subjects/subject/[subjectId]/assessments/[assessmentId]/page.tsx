@@ -3,9 +3,10 @@ import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
 import PageHeader from '@/components/ui/PageHeader';
 import Button from '@/components/ui/Button';
-import { ASSESSMENT_STATUS_LABELS } from '@/lib/constants';
 import { getAssessmentDetail } from '@/app/(dashboard)/faculty/subjects/[offeringId]/assessments/actions';
 import AssessmentDetailClient from '@/app/(dashboard)/faculty/subjects/[offeringId]/assessments/[assessmentId]/AssessmentDetailClient';
+import DeleteAssessmentButton from '@/app/(dashboard)/faculty/subjects/[offeringId]/assessments/[assessmentId]/DeleteAssessmentButton';
+import DownloadTosButton from '@/app/(dashboard)/faculty/subjects/[offeringId]/assessments/[assessmentId]/DownloadTosButton';
 
 interface Props {
   params: Promise<{ subjectId: string; assessmentId: string }>;
@@ -70,9 +71,18 @@ export default async function SubjectAssessmentDetailPage({ params }: Props) {
         title={detail.title}
         description={`${s.code} · Sections: ${sectionNames}`}
         actions={
-          <Link href={`/faculty/subjects/subject/${subjectId}/assessments/${assessmentId}/deploy`}>
-            <Button variant="primary">Deploy to Sections</Button>
-          </Link>
+          <div className="flex items-center gap-2">
+            <Link href={`/faculty/subjects/subject/${subjectId}/assessments/${assessmentId}/deploy`}>
+              <Button variant="primary">Deploy to Sections</Button>
+            </Link>
+            <DownloadTosButton assessmentId={assessmentId} assessmentTitle={detail.title} size="md" />
+            <DeleteAssessmentButton
+              assessmentId={assessmentId}
+              title={detail.title}
+              size="md"
+              redirectTo={`/faculty/subjects/subject/${subjectId}`}
+            />
+          </div>
         }
       />
 

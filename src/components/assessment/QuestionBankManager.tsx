@@ -87,12 +87,21 @@ export default function QuestionBankManager({ offeringId, topics }: Props): JSX.
         notifyError('Mark the correct choice');
         return;
       }
+    } else if (newType === 'true_false') {
+      if (!newChoices.some((c) => c.isCorrect && (c.key === 'T' || c.key === 'F'))) {
+        notifyError('Mark True or False as the correct answer');
+        return;
+      }
     } else if (!newAnswer.trim()) {
       notifyError('Canonical answer required for identification');
       return;
     }
     setSaving(true);
     try {
+      const tfChoices = [
+        { choice_key: 'T', choice_text: 'True' },
+        { choice_key: 'F', choice_text: 'False' },
+      ];
       await createBankItem(offeringId, {
         topic_id: newTopic || null,
         question_type: newType,
@@ -100,8 +109,18 @@ export default function QuestionBankManager({ offeringId, topics }: Props): JSX.
         difficulty: newDifficulty,
         bloom_level: newBloom,
         points: newPoints,
-        choices: newType === 'multiple_choice' ? newChoices.filter((c) => c.text.trim()).map((c) => ({ choice_key: c.key, choice_text: c.text })) : undefined,
-        correct_choice_key: newType === 'multiple_choice' ? newChoices.find((c) => c.isCorrect)?.key : undefined,
+        choices:
+          newType === 'multiple_choice'
+            ? newChoices.filter((c) => c.text.trim()).map((c) => ({ choice_key: c.key, choice_text: c.text }))
+            : newType === 'true_false'
+              ? tfChoices
+              : undefined,
+        correct_choice_key:
+          newType === 'multiple_choice'
+            ? newChoices.find((c) => c.isCorrect)?.key
+            : newType === 'true_false'
+              ? (newChoices.find((c) => c.isCorrect && (c.key === 'T' || c.key === 'F'))?.key ?? 'T')
+              : undefined,
         canonical_answer: newType === 'identification' ? newAnswer : undefined,
       });
       setShowAdd(false);
@@ -139,6 +158,7 @@ export default function QuestionBankManager({ offeringId, topics }: Props): JSX.
             <Select label="Type" value={newType} onChange={(e) => setNewType(e.target.value as QuestionType)}>
               <option value="multiple_choice">Multiple Choice</option>
               <option value="identification">Identification</option>
+              <option value="true_false">True or False</option>
             </Select>
             <Input label="Points" type="number" min={1} value={newPoints} onChange={(e) => setNewPoints(Number(e.target.value) || 1)} />
           </div>
@@ -181,6 +201,33 @@ export default function QuestionBankManager({ offeringId, topics }: Props): JSX.
                 </div>
               ))}
             </div>
+          ) : newType === 'true_false' ? (
+            <div className="space-y-2">
+              <p className="text-xs font-medium text-[var(--color-muted)]">Correct answer</p>
+              <div className="grid grid-cols-2 gap-3">
+                {(['T', 'F'] as const).map((key) => {
+                  const selected = newChoices.find((c) => c.key === key)?.isCorrect;
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() =>
+                        setNewChoices((prev) =>
+                          prev.map((x) => ({ ...x, isCorrect: x.key === key }))
+                        )
+                      }
+                      className={`p-3 rounded-[var(--radius-md)] border-2 text-sm font-semibold ${
+                        selected
+                          ? 'border-[var(--color-success)] bg-[var(--color-success)]/10 text-[var(--color-success)]'
+                          : 'border-[var(--color-border)] text-[var(--color-muted)]'
+                      }`}
+                    >
+                      {key === 'T' ? 'True' : 'False'}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
           ) : (
             <Input label="Canonical answer" value={newAnswer} onChange={(e) => setNewAnswer(e.target.value)} placeholder="Expected answer" />
           )}
@@ -201,6 +248,7 @@ export default function QuestionBankManager({ offeringId, topics }: Props): JSX.
           <option value="">Any type</option>
           <option value="multiple_choice">Multiple Choice</option>
           <option value="identification">Identification</option>
+          <option value="true_false">True or False</option>
         </select>
         <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search…" className="rounded-[var(--radius-md)] border border-[var(--color-border)] px-2 py-1 text-sm flex-1 min-w-[180px]" />
         <Button size="sm" variant="secondary" onClick={load}>Search</Button>
@@ -220,14 +268,21 @@ export default function QuestionBankManager({ offeringId, topics }: Props): JSX.
                 <div className="flex-1">
                   <p className="text-sm text-[var(--color-foreground)]">{it.question_text}</p>
                   <div className="flex flex-wrap gap-1.5 mt-2">
-                    <Badge variant="info">{it.question_type === 'multiple_choice' ? 'MCQ' : 'ID'}</Badge>
+                    <Badge variant="info">
+                      {it.question_type === 'multiple_choice'
+                        ? 'MCQ'
+                        : it.question_type === 'true_false'
+                          ? 'TF'
+                          : 'ID'}
+                    </Badge>
                     <Badge variant={it.difficulty === 'easy' ? 'success' : it.difficulty === 'difficult' ? 'danger' : 'warning'}>{it.difficulty}</Badge>
                     <Badge variant="outline">{it.bloom_level}</Badge>
                     <Badge variant="default">{it.points} pt</Badge>
                     {it.topic_id ? <Badge variant="default">{topics.find((t) => t.id === it.topic_id)?.title ?? 'Topic'}</Badge> : <Badge variant="outline">Uncategorized</Badge>}
                     {it.usage_count > 0 && <Badge variant="outline">Used {it.usage_count}×</Badge>}
                   </div>
-                  {it.question_type === 'multiple_choice' && (it as any).question_bank_choices && (
+                  {(it.question_type === 'multiple_choice' || it.question_type === 'true_false') &&
+                    (it as any).question_bank_choices && (
                     <ul className="mt-2 text-xs text-[var(--color-muted)] list-disc list-inside">
                       {(it as any).question_bank_choices.map((c: any) => (
                         <li key={c.id}>{c.choice_key}. {c.choice_text} {c.id === (it as any).question_bank_answer_keys?.correct_choice_id ? '✓' : ''}</li>

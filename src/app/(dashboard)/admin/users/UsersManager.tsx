@@ -12,7 +12,7 @@ import { confirmAction, notifyError, notifySuccess } from '@/components/ui/alert
 import { ROLE_LABELS } from '@/lib/constants';
 import type { UserRole } from '@/lib/types';
 import type { AdminUserRow } from './actions';
-import { setUserStatus, assignRole, revokeRole, setStudentVerification } from './actions';
+import { setUserStatus, assignRole, revokeRole, setStudentVerification, setStudentSection } from './actions';
 
 const statusVariant: Record<string, 'success' | 'warning' | 'danger' | 'default'> = {
   active: 'success',
@@ -29,13 +29,24 @@ const roleVariant: Record<string, 'info' | 'default' | 'outline'> = {
 
 const ASSIGNABLE_ROLES = ['super_admin', 'faculty', 'student'] as const;
 
+interface SectionChoice {
+  id: string;
+  label: string;
+}
+
 interface UsersManagerProps {
   users: AdminUserRow[];
   /** The signed-in administrator, so self-destructive controls can be disabled. */
   currentUserId: string;
+  /** Labeled academic-section choices for the per-student Section column. */
+  sections: SectionChoice[];
 }
 
-export default function UsersManager({ users, currentUserId }: UsersManagerProps): JSX.Element {
+export default function UsersManager({
+  users,
+  currentUserId,
+  sections,
+}: UsersManagerProps): JSX.Element {
   const router = useRouter();
   const [search, setSearch] = useState('');
 
@@ -82,17 +93,19 @@ export default function UsersManager({ users, currentUserId }: UsersManagerProps
                     <th className="text-left py-3 px-4 font-medium text-[var(--color-muted)]">Name</th>
                     <th className="text-left py-3 px-4 font-medium text-[var(--color-muted)]">Email</th>
                     <th className="text-left py-3 px-4 font-medium text-[var(--color-muted)]">Roles</th>
+                    <th className="text-left py-3 px-4 font-medium text-[var(--color-muted)]">Section</th>
                     <th className="text-left py-3 px-4 font-medium text-[var(--color-muted)]">Status</th>
                     <th className="text-left py-3 px-4 font-medium text-[var(--color-muted)]">Verification</th>
                     <th className="text-left py-3 px-4 font-medium text-[var(--color-muted)]">Joined</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.map((user) => (
+                      {filtered.map((user) => (
                     <UserRow
                       key={user.id}
                       user={user}
                       isSelf={user.id === currentUserId}
+                      sections={sections}
                       onChanged={() => router.refresh()}
                     />
                   ))}
@@ -113,10 +126,12 @@ export default function UsersManager({ users, currentUserId }: UsersManagerProps
 function UserRow({
   user,
   isSelf,
+  sections,
   onChanged,
 }: {
   user: AdminUserRow;
   isSelf: boolean;
+  sections: SectionChoice[];
   onChanged: () => void;
 }): JSX.Element {
   const isStudent = user.roles.includes('student');
@@ -191,6 +206,40 @@ function UserRow({
             </Select>
           )}
         </div>
+      </td>
+
+      <td className="py-3 px-4">
+        {isStudent ? (
+          <Select
+            aria-label="Academic section"
+            value={user.sectionId ?? ''}
+            className="!w-auto !py-1 !text-xs"
+            onChange={(e) => {
+              const next = e.target.value || null;
+              void (async () => {
+                const result = await setStudentSection(user.id, next);
+                if ('error' in result) {
+                  notifyError('Could not update the section', result.error);
+                  return;
+                }
+                notifySuccess(
+                  'Section updated',
+                  next
+                    ? `${user.fullName} moved to a new section — active offerings synced.`
+                    : `${user.fullName} removed from their section.`
+                );
+                onChanged();
+              })();
+            }}
+          >
+            <option value="">No section</option>
+            {sections.map((s) => (
+              <option key={s.id} value={s.id}>{s.label}</option>
+            ))}
+          </Select>
+        ) : (
+          <span className="text-xs text-[var(--color-muted)]">—</span>
+        )}
       </td>
 
       <td className="py-3 px-4">

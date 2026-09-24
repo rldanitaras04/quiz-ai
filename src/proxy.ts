@@ -32,6 +32,12 @@ export async function proxy(request: NextRequest) {
 
   const pathname = request.nextUrl.pathname;
 
+  // API routes must return JSON errors (401/403), never an HTML login page —
+  // the browser fetch() in the app would then fail parsing "<!DOCTYPE".
+  if (pathname.startsWith('/api/')) {
+    return supabaseResponse;
+  }
+
   // Redirect unauthenticated users to /login (except public routes)
   if (
     !user &&

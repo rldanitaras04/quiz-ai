@@ -283,7 +283,7 @@ export const GLOBAL_NAVIGATION: Record<UserRole, NavigationGroup[]> = {
 
 export function getSubjectWorkspaceNav(offeringId: string): NavigationItem[] {
   return [
-    { id: 'subject-overview', label: 'Overview', href: routes.faculty.subject(offeringId), icon: House },
+    { id: 'subject-overview', label: 'Overview', href: routes.faculty.subject(offeringId), icon: House, exact: true },
     { id: 'subject-students', label: 'Students', href: routes.faculty.subjectStudents(offeringId), icon: Student },
     { id: 'subject-assessments', label: 'Assessments', href: routes.faculty.subjectAssessments(offeringId), icon: Clipboard },
     { id: 'subject-sources', label: 'Source Materials', href: routes.faculty.subjectSources(offeringId), icon: FolderOpen },
@@ -313,7 +313,7 @@ export function getAssessmentWorkspaceNav(offeringId: string, assessmentId: stri
 
 export function getStudentSubjectNav(offeringId: string): NavigationItem[] {
   return [
-    { id: 'student-subject-overview', label: 'Overview', href: routes.student.subject(offeringId), icon: House },
+    { id: 'student-subject-overview', label: 'Overview', href: routes.student.subject(offeringId), icon: House, exact: true },
     { id: 'student-subject-assessments', label: 'Assessments', href: `/student/subjects/${offeringId}#assessments`, icon: Clipboard },
     { id: 'student-subject-results', label: 'Results', href: `/student/subjects/${offeringId}#results`, icon: ChartBar },
   ];

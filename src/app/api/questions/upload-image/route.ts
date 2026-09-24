@@ -82,7 +82,33 @@ export async function POST(request: NextRequest) {
 
     if (uploadError) {
       console.error('Question image upload error:', uploadError);
-      return NextResponse.json({ error: 'Failed to upload image' }, { status: 500 });
+      // Bucket missing → create once and retry (migration may not have run yet).
+      if (
+        uploadError.message?.toLowerCase().includes('bucket not found') ||
+        uploadError.message?.toLowerCase().includes('not found')
+      ) {
+        const { error: createErr } = await supabase.storage.createBucket('question-images', {
+          public: true,
+          fileSizeLimit: 10485760,
+          allowedMimeTypes: [...SUPPORTED_QUESTION_IMAGE_TYPES],
+        });
+        if (!createErr) {
+          const { error: retryErr } = await supabase.storage
+            .from('question-images')
+            .upload(storagePath, buffer, { contentType: file.type, upsert: false });
+          if (!retryErr) {
+            const { data: pub } = supabase.storage.from('question-images').getPublicUrl(storagePath);
+            return NextResponse.json(
+              { url: pub.publicUrl, storagePath, mimeType: file.type, size: file.size },
+              { status: 201 }
+            );
+          }
+        }
+      }
+      return NextResponse.json(
+        { error: `Failed to upload image: ${uploadError.message ?? 'unknown storage error'}` },
+        { status: 500 }
+      );
     }
 
     const { data: pub } = supabase.storage.from('question-images').getPublicUrl(storagePath);

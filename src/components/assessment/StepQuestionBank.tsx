@@ -24,7 +24,7 @@ type Filters = {
 
 function mapBankToDraft(bank: QuestionBankItem, position: number): DraftQuestion {
   const id = `bank-${bank.id}-${Date.now()}-${position}`;
-  const isMcq = bank.question_type === 'multiple_choice';
+  const isChoiceBased = bank.question_type === 'multiple_choice' || bank.question_type === 'true_false';
   const choices = (bank.question_bank_choices ?? bank.choices ?? []) as Array<{ id: string; choice_key: string; choice_text: string; position: number }>;
   const ak = bank.question_bank_answer_keys as any;
   const correctId = ak?.correct_choice_id ?? bank.correct_choice_id ?? null;
@@ -62,7 +62,7 @@ function mapBankToDraft(bank: QuestionBankItem, position: number): DraftQuestion
     topic_title: (bank as any).topic?.title ?? undefined,
     image_url: (bank as any).image_url ?? null,
     image_storage_path: (bank as any).image_storage_path ?? null,
-    question_choices: isMcq ? draftChoices : [],
+    question_choices: isChoiceBased ? draftChoices : [],
     canonical_answer: bank.canonical_answer ?? ak?.canonical_answer ?? '',
     sourceChunkIds: [],
   };
@@ -256,7 +256,8 @@ export default function StepQuestionBank({ offeringId, topics, onImport, existin
                 {group.items.map(item => {
                   const isSelected = selected.has(item.id);
                   const ak = (item as any).question_bank_answer_keys ?? null;
-                  const answer = item.question_type === 'multiple_choice'
+                  const isChoiceBased = item.question_type === 'multiple_choice' || item.question_type === 'true_false';
+                  const answer = isChoiceBased
                     ? (() => {
                         const choices = (item as any).question_bank_choices as Array<{ id: string; choice_key: string; choice_text: string }> | undefined;
                         const cid = ak?.correct_choice_id ?? (item as any).correct_choice_id;
@@ -274,7 +275,13 @@ export default function StepQuestionBank({ offeringId, topics, onImport, existin
                       <div className="flex-1 min-w-0">
                         <p className="text-sm text-[var(--color-foreground)] line-clamp-2">{item.question_text}</p>
                         <div className="flex flex-wrap gap-1.5 mt-2">
-                          <Badge variant={item.question_type === 'multiple_choice' ? 'info' : 'default'}>{item.question_type === 'multiple_choice' ? 'MCQ' : 'ID'}</Badge>
+                          <Badge variant={item.question_type === 'identification' ? 'default' : 'info'}>
+                            {item.question_type === 'multiple_choice'
+                              ? 'MCQ'
+                              : item.question_type === 'true_false'
+                                ? 'TF'
+                                : 'ID'}
+                          </Badge>
                           <Badge variant={item.difficulty === 'easy' ? 'success' : item.difficulty === 'difficult' ? 'danger' : 'warning'}>{item.difficulty}</Badge>
                           <Badge variant="outline">{item.bloom_level}</Badge>
                           <Badge variant="default">{item.points} pt{item.points === 1 ? '' : 's'}</Badge>

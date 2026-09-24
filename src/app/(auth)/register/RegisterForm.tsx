@@ -15,6 +15,7 @@ import {
   clearFieldError,
   type FormErrors,
 } from "@/lib/validators";
+import { Brand } from "@/components/brand";
 
 type Role = "student" | "faculty";
 
@@ -196,6 +197,9 @@ export default function RegisterForm({
   return (
     <div className="rounded-xl bg-[var(--color-surface)] p-8 shadow-lg">
       <div className="mb-6 text-center">
+        <div className="mb-6 flex justify-center">
+          <Brand />
+        </div>
         <h2 className="text-xl font-semibold text-[var(--color-foreground)]">
           Create your account
         </h2>

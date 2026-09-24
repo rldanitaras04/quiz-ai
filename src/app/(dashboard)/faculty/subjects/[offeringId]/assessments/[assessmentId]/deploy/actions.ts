@@ -6,6 +6,7 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { notifyOfferingStudents } from '@/lib/notifications';
 import { recordAuditLog } from '@/lib/audit';
 import { isFacultyOfOffering } from '@/lib/auth';
+import { scoreAttempt } from '@/lib/scoring';
 import type { CreateDeploymentInput } from '@/lib/types';
 
 /** Fields a client may set on an existing deployment (everything else is fixed). */
@@ -115,19 +116,26 @@ export async function createDeployment(
       return { success: false, error: insertError.message };
     }
 
-    // Notify the class about the schedule (best-effort: a notification failure
-    // must not undo a created deployment).
+    // Notify the class when the exam is deployed (best-effort: a notification
+    // failure must not undo a created deployment).
     const { data: assessmentTitle } = await supabase
       .from('assessments')
       .select('title')
       .eq('id', assessmentId)
       .maybeSingle();
 
+    const title = assessmentTitle?.title ?? 'An assessment';
+    const opensAt = new Date(config.opens_at);
+    const closesAt = new Date(config.closes_at);
+    const availableNow = opensAt.getTime() <= Date.now();
+
     await notifyOfferingStudents({
       offeringId,
       type: 'assessment_opened',
-      title: 'New assessment scheduled',
-      body: `${assessmentTitle?.title ?? 'An assessment'} opens ${new Date(config.opens_at).toLocaleString()} and closes ${new Date(config.closes_at).toLocaleString()}.`,
+      title: availableNow ? 'New exam available' : 'New exam scheduled',
+      body: availableNow
+        ? `${title} is available now until ${closesAt.toLocaleString()} (${config.duration_minutes} min, ${config.attempt_limit} attempt${config.attempt_limit === 1 ? '' : 's'}).`
+        : `${title} opens ${opensAt.toLocaleString()} and closes ${closesAt.toLocaleString()} (${config.duration_minutes} min, ${config.attempt_limit} attempt${config.attempt_limit === 1 ? '' : 's'}).`,
       data: { deployment_id: deployment.id, assessment_id: assessmentId },
     });
 
@@ -147,6 +155,8 @@ export async function createDeployment(
     revalidatePath(`/faculty/subjects/${offeringId}/assessments/${assessmentId}`);
     revalidatePath(`/faculty/subjects/${offeringId}/deployments`);
     revalidatePath('/student/assessments');
+    revalidatePath('/student');
+    revalidatePath('/notifications');
 
     return { success: true, deploymentId: deployment.id };
   } catch {
@@ -168,7 +178,7 @@ export async function updateDeployment(
 
     const { data: deployment } = await supabase
       .from('assessment_deployments')
-      .select('id, created_by, subject_offering_id')
+      .select('id, created_by, subject_offering_id, assessment_id, opens_at, closes_at')
       .eq('id', deploymentId)
       .single();
 
@@ -238,7 +248,37 @@ export async function updateDeployment(
       metadata: { fields: Object.keys(updates) },
     });
 
+    const scheduleChanged =
+      (typeof config.opens_at === 'string' && config.opens_at !== deployment.opens_at) ||
+      (typeof config.closes_at === 'string' && config.closes_at !== deployment.closes_at);
+
+    if (scheduleChanged) {
+      const { data: assessmentTitle } = await supabase
+        .from('assessments')
+        .select('title')
+        .eq('id', deployment.assessment_id)
+        .maybeSingle();
+
+      const title = assessmentTitle?.title ?? 'Your assessment';
+      const opensAt = new Date(typeof config.opens_at === 'string' ? config.opens_at : deployment.opens_at);
+      const closesAt = new Date(typeof config.closes_at === 'string' ? config.closes_at : deployment.closes_at);
+
+      await notifyOfferingStudents({
+        offeringId: deployment.subject_offering_id,
+        type: 'reminder',
+        title: 'Exam schedule updated',
+        body: `${title} now opens ${opensAt.toLocaleString()} and closes ${closesAt.toLocaleString()}.`,
+        data: {
+          deployment_id: deploymentId,
+          assessment_id: deployment.assessment_id,
+        },
+      });
+    }
+
     revalidatePath(`/faculty/subjects/${deployment.subject_offering_id}/deployments`);
+    revalidatePath('/student/assessments');
+    revalidatePath('/student');
+    revalidatePath('/notifications');
 
     return { success: true };
   } catch {
@@ -268,9 +308,9 @@ export async function releaseResults(
       return { success: false, error: 'Unauthorized' };
     }
 
-    const { data: deployment } = await supabase
+const { data: deployment } = await supabase
       .from('assessment_deployments')
-      .select('id, subject_offering_id, assessment_version_id')
+      .select('id, created_by, subject_offering_id, assessment_id, opens_at, closes_at, assessment_version_id')
       .eq('id', deploymentId)
       .single();
 
@@ -291,6 +331,38 @@ export async function releaseResults(
 
     const admin = createAdminClient();
     const now = new Date().toISOString();
+
+    // Backfill missing result rows: submit used to fail inserting `percentage`
+    // (a GENERATED column), so some attempts are submitted with responses
+    // scored but no assessment_results row — Release then had nothing to publish.
+    const { data: submittedAttempts } = await admin
+      .from('exam_attempts')
+      .select('id, student_id, status')
+      .eq('deployment_id', deploymentId)
+      .in('status', ['submitted', 'auto_submitted']);
+
+    for (const attempt of submittedAttempts ?? []) {
+      const { data: existing } = await admin
+        .from('assessment_results')
+        .select('id')
+        .eq('attempt_id', attempt.id)
+        .maybeSingle();
+      if (existing) continue;
+
+      try {
+        const { rawScore, possibleScore } = await scoreAttempt(attempt.id, admin);
+        await admin.from('assessment_results').insert({
+          attempt_id: attempt.id,
+          student_id: attempt.student_id,
+          deployment_id: deploymentId,
+          raw_score: rawScore,
+          possible_score: possibleScore || 1,
+          status: 'pending',
+        });
+      } catch {
+        // Leave this attempt for a later re-score; keep releasing the rest.
+      }
+    }
 
     const { data: released, error: releaseError } = await admin
       .from('assessment_results')
@@ -313,7 +385,7 @@ export async function releaseResults(
     if (rows.length > 0) {
       const { data: assessmentVersion } = await admin
         .from('assessment_versions')
-        .select('assessment:assessments(id, title)')
+        .select('assessment:assessments!assessment_versions_assessment_id_fkey(id, title)')
         .eq('id', deployment.assessment_version_id)
         .maybeSingle();
 
@@ -352,6 +424,11 @@ export async function releaseResults(
     }
 
     revalidatePath(`/faculty/subjects/${deployment.subject_offering_id}/deployments`);
+    revalidatePath('/student/results');
+    revalidatePath('/student');
+    revalidatePath('/student/assessments');
+    revalidatePath('/student/assessments/[assessmentId]', 'page');
+    revalidatePath('/notifications');
 
     return { success: true, released: rows.length };
   } catch {

@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { requireAdminUser, type ActionResult } from '../actions';
 import { recordAuditLog } from '@/lib/audit';
+import { enrollStudents } from '@/lib/enrollment';
 
 /**
  * Subject, subject-offering and faculty-assignment configuration.
@@ -111,7 +112,7 @@ export async function getSubjectsOverview(): Promise<SubjectOverview[]> {
       supabase.from('enrollments').select('subject_offering_id').eq('status', 'enrolled'),
       supabase.from('faculty_assignments').select(`
         id, subject_offering_id, faculty_id, is_primary,
-        faculty:profiles!faculty_assignments_faculty_id_fkey(full_name)
+        faculty:faculty_profiles(profiles(full_name))
       `),
     ]);
 
@@ -126,11 +127,13 @@ export async function getSubjectsOverview(): Promise<SubjectOverview[]> {
   const facultyByOffering = new Map<string, OfferingWithFaculty['faculty']>();
   for (const a of assignmentsResult.data ?? []) {
     const faculty = Array.isArray(a.faculty) ? a.faculty[0] : a.faculty;
+    const facultyProfileRaw = (faculty as { profiles?: { full_name?: string } | { full_name?: string }[] | null } | null)?.profiles ?? null;
+    const facultyProfile = Array.isArray(facultyProfileRaw) ? facultyProfileRaw[0] : facultyProfileRaw;
     const list = facultyByOffering.get(a.subject_offering_id) ?? [];
     list.push({
       assignmentId: a.id,
       facultyId: a.faculty_id,
-      fullName: (faculty as { full_name?: string } | null)?.full_name ?? '(unknown)',
+      fullName: facultyProfile?.full_name ?? '(unknown)',
       isPrimary: Boolean(a.is_primary),
     });
     facultyByOffering.set(a.subject_offering_id, list);
@@ -385,12 +388,36 @@ export async function createOffering(input: {
 
   if (error) return { error: friendlyError(error.message, 'Failed to create the offering.') };
 
+  // Sync hook: an offering targets a section, so everyone already assigned to
+  // that section starts enrolled — otherwise a student can be "in the section"
+  // yet absent from every subject. Re-enrolls withdrawn rows too; faculty can
+  // still withdraw individually afterwards.
+  let autoEnrolled = 0;
+  const { data: sectionStudents } = await supabase
+    .from('student_profiles')
+    .select('user_id')
+    .eq('section_id', sectionId);
+
+  if (sectionStudents && sectionStudents.length > 0 && data?.id) {
+    const summary = await enrollStudents(
+      supabase,
+      data.id,
+      sectionStudents.map((s) => s.user_id)
+    );
+    autoEnrolled = summary.added + summary.reenrolled;
+  }
+
   await recordAuditLog({
     actorUserId: userId,
     action: 'create',
     entityType: 'subject_offering',
     entityId: data?.id ?? null,
-    metadata: { subject_id: subjectId, semester_id: semesterId, section_id: sectionId },
+    metadata: {
+      subject_id: subjectId,
+      semester_id: semesterId,
+      section_id: sectionId,
+      auto_enrolled: autoEnrolled,
+    },
   });
 
   revalidateSubjects();
@@ -456,6 +483,99 @@ export async function deleteOffering(id: string): Promise<ActionResult> {
 
   revalidateSubjects();
   return { success: true };
+}
+
+// ---------------------------------------------------------------------------
+// Enrollment roster (admin "Manage students" modal)
+// ---------------------------------------------------------------------------
+
+export interface OfferingRosterRow {
+  enrollmentId: string;
+  studentId: string;
+  status: string;
+  enrolledAt: string;
+  fullName: string;
+  email: string | null;
+  studentNumber: string;
+}
+
+export type OfferingRosterResult =
+  | { error: string }
+  | {
+      success: true;
+      rows: OfferingRosterRow[];
+      subjectLabel: string;
+      sectionLabel: string;
+      sectionId: string;
+    };
+
+/** Full roster (every status) for one offering — the admin modal's data source. */
+export async function getOfferingRoster(offeringId: string): Promise<OfferingRosterResult> {
+  const { supabase } = await requireAdminUser();
+
+  if (!/^[0-9a-f-]{36}$/i.test(offeringId)) return { error: 'Invalid offering id.' };
+
+  const { data: offering } = await supabase
+    .from('subject_offerings')
+    .select('id, section_id, subject:subjects(code, title), section:sections(name)')
+    .eq('id', offeringId)
+    .single();
+
+  if (!offering) return { error: 'That offering no longer exists.' };
+
+  const { data: enrollments, error } = await supabase
+    .from('enrollments')
+    .select(`
+      id,
+      student_id,
+      status,
+      enrolled_at,
+      student:student_profiles(student_number, profiles(full_name, email))
+    `)
+    .eq('subject_offering_id', offeringId)
+    .order('enrolled_at', { ascending: true });
+
+  if (error) return { error: 'Failed to load the roster.' };
+
+  const subject = Array.isArray(offering.subject) ? offering.subject[0] : offering.subject;
+  const section = Array.isArray(offering.section) ? offering.section[0] : offering.section;
+
+  interface RawEnrollment {
+    id: string;
+    student_id: string;
+    status: string;
+    enrolled_at: string;
+    student: {
+      student_number: string | null;
+      profiles: { full_name: string | null; email: string | null } | { full_name: string | null; email: string | null }[] | null;
+    } | null;
+  }
+
+  const rows: OfferingRosterRow[] = ((enrollments ?? []) as unknown as RawEnrollment[]).map((e) => {
+    const student = e.student ?? null;
+    const profileRaw = student?.profiles ?? null;
+    const profile = Array.isArray(profileRaw) ? profileRaw[0] : profileRaw;
+
+    return {
+      enrollmentId: e.id,
+      studentId: e.student_id,
+      status: e.status,
+      enrolledAt: e.enrolled_at,
+      fullName: profile?.full_name ?? '(unknown)',
+      email: profile?.email ?? null,
+      studentNumber: student?.student_number ?? '',
+    };
+  });
+
+  const sectionId = (offering as { section_id?: string | null }).section_id ?? '';
+
+  return {
+    success: true,
+    rows,
+    subjectLabel: subject ? `${subject.code} – ${subject.title}` : 'Offering',
+    sectionLabel: section?.name ?? '—',
+    sectionId,
+  };
 }
 
 // ---------------------------------------------------------------------------

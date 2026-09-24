@@ -1,5 +1,6 @@
 'use server';
 
+import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
 
 export async function markNotificationRead(notificationId: string): Promise<{ error?: string }> {
@@ -16,5 +17,8 @@ export async function markNotificationRead(notificationId: string): Promise<{ er
     .eq('user_id', user.id);
 
   if (error) return { error: error.message };
+  revalidatePath('/notifications');
+  revalidatePath('/student');
+  revalidatePath('/');
   return {};
 }

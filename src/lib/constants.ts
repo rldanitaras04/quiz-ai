@@ -31,6 +31,17 @@ export function getPrimaryRole(roles: UserRole[]): UserRole {
 export const QUESTION_TYPES: readonly QuestionType[] = [
   'multiple_choice',
   'identification',
+  'true_false',
+] as const;
+
+/**
+ * Student-facing group order. Items are always clustered by type, and item
+ * numbers restart at 1 inside each group (no continuous numbering).
+ */
+export const QUESTION_TYPE_GROUP_ORDER: readonly QuestionType[] = [
+  'multiple_choice',
+  'identification',
+  'true_false',
 ] as const;
 
 export const DIFFICULTY_LEVELS: readonly Difficulty[] = [
@@ -77,7 +88,20 @@ export const ROLE_LABELS: Record<UserRole, string> = {
 export const QUESTION_TYPE_LABELS: Record<QuestionType, string> = {
   multiple_choice: 'Multiple Choice',
   identification: 'Identification',
+  true_false: 'True or False',
 };
+
+export const QUESTION_TYPE_SHORT_LABELS: Record<QuestionType, string> = {
+  multiple_choice: 'MCQ',
+  identification: 'ID',
+  true_false: 'TF',
+};
+
+/** Fixed True/False choice keys used for authoring and AI/bank import. */
+export const TRUE_FALSE_CHOICES = [
+  { choice_key: 'T', choice_text: 'True', is_correct: true },
+  { choice_key: 'F', choice_text: 'False', is_correct: false },
+] as const;
 
 export const DIFFICULTY_LABELS: Record<Difficulty, string> = {
   easy: 'Easy',
@@ -269,7 +293,7 @@ export const MAX_QUESTION_POINTS = 100;
 
 export const MIN_QUESTION_POINTS = 1;
 
-export const APP_NAME = 'MiMo';
+export const APP_NAME = 'SEAMS AI';
 
 export const APP_DESCRIPTION = 'AI-Assisted Secure Assessment System';
 

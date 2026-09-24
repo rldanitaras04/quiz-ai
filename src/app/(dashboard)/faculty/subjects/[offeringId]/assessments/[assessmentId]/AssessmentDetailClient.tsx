@@ -32,6 +32,8 @@ import {
 } from '@/app/(dashboard)/faculty/subjects/[offeringId]/assessments/actions';
 import { getTopicsForOffering } from '@/app/(dashboard)/faculty/subjects/[offeringId]/topics/actions';
 import { saveAssessmentQuestionToBank } from '@/app/(dashboard)/faculty/subjects/[offeringId]/question-bank/actions';
+import DeleteAssessmentButton from '@/app/(dashboard)/faculty/subjects/[offeringId]/assessments/[assessmentId]/DeleteAssessmentButton';
+import DownloadTosButton from '@/app/(dashboard)/faculty/subjects/[offeringId]/assessments/[assessmentId]/DownloadTosButton';
 import type { DraftQuestion, DraftQuestionChoice, Topic } from '@/lib/types';
 
 interface AssessmentDetailClientProps {
@@ -110,14 +112,15 @@ function toDraft(question: AssessmentDetailQuestion, versionId: string): DraftQu
 }
 
 function isAnswered(question: AssessmentDetailQuestion): boolean {
-  return question.question_type === 'multiple_choice'
-    ? Boolean(question.correctChoiceId)
-    : Boolean(question.canonicalAnswer?.trim());
+  if (question.question_type === 'multiple_choice' || question.question_type === 'true_false') {
+    return Boolean(question.correctChoiceId);
+  }
+  return Boolean(question.canonicalAnswer?.trim());
 }
 
-/** "B. Manila" for multiple choice, the canonical answer for identification. */
+/** "B. Manila" for MCQ/TF, the canonical answer for identification. */
 function answerSummary(question: AssessmentDetailQuestion): string | null {
-  if (question.question_type === 'multiple_choice') {
+  if (question.question_type === 'multiple_choice' || question.question_type === 'true_false') {
     const correct = question.choices.find((choice) => choice.id === question.correctChoiceId);
     return correct ? `${correct.choice_key}. ${correct.choice_text}` : null;
   }
@@ -193,7 +196,11 @@ export default function AssessmentDetailClient({
     if (!draft) return;
 
     const isMultipleChoice = draft.question_type === 'multiple_choice';
-    const filledChoices = draft.question_choices.filter((choice) => choice.choice_text.trim());
+    const isTrueFalse = draft.question_type === 'true_false';
+    const isChoiceBased = isMultipleChoice || isTrueFalse;
+    const filledChoices = isTrueFalse
+      ? draft.question_choices
+      : draft.question_choices.filter((choice) => choice.choice_text.trim());
 
     if (!draft.question_text.trim()) {
       notifyError('Question text is required');
@@ -206,6 +213,11 @@ export default function AssessmentDetailClient({
       }
       if (!filledChoices.some((choice) => choice.is_correct)) {
         notifyError('Mark the correct choice', 'Select which choice is the right answer.');
+        return;
+      }
+    } else if (isTrueFalse) {
+      if (!filledChoices.some((choice) => choice.is_correct)) {
+        notifyError('Mark True or False as correct', 'Select which answer is correct for this statement.');
         return;
       }
     } else if (!(draft.canonical_answer ?? '').trim()) {
@@ -223,11 +235,11 @@ export default function AssessmentDetailClient({
       image_url: (draft as any).image_url ?? null,
       image_storage_path: (draft as any).image_storage_path ?? null,
       // An empty list clears choices when a question switches to identification.
-      choices: isMultipleChoice ? filledChoices.map(choicePayload) : [],
-      correct_choice_key: isMultipleChoice
+      choices: isChoiceBased ? filledChoices.map(choicePayload) : [],
+      correct_choice_key: isChoiceBased
         ? filledChoices.find((choice) => choice.is_correct)?.choice_key
         : undefined,
-      canonical_answer: isMultipleChoice ? undefined : (draft.canonical_answer ?? '').trim(),
+      canonical_answer: isChoiceBased ? undefined : (draft.canonical_answer ?? '').trim(),
     };
 
     setSavingQuestion(true);
@@ -433,6 +445,7 @@ export default function AssessmentDetailClient({
                 Deploy
               </Button>
             </Link>
+            <DownloadTosButton assessmentId={detail.id} assessmentTitle={detail.title} />
             {detail.questionsLocked && (
               <Button
                 variant="secondary"
@@ -443,6 +456,11 @@ export default function AssessmentDetailClient({
                 New version
               </Button>
             )}
+            <DeleteAssessmentButton
+              assessmentId={detail.id}
+              title={detail.title}
+              redirectTo={`/faculty/subjects/${detail.subjectOfferingId}/assessments`}
+            />
           </div>
         </CardHeader>
 

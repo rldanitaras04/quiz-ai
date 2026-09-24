@@ -27,7 +27,7 @@ export default async function StudentSubjectsPage() {
         section:sections(id, name, program:programs(id, code, name), year_level:year_levels(id, name)),
         faculty_assignments:faculty_assignments(
           id,
-          faculty:profiles(id, full_name)
+          faculty:faculty_profiles(profiles(id, full_name))
         )
       )
     `)
@@ -65,9 +65,13 @@ export default async function StudentSubjectsPage() {
                 const facultyAssignments = offering?.faculty_assignments as
                   | Array<Record<string, unknown>>
                   | undefined;
-                const faculty = facultyAssignments?.[0]?.faculty as
+                const facultyRaw = facultyAssignments?.[0]?.faculty as
                   | Record<string, unknown>
                   | undefined;
+                const facultyProfilesRaw = facultyRaw?.profiles;
+                const faculty = (Array.isArray(facultyProfilesRaw)
+                  ? facultyProfilesRaw[0]
+                  : facultyProfilesRaw) as Record<string, unknown> | undefined;
                 const program = section?.program as Record<string, unknown> | undefined;
                 const yearLevel = section?.year_level as Record<string, unknown> | undefined;
                 const academicYear = semester?.academic_year as

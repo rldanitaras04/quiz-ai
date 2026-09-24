@@ -10,6 +10,7 @@ interface RemoveStudentButtonProps {
   offeringId: string;
   studentId: string;
   studentName: string;
+  onChanged?: () => void;
 }
 
 /**
@@ -20,6 +21,7 @@ export default function RemoveStudentButton({
   offeringId,
   studentId,
   studentName,
+  onChanged,
 }: RemoveStudentButtonProps): JSX.Element {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
@@ -44,6 +46,7 @@ export default function RemoveStudentButton({
 
     notifySuccess('Student removed', `${studentName} is no longer enrolled.`);
     router.refresh();
+    onChanged?.();
   };
 
   return (

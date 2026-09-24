@@ -6,7 +6,7 @@ export interface AIProvider {
 export interface GenerateQuestionsParams {
   sourceTexts: string[];
   topic: string;
-  questionType: 'multiple_choice' | 'identification';
+  questionType: 'multiple_choice' | 'identification' | 'true_false';
   count: number;
   difficulty: 'easy' | 'moderate' | 'difficult' | 'mixed';
   bloomLevel: string;
@@ -15,7 +15,7 @@ export interface GenerateQuestionsParams {
 
 export interface GeneratedQuestion {
   questionText: string;
-  questionType: 'multiple_choice' | 'identification';
+  questionType: 'multiple_choice' | 'identification' | 'true_false';
   difficulty: string;
   bloomLevel: string;
   points: number;

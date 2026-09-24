@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { requireAdminUser, type ActionResult } from '../actions';
 import { recordAuditLog } from '@/lib/audit';
+import { enrollStudents } from '@/lib/enrollment';
 
 /**
  * User and role administration (spec §2.1: "manage users and role
@@ -68,6 +69,12 @@ function isVerificationStatus(value: string): value is VerificationStatus {
 function revalidateUsers(): void {
   revalidatePath('/admin/users');
   revalidatePath('/admin');
+  // Section moves auto-enroll students into the section's active offerings.
+  revalidatePath('/admin/subjects');
+  revalidatePath('/faculty/subjects');
+  revalidatePath('/faculty');
+  revalidatePath('/student/subjects');
+  revalidatePath('/student/assessments');
 }
 
 // ---------------------------------------------------------------------------
@@ -83,11 +90,12 @@ export interface AdminUserRow {
   roles: string[];
   studentNumber: string | null;
   verificationStatus: string | null;
+  sectionId: string | null;
 }
 
 /**
  * Every account with its roles and, for students, the data the review actions
- * need (student number and identity-verification state).
+ * need (student number, identity-verification state, and academic section).
  */
 export async function getAdminUsers(): Promise<AdminUserRow[]> {
   const { supabase } = await requireAdminUser();
@@ -98,7 +106,7 @@ export async function getAdminUsers(): Promise<AdminUserRow[]> {
       .select('id, email, full_name, status, created_at')
       .order('created_at', { ascending: false }),
     supabase.from('user_roles').select('user_id, role'),
-    supabase.from('student_profiles').select('user_id, student_number, verification_status'),
+    supabase.from('student_profiles').select('user_id, student_number, verification_status, section_id'),
   ]);
 
   const rolesByUser = new Map<string, string[]>();
@@ -123,6 +131,7 @@ export async function getAdminUsers(): Promise<AdminUserRow[]> {
       roles: rolesByUser.get(p.id) ?? [],
       studentNumber: student?.student_number ?? null,
       verificationStatus: student?.verification_status ?? null,
+      sectionId: student?.section_id ?? null,
     };
   });
 }
@@ -294,6 +303,126 @@ export async function setStudentVerification(
     entityType: 'student_profile',
     entityId: userId,
     metadata: { verification_status: status },
+  });
+
+  revalidateUsers();
+  return { success: true };
+}
+
+// ---------------------------------------------------------------------------
+// Student section assignment (with offering-enrollment sync)
+// ---------------------------------------------------------------------------
+
+/**
+ * Assigns (or clears) the student's academic section.
+ *
+ * Sync hook: while the section is set, the student is enrolled — and
+ * previously-withdrawn rows re-enrolled — into every ACTIVE offering that
+ * targets that section. This is the fix for "the student is in the section
+ * but not enrolled in the subject": section membership seeds enrollment.
+ *
+ * Clearing the section (null) does NOT withdraw them from offerings — they
+ * may have attempt history; withdrawal stays a faculty decision on the roster.
+ * Moving to a DIFFERENT section DOES withdraw the old section's active
+ * enrollments, so My Subjects never shows the same subject once per section.
+ *
+ * Setting the same section again re-runs the sync, so it also repairs drift.
+ */
+export async function setStudentSection(
+  userId: string,
+  sectionId: string | null
+): Promise<ActionResult> {
+  const { supabase, userId: actorId } = await requireAdminUser();
+
+  if (!UUID_RE.test(text(userId))) return { error: 'Invalid user id.' };
+
+  const sid = sectionId ? text(sectionId) : null;
+  if (sid && !UUID_RE.test(sid)) return { error: 'Invalid section id.' };
+
+  const { data: studentProfile } = await supabase
+    .from('student_profiles')
+    .select('user_id, section_id')
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (!studentProfile) return { error: 'That user has no student profile.' };
+
+  if (sid) {
+    const { data: section } = await supabase
+      .from('sections')
+      .select('id, name')
+      .eq('id', sid)
+      .maybeSingle();
+    if (!section) return { error: 'That section no longer exists.' };
+  }
+
+  const { data: updated, error } = await supabase
+    .from('student_profiles')
+    .update({ section_id: sid, updated_at: new Date().toISOString() })
+    .eq('user_id', userId)
+    .select('user_id')
+    .maybeSingle();
+
+  if (error) return { error: friendlyError(error.message, 'Failed to update the section.') };
+  if (!updated) return { error: 'That student profile no longer exists.' };
+
+  // Moving BETWEEN sections: withdraw the old section's active enrollments
+  // first, otherwise the student keeps both sections' offerings and sees the
+  // same subject twice. Clearing the section skips this (documented above).
+  let autoWithdrew = 0;
+  const previousSectionId = studentProfile.section_id;
+  if (previousSectionId && sid && previousSectionId !== sid) {
+    const { data: oldOfferings } = await supabase
+      .from('subject_offerings')
+      .select('id')
+      .eq('section_id', previousSectionId);
+    const oldOfferingIds = (oldOfferings ?? []).map((o) => o.id);
+
+    if (oldOfferingIds.length > 0) {
+      const { data: stale } = await supabase
+        .from('enrollments')
+        .select('id')
+        .eq('student_id', userId)
+        .eq('status', 'enrolled')
+        .in('subject_offering_id', oldOfferingIds);
+      const staleIds = (stale ?? []).map((e) => e.id);
+
+      if (staleIds.length > 0) {
+        const { error: withdrawError } = await supabase
+          .from('enrollments')
+          .update({ status: 'withdrawn', updated_at: new Date().toISOString() })
+          .in('id', staleIds);
+        if (!withdrawError) autoWithdrew = staleIds.length;
+      }
+    }
+  }
+
+  // Enrollment sync (only when moving INTO a section).
+  let autoEnrolled = 0;
+  if (sid) {
+    const { data: offerings } = await supabase
+      .from('subject_offerings')
+      .select('id')
+      .eq('section_id', sid)
+      .eq('status', 'active');
+
+    for (const offering of offerings ?? []) {
+      const summary = await enrollStudents(supabase, offering.id, [userId]);
+      autoEnrolled += summary.added + summary.reenrolled;
+    }
+  }
+
+  await recordAuditLog({
+    actorUserId: actorId,
+    action: 'update',
+    entityType: 'student_profile',
+    entityId: userId,
+    metadata: {
+      section_id: sid,
+      previous_section_id: previousSectionId,
+      auto_enrolled_offerings: autoEnrolled,
+      auto_withdrawn_offerings: autoWithdrew,
+    },
   });
 
   revalidateUsers();

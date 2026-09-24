@@ -1,13 +1,12 @@
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import PageHeader from '@/components/ui/PageHeader';
-import { Card } from '@/components/ui/Card';
-import Badge from '@/components/ui/Badge';
 import EmptyState from '@/components/ui/EmptyState';
 import Button from '@/components/ui/Button';
-import { Table, THead, TBody, TR, TH, TD } from '@/components/ui/Table';
-import { ASSESSMENT_STATUS_LABELS } from '@/lib/constants';
 import Link from 'next/link';
+import AssessmentsTable from '@/app/(dashboard)/faculty/subjects/[offeringId]/assessments/AssessmentsTable';
+import type { AssessmentListRow } from '@/app/(dashboard)/faculty/subjects/[offeringId]/assessments/AssessmentsTable';
+import WorkspaceNavSetter from '@/components/layout/WorkspaceNavSetter';
 
 interface Props {
   params: Promise<{ offeringId: string }>;
@@ -54,22 +53,30 @@ export default async function AssessmentsPage({ params }: Props) {
       assessment_type,
       status,
       created_at,
-      current_version:assessment_versions(id, total_items, total_points)
+      current_version:assessment_versions!assessments_current_version_id_fkey(id, total_items, total_points)
     `)
     .eq('subject_offering_id', offeringId)
     .order('created_at', { ascending: false });
 
-  const statusVariant = (status: string): 'success' | 'warning' | 'info' | 'default' => {
-    switch (status) {
-      case 'published': return 'success';
-      case 'approved': return 'info';
-      case 'draft': return 'warning';
-      default: return 'default';
-    }
-  };
+  const listRows: AssessmentListRow[] = ((assessments ?? []) as unknown as AssessmentRow[]).map((a) => ({
+    id: a.id,
+    title: a.title,
+    assessment_type: a.assessment_type,
+    status: a.status,
+    created_at: a.created_at,
+    total_items: a.current_version?.total_items ?? null,
+    total_points: a.current_version?.total_points ?? null,
+    review_href: `/faculty/subjects/${offeringId}/assessments/${a.id}`,
+    deploy_href: `/faculty/subjects/${offeringId}/assessments/${a.id}/deploy`,
+    show_deploy: true,
+  }));
 
   return (
     <div>
+      <WorkspaceNavSetter
+        offeringId={offeringId}
+        currentPath={`/faculty/subjects/${offeringId}/assessments`}
+      />
       <PageHeader
         breadcrumbs={[
           { label: 'Faculty', href: '/faculty' },
@@ -86,71 +93,8 @@ export default async function AssessmentsPage({ params }: Props) {
         }
       />
 
-      {assessments && assessments.length > 0 ? (
-        <Card>
-          <Table caption="Assessments for this offering">
-            <THead>
-              <TR>
-                <TH>Assessment</TH>
-                <TH>Type</TH>
-                <TH align="right">Items</TH>
-                <TH align="right">Points</TH>
-                <TH>Created</TH>
-                <TH>Status</TH>
-                <TH align="right">Actions</TH>
-              </TR>
-            </THead>
-            <TBody>
-              {(assessments as unknown as AssessmentRow[]).map((a) => {
-                const version = a.current_version;
-                return (
-                  <TR key={a.id} className="hover:bg-[var(--color-surface-hover)]">
-                    <TD className="font-medium">
-                      <Link
-                        href={`/faculty/subjects/${offeringId}/assessments/${a.id}`}
-                        className="text-[var(--color-foreground)] hover:text-[var(--color-primary)] hover:underline"
-                      >
-                        {a.title}
-                      </Link>
-                    </TD>
-                    <TD className="text-[var(--color-muted)]">
-                      {a.assessment_type === 'multiple_choice' ? 'Multiple Choice' : 'Identification'}
-                    </TD>
-                    <TD numeric className="text-[var(--color-foreground)]">
-                      {version?.total_items ?? '—'}
-                    </TD>
-                    <TD numeric className="text-[var(--color-foreground)]">
-                      {version?.total_points ?? '—'}
-                    </TD>
-                    <TD className="text-xs text-[var(--color-muted)]">
-                      {new Date(a.created_at).toLocaleDateString()}
-                    </TD>
-                    <TD>
-                      <Badge variant={statusVariant(a.status)}>
-                        {ASSESSMENT_STATUS_LABELS[a.status as keyof typeof ASSESSMENT_STATUS_LABELS] ?? a.status}
-                      </Badge>
-                    </TD>
-                    <TD className="whitespace-nowrap text-right">
-                      <Link
-                        href={`/faculty/subjects/${offeringId}/assessments/${a.id}`}
-                        className="text-sm font-medium text-[var(--color-primary)] hover:underline"
-                      >
-                        Review
-                      </Link>
-                      <span className="mx-2 text-[var(--color-border)]">|</span>
-                      <Link
-                        href={`/faculty/subjects/${offeringId}/assessments/${a.id}/deploy`}
-                        className="text-sm font-medium text-[var(--color-primary)] hover:underline"
-                      >
-                        Deploy
-                      </Link>
-                    </TD>
-                  </TR>
-                );
-              })}
-            </TBody>
-          </Table>
-        </Card>
+      {listRows.length > 0 ? (
+        <AssessmentsTable rows={listRows} />
       ) : (
         <EmptyState
           title="No assessments yet"

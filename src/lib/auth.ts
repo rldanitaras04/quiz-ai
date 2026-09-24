@@ -90,6 +90,30 @@ export async function isFacultyOfOffering(
   return Boolean(data);
 }
 
+/**
+ * True when the user may add/remove/restore enrollment rows on the offering:
+ * the assigned faculty, or any super administrator (RLS already grants
+ * `Admin can manage enrollments`; this keeps the action-level error message
+ * useful instead of a silent no-op). Assessment *content* ownership stays with
+ * `isFacultyOfOffering` — administrators do not inherit the answer-key gate.
+ */
+export async function canManageEnrollment(
+  supabase: SupabaseClient,
+  userId: string,
+  offeringId: string
+): Promise<boolean> {
+  if (await isFacultyOfOffering(supabase, userId, offeringId)) return true;
+
+  const { data } = await supabase
+    .from('user_roles')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('role', 'super_admin')
+    .maybeSingle();
+
+  return Boolean(data);
+}
+
 export interface FacultyAssessment {
   id: string;
   title: string;

@@ -40,7 +40,7 @@ export default async function DeployPage({ params }: Props) {
       id,
       title,
       current_version_id,
-      current_version:assessment_versions(id, version_number, status, total_items, total_points)
+      current_version:assessment_versions!assessments_current_version_id_fkey(id, version_number, status, total_items, total_points)
     `)
     .eq('id', assessmentId)
     .single();

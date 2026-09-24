@@ -179,6 +179,25 @@ export async function createBankItem(
         });
       }
     }
+  } else if (data.question_type === 'true_false') {
+    const defaults = [
+      { bank_question_id: inserted.id, choice_key: 'T', choice_text: 'True', position: 0 },
+      { bank_question_id: inserted.id, choice_key: 'F', choice_text: 'False', position: 1 },
+    ];
+    const { data: choices, error: cErr } = await supabase
+      .from('question_bank_choices')
+      .insert(defaults)
+      .select('id, choice_key');
+    if (cErr) throw new Error(cErr.message);
+    const correctKey = data.correct_choice_key || 'T';
+    const correct = choices?.find(c => c.choice_key === correctKey);
+    if (correct) {
+      await supabase.from('question_bank_answer_keys').insert({
+        bank_question_id: inserted.id,
+        correct_choice_id: correct.id,
+        updated_by: userId,
+      });
+    }
   }
 
   if (data.question_type === 'identification' && data.canonical_answer) {
@@ -289,15 +308,19 @@ export async function saveAssessmentQuestionToBank(
 
   const { data: assess } = await supabase
     .from('assessments')
-    .select('subject_id, subject_offering_id')
+    .select('subject_offering_id')
     .eq('id', ver.assessment_id)
     .single();
   if (!assess) throw new Error('Assessment not found');
 
-  // Subject may be subject_offering's subject for old data; prefer direct subject_id else resolve via offering
-  let subjectId = assess.subject_id as string | null;
-  if (!subjectId && assess.subject_offering_id) {
-    const { data: off } = await supabase.from('subject_offerings').select('subject_id').eq('id', assess.subject_offering_id).single();
+  // Subject lives on the offering (assessments table has no subject_id).
+  let subjectId: string | null = null;
+  if (assess.subject_offering_id) {
+    const { data: off } = await supabase
+      .from('subject_offerings')
+      .select('subject_id')
+      .eq('id', assess.subject_offering_id)
+      .single();
     subjectId = off?.subject_id ?? null;
   }
   if (!subjectId) throw new Error('Cannot determine subject for bank save');
@@ -334,7 +357,7 @@ export async function saveAssessmentQuestionToBank(
     .single();
   if (error || !inserted) throw new Error(error?.message ?? 'Failed to save to bank');
 
-  if (q.question_type === 'multiple_choice' && choices?.length) {
+  if ((q.question_type === 'multiple_choice' || q.question_type === 'true_false') && choices?.length) {
     const { data: bankChoices, error: cErr } = await supabase
       .from('question_bank_choices')
       .insert(choices.map((c, idx) => ({
@@ -346,7 +369,6 @@ export async function saveAssessmentQuestionToBank(
       .select('id, choice_key');
     if (cErr) throw new Error(cErr.message);
     if (answerKey?.correct_choice_id && bankChoices) {
-      // Map correct choice by key
       const originalCorrect = choices.find(c => c.id === answerKey.correct_choice_id);
       if (originalCorrect) {
         const bankCorrect = bankChoices.find(c => c.choice_key === originalCorrect.choice_key);

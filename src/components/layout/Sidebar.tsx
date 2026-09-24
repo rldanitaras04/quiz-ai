@@ -5,6 +5,7 @@ import Link from 'next/link';
 import type { JSX } from 'react';
 import type { UserRole } from '@/lib/types';
 import { APP_NAME } from '@/lib/constants';
+import { BrandIcon } from '@/components/brand';
 import {
   GLOBAL_NAVIGATION,
   isNavActive,
@@ -15,6 +16,8 @@ import {
 interface SidebarProps {
   role: UserRole;
   collapsed?: boolean;
+  /** When provided, a close button is shown (mobile drawer). */
+  onClose?: () => void;
 }
 
 function NavIcon({ icon: Icon }: { icon: NavigationItem['icon'] }): JSX.Element {
@@ -28,7 +31,7 @@ function NavIcon({ icon: Icon }: { icon: NavigationItem['icon'] }): JSX.Element 
  * Collapsing is driven by the hamburger in the top bar; this component just
  * renders the requested width.
  */
-export default function Sidebar({ role, collapsed = false }: SidebarProps): JSX.Element {
+export default function Sidebar({ role, collapsed = false, onClose }: SidebarProps): JSX.Element {
   const pathname = usePathname();
   const groups: NavigationGroup[] = GLOBAL_NAVIGATION[role] ?? [];
 
@@ -44,11 +47,21 @@ export default function Sidebar({ role, collapsed = false }: SidebarProps): JSX.
           collapsed ? 'justify-center px-2' : 'gap-3 px-4'
         }`}
       >
-        <div className="flex-shrink-0 flex items-center justify-center h-8 w-8 rounded-[var(--radius-md)] bg-[var(--color-primary)] text-white text-sm font-bold">
-          M
-        </div>
+        <BrandIcon className="h-8 w-8 flex-shrink-0" alt={APP_NAME} />
         {!collapsed && (
-          <span className="text-lg font-semibold text-[var(--color-foreground)]">{APP_NAME}</span>
+          <span className="text-lg font-semibold text-[var(--color-foreground)] flex-1">{APP_NAME}</span>
+        )}
+        {onClose && (
+          <button
+            type="button"
+            onClick={onClose}
+            className="ml-auto flex items-center justify-center h-8 w-8 rounded-[var(--radius-md)] text-[var(--color-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-foreground)] transition-colors lg:hidden"
+            aria-label="Close navigation"
+          >
+            <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+            </svg>
+          </button>
         )}
       </div>
 

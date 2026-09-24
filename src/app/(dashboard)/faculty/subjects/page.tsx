@@ -177,12 +177,14 @@ export default async function FacultySubjectsPage() {
                           </Badge>
                         </TD>
                         <TD className="whitespace-nowrap text-right">
-                          <Link
-                            href={`/faculty/subjects/${offering.offeringId}`}
-                            className="text-sm font-medium text-[var(--color-primary)] hover:underline"
-                          >
-                            Manage
-                          </Link>
+                          <div className="flex items-center justify-end gap-3">
+                            <Link
+                              href={`/faculty/subjects/${offering.offeringId}`}
+                              className="text-sm font-medium text-[var(--color-primary)] hover:underline"
+                            >
+                              Manage
+                            </Link>
+                          </div>
                         </TD>
                       </TR>
                     ))}

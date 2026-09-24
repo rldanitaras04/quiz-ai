@@ -73,6 +73,8 @@ export default function StepManualEntry({ questions, onChange, topics, onCreateT
       const filled = q.question_choices.filter(c => c.choice_text.trim());
       if (filled.length < 2) return 'incomplete';
       if (!filled.some(c => c.is_correct)) return 'incomplete';
+    } else if (q.question_type === 'true_false') {
+      if (!q.question_choices.some(c => c.is_correct)) return 'incomplete';
     } else if (!(q.canonical_answer ?? '').trim()) return 'incomplete';
     return 'complete';
   };

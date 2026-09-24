@@ -7,6 +7,7 @@ import Button from '@/components/ui/Button';
 import Link from 'next/link';
 import StartExamButton from './StartExamButton';
 import { ATTEMPT_STATUS_LABELS } from '@/lib/constants';
+import { countUsedAttempts } from '@/lib/attempt-limit';
 
 interface Props {
   params: Promise<{ assessmentId: string }>;
@@ -118,9 +119,14 @@ export default async function AssessmentDetailPage({ params }: Props) {
     const opensAt = new Date(d.opens_at as string);
     const closesAt = new Date(d.closes_at as string);
     const studentAttempts = (attempts ?? []).filter((a: Record<string, unknown>) => a.deployment_id === d.id);
-    const submittedCount = studentAttempts.filter((a) => ['submitted', 'auto_submitted'].includes(a.status as string)).length;
+    const usedCount = countUsedAttempts(studentAttempts);
     const hasInProgress = studentAttempts.some((a) => a.status === 'in_progress');
-    return now >= opensAt && now <= closesAt && !hasInProgress && submittedCount < (d.attempt_limit as number);
+    return (
+      now >= opensAt &&
+      now <= closesAt &&
+      !hasInProgress &&
+      usedCount < (d.attempt_limit as number)
+    );
   });
 
   const resumableDeployment = (deployments ?? []).find((d: Record<string, unknown>) => {

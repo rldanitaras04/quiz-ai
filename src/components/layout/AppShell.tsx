@@ -24,6 +24,8 @@ interface AppShellProps {
   role: UserRole;
   userName: string;
   avatarUrl: string | null;
+  /** Unread notification badge for the top-bar bell. */
+  notificationCount?: number;
 }
 
 /**
@@ -41,6 +43,7 @@ export default function AppShell({
   role,
   userName,
   avatarUrl,
+  notificationCount,
 }: AppShellProps): JSX.Element {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [mobileContextualNavOpen, setMobileContextualNavOpen] = useState(false);
@@ -93,7 +96,7 @@ export default function AppShell({
         }`}
         aria-hidden={!drawerOpen}
       >
-        <Sidebar role={role} />
+        <Sidebar role={role} onClose={closeDrawer} />
       </div>
 
       {/* Desktop global rail */}
@@ -116,6 +119,7 @@ export default function AppShell({
           avatarUrl={avatarUrl}
           onNavToggle={toggleNavigation}
           navExpanded={navigationExpanded}
+          notificationCount={notificationCount}
         />
 
         <main className="flex-1 overflow-y-auto pb-16 lg:pb-0">

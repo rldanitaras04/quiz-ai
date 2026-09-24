@@ -6,6 +6,8 @@ import type { QuestionWithChoices } from '@/lib/types';
 interface ExamQuestionProps {
   question: QuestionWithChoices;
   position: number;
+  /** Type-group label shown when this is the first item of a type section. */
+  sectionLabel?: string;
   selectedChoiceId: string | null;
   textAnswer: string;
   flagged: boolean;
@@ -17,6 +19,7 @@ interface ExamQuestionProps {
 export default function ExamQuestion({
   question,
   position,
+  sectionLabel,
   selectedChoiceId,
   textAnswer,
   flagged,
@@ -24,8 +27,19 @@ export default function ExamQuestion({
   onTextChange,
   onFlagToggle,
 }: ExamQuestionProps): JSX.Element {
+  const isChoiceBased =
+    question.question_type === 'multiple_choice' || question.question_type === 'true_false';
+
   return (
     <div className="flex flex-col gap-6">
+      {sectionLabel && (
+        <div className="flex items-center gap-3">
+          <span className="text-xs font-semibold uppercase tracking-wide text-primary">
+            {sectionLabel}
+          </span>
+          <div className="flex-1 h-px bg-border" aria-hidden="true" />
+        </div>
+      )}
       <div className="flex items-start justify-between gap-4">
         <div className="flex-1">
           <div className="flex items-center gap-2 mb-2">
@@ -65,7 +79,7 @@ export default function ExamQuestion({
         </button>
       </div>
 
-      {question.question_type === 'multiple_choice' && (
+      {isChoiceBased && (
         <fieldset className="flex flex-col gap-3">
           <legend className="sr-only">Select your answer</legend>
           {question.question_choices.map((choice) => (

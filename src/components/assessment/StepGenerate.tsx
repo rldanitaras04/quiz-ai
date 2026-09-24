@@ -45,7 +45,12 @@ function mapGeneratedQuestion(raw: GeneratedQuestionPayload, position: number): 
   return {
     id,
     assessment_version_id: '',
-    question_type: raw.questionType === 'identification' ? 'identification' : 'multiple_choice',
+    question_type:
+      raw.questionType === 'identification'
+        ? 'identification'
+        : raw.questionType === 'true_false'
+          ? 'true_false'
+          : 'multiple_choice',
     question_text: raw.questionText ?? raw.question_text ?? '',
     difficulty: raw.difficulty ?? 'moderate',
     bloom_level: raw.bloomLevel ?? raw.bloom_level ?? 'understand',
@@ -294,7 +299,7 @@ export default function StepGenerate({
           <dd className="text-[var(--color-foreground)]">
             {state.questionTypes
               .filter((t: QuestionType) => (state.countPerType[t] || 0) > 0)
-              .map((t: QuestionType) => `${state.countPerType[t]} ${t === 'multiple_choice' ? 'MCQ' : 'ID'}`)
+              .map((t: QuestionType) => `${state.countPerType[t]} ${t === 'multiple_choice' ? 'MCQ' : t === 'true_false' ? 'TF' : 'ID'}`)
               .join(', ')}
           </dd>
           <dt className="text-[var(--color-muted)]">Total questions:</dt>

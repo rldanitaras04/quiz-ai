@@ -5,13 +5,13 @@ import { useRouter } from 'next/navigation';
 import { useUser } from '@/lib/hooks';
 import ExamTimer from '@/components/exam/ExamTimer';
 import ExamQuestion from '@/components/exam/ExamQuestion';
-import ExamNavigator from '@/components/exam/ExamNavigator';
 import Button from '@/components/ui/Button';
 import Modal from '@/components/ui/Modal';
 import Spinner from '@/components/ui/Spinner';
 import { getAttemptDetails, submitExam } from '../actions';
 import { saveAnswerLocally, syncAnswersToServer, getLocalAnswers, clearLocalAnswers } from '@/lib/sync';
 import ExamShell from '@/components/layout/ExamShell';
+import { QUESTION_TYPE_LABELS, QUESTION_TYPE_SHORT_LABELS } from '@/lib/constants';
 import type {
   ExamAttempt,
   ExamManifest,
@@ -48,7 +48,6 @@ export default function ExamPage({
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
   const [showSubmitDialog, setShowSubmitDialog] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [navigatorOpen, setNavigatorOpen] = useState(false);
   const [isOnline, setIsOnline] = useState(true);
   const [pendingSync, setPendingSync] = useState(0);
 
@@ -332,20 +331,53 @@ export default function ExamPage({
 
   if (!attempt || !manifest || questions.length === 0) return null;
 
+  // Manifest order is already type-grouped (and shuffled inside groups when
+  // the deployment says so). Walk it and restart item numbers at 1 per type.
+  const typeCounters = new Map<string, number>();
+  const seenTypes = new Set<string>();
+  const displayById = new Map<
+    string,
+    { displayNumber: number; isFirstInGroup: boolean; groupLabel: string }
+  >();
+  for (const q of questions) {
+    const next = (typeCounters.get(q.question_type) ?? 0) + 1;
+    typeCounters.set(q.question_type, next);
+    const firstEver = !seenTypes.has(q.question_type);
+    seenTypes.add(q.question_type);
+    displayById.set(q.id, {
+      displayNumber: next,
+      isFirstInGroup: firstEver,
+      groupLabel: QUESTION_TYPE_LABELS[q.question_type] ?? q.question_type,
+    });
+  }
+
   const currentQuestion = questions[currentIndex];
+  const currentMeta = displayById.get(currentQuestion.id);
   const currentAnswer = answers.get(currentQuestion.id);
 
-  const navigatorQuestions = questions.map((q, i) => ({
-    questionId: q.id,
-    position: i + 1,
-    answered: (() => {
-      const a = answers.get(q.id);
-      return !!(a?.selectedChoiceId || a?.textAnswer?.trim());
-    })(),
-    flagged: flagged.has(q.id),
-  }));
+  const answeredCount = questions.filter((q) => {
+    const a = answers.get(q.id);
+    return !!(a?.selectedChoiceId || a?.textAnswer?.trim());
+  }).length;
 
-  const answeredCount = navigatorQuestions.filter((q) => q.answered).length;
+  const canGoPrev = currentIndex > 0;
+  const canGoNext = currentIndex < questions.length - 1;
+
+  // Group items by question type (MCQ / ID / TF) for the section navigator.
+  const navigatorSections: {
+    label: string;
+    items: { q: (typeof questions)[number]; index: number }[];
+  }[] = [];
+  questions.forEach((q, index) => {
+    const shortLabel = QUESTION_TYPE_SHORT_LABELS[q.question_type] ?? q.question_type;
+    const sectionLabel = `${shortLabel} Section`;
+    const last = navigatorSections[navigatorSections.length - 1];
+    if (last && last.label === sectionLabel) {
+      last.items.push({ q, index });
+    } else {
+      navigatorSections.push({ label: sectionLabel, items: [{ q, index }] });
+    }
+  });
 
   return (
     <ExamShell
@@ -394,78 +426,133 @@ export default function ExamPage({
 
         {/* Exam content */}
         <div className="flex flex-1 overflow-hidden">
-          {/* Desktop navigator sidebar */}
-          <div className="hidden md:block w-64 flex-shrink-0 overflow-y-auto border-r border-[var(--color-border)] bg-[var(--color-surface)]">
-            <div className="sticky top-4 p-4">
-              <ExamNavigator
-                questions={navigatorQuestions}
-                currentIndex={currentIndex}
-                onSelect={setCurrentIndex}
-                isOpen={false}
-                onClose={() => {}}
-              />
-            </div>
-          </div>
+          <div className="flex-1 overflow-y-auto px-4 pb-28 md:pb-8">
+            <div className="max-w-4xl mx-auto py-6">
+              {/* Section-grouped answer status: green answered / red unanswered */}
+              <div className="mb-6 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+                <div className="flex flex-col gap-5">
+                  {navigatorSections.map((section) => (
+                    <div key={section.label} className="flex flex-col gap-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-semibold uppercase tracking-wide text-[var(--color-primary)]">
+                          {section.label}
+                        </span>
+                        <div className="flex-1 h-px bg-[var(--color-border)]" aria-hidden="true" />
+                      </div>
+                      <div className="grid grid-cols-5 sm:grid-cols-7 md:grid-cols-10 gap-2">
+                        {section.items.map(({ q, index }) => {
+                          const a = answers.get(q.id);
+                          const isAnswered = !!(a?.selectedChoiceId || a?.textAnswer?.trim());
+                          const isCurrent = index === currentIndex;
+                          const status = isAnswered ? 'Answered' : 'Unanswered';
+                          const displayNumber =
+                            displayById.get(q.id)?.displayNumber ?? index + 1;
 
-          {/* Question area */}
-          <div className="flex-1 overflow-y-auto px-4 pb-24 md:pb-4">
-            <div className="max-w-2xl mx-auto py-6">
-              <ExamQuestion
-                question={currentQuestion}
-                position={currentIndex + 1}
-                selectedChoiceId={currentAnswer?.selectedChoiceId ?? null}
-                textAnswer={currentAnswer?.textAnswer ?? ''}
-                flagged={flagged.has(currentQuestion.id)}
-                onChoiceSelect={(choiceId) =>
-                  updateAnswer(currentQuestion.id, { selectedChoiceId: choiceId })
-                }
-                onTextChange={(text) =>
-                  updateAnswer(currentQuestion.id, { textAnswer: text })
-                }
-                onFlagToggle={() => toggleFlag(currentQuestion.id)}
-              />
+                          return (
+                            <button
+                              key={q.id}
+                              type="button"
+                              onClick={() => setCurrentIndex(index)}
+                              aria-label={`Question ${displayNumber}, ${status}${isCurrent ? ', current' : ''}`}
+                              className={`relative h-10 w-full rounded-lg border text-sm font-medium tabular-nums transition-all ${
+                                isAnswered
+                                  ? 'border-[var(--color-success)]/40 bg-[var(--color-success-light)] text-[var(--color-success-dark)] hover:opacity-90'
+                                  : 'border-[var(--color-danger)]/40 bg-[var(--color-danger-light)] text-[var(--color-danger-dark)] hover:opacity-90'
+                              } ${
+                                isCurrent
+                                  ? 'bg-[var(--color-primary)]! text-white! border-[var(--color-primary)]! ring-2 ring-[var(--color-primary)] ring-offset-2 ring-offset-[var(--color-surface)]'
+                                  : ''
+                              }`}
+                            >
+                              {displayNumber}
+                              {flagged.has(q.id) && !isCurrent && (
+                                <span className="absolute -top-1 -right-1 h-3 w-3 rounded-full bg-[var(--color-warning)] border-2 border-[var(--color-surface)]" />
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-4 flex flex-wrap items-center gap-4 text-xs text-[var(--color-muted)]">
+                  <span className="flex items-center gap-1.5">
+                    <span className="h-3 w-3 rounded-sm bg-[var(--color-success)]" aria-hidden="true" />
+                    Answered ({answeredCount})
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="h-3 w-3 rounded-sm bg-[var(--color-danger)]" aria-hidden="true" />
+                    Unanswered ({questions.length - answeredCount})
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex flex-col md:flex-row md:items-start gap-4">
+                <div className="md:w-28 shrink-0 md:pt-24 order-2 md:order-1">
+                  <Button
+                    variant="secondary"
+                    className="w-full md:w-auto"
+                    disabled={!canGoPrev}
+                    onClick={() => setCurrentIndex((i) => Math.max(0, i - 1))}
+                  >
+                    Previous
+                  </Button>
+                </div>
+
+                <div className="flex-1 min-w-0 order-1 md:order-2">
+                  <div className="max-w-2xl mx-auto">
+                    <ExamQuestion
+                      question={currentQuestion}
+                      position={currentMeta?.displayNumber ?? currentIndex + 1}
+                      sectionLabel={currentMeta?.isFirstInGroup ? currentMeta.groupLabel : undefined}
+                      selectedChoiceId={currentAnswer?.selectedChoiceId ?? null}
+                      textAnswer={currentAnswer?.textAnswer ?? ''}
+                      flagged={flagged.has(currentQuestion.id)}
+                      onChoiceSelect={(choiceId) =>
+                        updateAnswer(currentQuestion.id, { selectedChoiceId: choiceId })
+                      }
+                      onTextChange={(text) =>
+                        updateAnswer(currentQuestion.id, { textAnswer: text })
+                      }
+                      onFlagToggle={() => toggleFlag(currentQuestion.id)}
+                    />
+                  </div>
+                </div>
+
+                <div className="md:w-28 shrink-0 md:pt-24 order-3 flex md:justify-end">
+                  <Button
+                    variant="secondary"
+                    className="w-full md:w-auto"
+                    disabled={!canGoNext}
+                    onClick={() =>
+                      setCurrentIndex((i) => Math.min(questions.length - 1, i + 1))
+                    }
+                  >
+                    Next
+                  </Button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
 
-        {/* Mobile bottom bar */}
-        <div className="fixed bottom-0 left-0 right-0 bg-surface border-t border-border px-4 py-3 md:hidden z-40">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="w-full"
-            onClick={() => setNavigatorOpen(true)}
-          >
-            Questions ({answeredCount}/{questions.length})
-          </Button>
-        </div>
-
-        {/* Mobile navigator overlay */}
-        <ExamNavigator
-          questions={navigatorQuestions}
-          currentIndex={currentIndex}
-          onSelect={setCurrentIndex}
-          isOpen={navigatorOpen}
-          onClose={() => setNavigatorOpen(false)}
-        />
-
-        {/* Desktop submit button */}
-        <div className="hidden md:flex fixed bottom-6 right-6 z-30">
+        {/* Mobile submit button */}
+        <div className="md:hidden fixed bottom-0 left-0 right-0 z-30 bg-surface border-t border-border px-4 py-3">
           <Button
             variant="primary"
             size="lg"
+            className="w-full"
             onClick={() => setShowSubmitDialog(true)}
           >
             Submit Exam
           </Button>
         </div>
 
-        {/* Mobile submit button */}
-        <div className="md:hidden fixed bottom-16 left-4 right-4 z-30">
+        {/* Desktop submit button */}
+        <div className="hidden md:flex fixed bottom-6 right-6 z-30">
           <Button
             variant="primary"
             size="lg"
-            className="w-full"
             onClick={() => setShowSubmitDialog(true)}
           >
             Submit Exam

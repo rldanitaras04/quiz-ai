@@ -12,6 +12,7 @@ import { Table, THead, TBody, TR, TH, TD } from '@/components/ui/Table';
 import SourceUploadSimple from '@/components/sources/SourceUploadSimple';
 import { getSettings } from '@/lib/settings';
 import DeleteSourceButton from './DeleteSourceButton';
+import WorkspaceNavSetter from '@/components/layout/WorkspaceNavSetter';
 import { FileText, Article, ClipboardText } from '@phosphor-icons/react';
 import { notifyError } from '@/components/ui/alerts';
 
@@ -133,6 +134,10 @@ export default function SourcesPage({ params }: Props) {
 
   return (
     <div>
+      <WorkspaceNavSetter
+        offeringId={offeringId}
+        currentPath={`/faculty/subjects/${offeringId}/sources`}
+      />
       <PageHeader
         breadcrumbs={[
           { label: 'Faculty', href: '/faculty' },

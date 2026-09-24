@@ -3,6 +3,7 @@
 import type { JSX, ReactNode } from 'react';
 import Link from 'next/link';
 import { ArrowLeft } from '@phosphor-icons/react';
+import { BrandIcon } from '@/components/brand';
 
 interface ExamShellProps {
   children: ReactNode;
@@ -37,8 +38,9 @@ export default function ExamShell({
           </Link>
         )}
         <div className="flex-1" />
-        <div className="text-xs font-medium text-[var(--color-muted)]">
-          MiMo Examination
+        <div className="flex items-center gap-1.5 text-xs font-medium text-[var(--color-muted)]">
+          <BrandIcon className="h-4 w-4" alt="" />
+          SEAMS AI Examination
         </div>
       </header>
 

@@ -129,6 +129,10 @@ function revalidateAssessment(offeringId: string, assessmentId?: string): void {
   if (assessmentId) {
     revalidatePath(`/faculty/subjects/${offeringId}/assessments/${assessmentId}`);
   }
+  revalidatePath('/faculty/subjects');
+  // Subject-scoped list + detail under /faculty/subjects/subject/[subjectId]/...
+  revalidatePath('/faculty/subjects/subject/[subjectId]', 'page');
+  revalidatePath('/faculty/subjects/subject/[subjectId]/assessments/[assessmentId]', 'page');
 }
 
 export async function getSourceMaterials(offeringId: string) {
@@ -544,6 +548,109 @@ export async function updateAssessment(
   return { success: true };
 }
 
+/**
+ * Deletes one or more assessments for faculty on their offerings.
+ *
+ * Each row is authorized and attempt-checked the same way as `deleteAssessment`.
+ * Rows that cannot be deleted (not owned, student attempts exist) are reported
+ * in `failed` so a bulk run is not all-or-nothing when only some are blocked.
+ */
+export async function deleteAssessments(
+  assessmentIds: string[]
+): Promise<{
+  deleted: string[];
+  failed: { id: string; title: string; error: string }[];
+}> {
+  const { supabase, userId } = await requireUser();
+
+  const ids = [...new Set(assessmentIds.filter(Boolean))];
+  if (ids.length === 0) throw new Error('No assessments selected');
+
+  const deleted: string[] = [];
+  const failed: { id: string; title: string; error: string }[] = [];
+
+  for (const assessmentId of ids) {
+    let title = assessmentId;
+    try {
+      const assessment = await getFacultyAssessment(supabase, userId, assessmentId);
+      if (!assessment) {
+        throw new Error('Not found or you are not assigned to its offering');
+      }
+      title = assessment.title;
+
+      const { data: deployments } = await supabase
+        .from('assessment_deployments')
+        .select('id')
+        .eq('assessment_id', assessmentId);
+
+      const deploymentIds = (deployments ?? []).map((d) => d.id);
+      if (deploymentIds.length > 0) {
+        const { count } = await supabase
+          .from('exam_attempts')
+          .select('id', { count: 'exact', head: true })
+          .in('deployment_id', deploymentIds);
+
+        if (count && count > 0) {
+          throw new Error(
+            `Has ${count} student attempt${count === 1 ? '' : 's'} — close and clear attempts first`
+          );
+        }
+      }
+
+      const { error } = await supabase.from('assessments').delete().eq('id', assessmentId);
+      if (error) throw new Error(error.message);
+
+      const { data: remaining } = await supabase
+        .from('assessments')
+        .select('id')
+        .eq('id', assessmentId)
+        .maybeSingle();
+      if (remaining) throw new Error('Could not delete (RLS blocked the write)');
+
+      await recordAuditLog({
+        actorUserId: userId,
+        action: 'delete',
+        entityType: 'assessment',
+        entityId: assessmentId,
+        metadata: {
+          title: assessment.title,
+          status: assessment.status,
+          subject_offering_id: assessment.subjectOfferingId,
+          bulk: ids.length > 1,
+        },
+      });
+
+      revalidateAssessment(assessment.subjectOfferingId, assessmentId);
+      deleted.push(assessmentId);
+    } catch (e) {
+      failed.push({
+        id: assessmentId,
+        title,
+        error: e instanceof Error ? e.message : 'Unknown error',
+      });
+    }
+  }
+
+  if (deleted.length > 0) {
+    revalidatePath('/faculty/subjects');
+    revalidatePath('/faculty/subjects/subject/[subjectId]', 'page');
+    revalidatePath('/faculty/subjects/subject/[subjectId]/assessments/[assessmentId]', 'page');
+  }
+
+  return { deleted, failed };
+}
+
+/**
+ * Single-assessment delete (wrapper around the bulk path).
+ */
+export async function deleteAssessment(assessmentId: string): Promise<{ success: true }> {
+  const result = await deleteAssessments([assessmentId]);
+  if (result.failed.length > 0) {
+    throw new Error(result.failed[0].error);
+  }
+  return { success: true };
+}
+
 export async function updateGenerationConfig(
   assessmentId: string,
   config: Record<string, unknown>
@@ -648,6 +755,27 @@ export async function addQuestion(
 
     if (cErr) throw new Error(cErr.message);
 
+    if (data.correct_choice_key && choices) {
+      const correctChoice = choices.find(c => c.choice_key === data.correct_choice_key);
+      if (correctChoice) {
+        await supabase.from('answer_keys').insert({
+          question_id: question.id,
+          correct_choice_id: correctChoice.id,
+          updated_by: userId,
+        });
+      }
+    }
+  } else if (data.question_type === 'true_false') {
+    // Ensure default True/False choices exist even if caller omitted them.
+    const defaults = [
+      { question_id: question.id, choice_key: 'T', choice_text: 'True', position: 0 },
+      { question_id: question.id, choice_key: 'F', choice_text: 'False', position: 1 },
+    ];
+    const { data: choices, error: cErr } = await supabase
+      .from('question_choices')
+      .insert(defaults)
+      .select();
+    if (cErr) throw new Error(cErr.message);
     if (data.correct_choice_key && choices) {
       const correctChoice = choices.find(c => c.choice_key === data.correct_choice_key);
       if (correctChoice) {
@@ -948,6 +1076,8 @@ export async function publishAssessment(assessmentId: string) {
   revalidateAssessment(assessment.subjectOfferingId, assessment.id);
   // Students see published assessments on their own list.
   revalidatePath('/student/assessments');
+  revalidatePath('/student');
+  revalidatePath('/notifications');
   return { success: true };
 }
 
@@ -1015,7 +1145,11 @@ export async function saveGeneratedQuestions(
 
     if (qErr || !question) return { success: false, error: `Failed to save question ${i + 1}: ${qErr?.message ?? 'unknown'}` };
 
-    if (q.question_type === 'multiple_choice' && q.question_choices && q.question_choices.length > 0) {
+    if (
+      (q.question_type === 'multiple_choice' || q.question_type === 'true_false') &&
+      q.question_choices &&
+      q.question_choices.length > 0
+    ) {
       const { data: choices, error: cErr } = await supabase
         .from('question_choices')
         .insert(q.question_choices.map((c, ci) => ({
@@ -1344,4 +1478,128 @@ export async function getSourceForQuestion(
   });
 
   return { data: result };
+}
+
+export type TosExportData = import('@/lib/export/tos-doc').TosExportData;
+
+/**
+ * Derived Table of Specifications for the assessment's current version:
+ * questions grouped by topic × type × difficulty × Bloom level, with summary
+ * rollups. Read-only; gated the same way as `getAssessmentDetail`.
+ */
+export async function getAssessmentTosExport(
+  assessmentId: string
+): Promise<{ data: TosExportData | null; error?: string }> {
+  const { supabase, userId } = await requireUser();
+
+  const assessment = await getFacultyAssessment(supabase, userId, assessmentId);
+  if (!assessment) return { data: null, error: 'Not authorized' };
+  if (!assessment.currentVersionId) {
+    return { data: null, error: 'This assessment has no current version yet.' };
+  }
+
+  const { data: questions, error: qErr } = await supabase
+    .from('questions')
+    .select('question_type, difficulty, bloom_level, points, topic:topics(title)')
+    .eq('assessment_version_id', assessment.currentVersionId);
+
+  if (qErr) return { data: null, error: qErr.message };
+
+  const { data: offering } = await supabase
+    .from('subject_offerings')
+    .select('subject:subjects(code, title), section:sections(name)')
+    .eq('id', assessment.subjectOfferingId)
+    .maybeSingle();
+
+  const subject = offering?.subject
+    ? Array.isArray(offering.subject)
+      ? offering.subject[0]
+      : offering.subject
+    : null;
+  const section = offering?.section
+    ? Array.isArray(offering.section)
+      ? offering.section[0]
+      : offering.section
+    : null;
+  const subjectLabel = subject
+    ? `${subject.code}${section ? ` - ${section.name}` : ''}`
+    : null;
+
+  const typeOrder: QuestionType[] = ['multiple_choice', 'identification', 'true_false'];
+  const diffOrder: Difficulty[] = ['easy', 'moderate', 'difficult'];
+  const bloomOrder: BloomLevel[] = [
+    'remember',
+    'understand',
+    'apply',
+    'analyze',
+    'evaluate',
+    'create',
+  ];
+
+  const byType = Object.fromEntries(typeOrder.map((t) => [t, 0])) as Record<QuestionType, number>;
+  const byDifficulty = Object.fromEntries(diffOrder.map((d) => [d, 0])) as Record<Difficulty, number>;
+  const byBloom = Object.fromEntries(bloomOrder.map((b) => [b, 0])) as Record<BloomLevel, number>;
+  const byTopicMap = new Map<string, number>();
+  const cellMap = new Map<string, TosExportRow>();
+
+  type TosExportRow = import('@/lib/export/tos-doc').TosExportRow;
+
+  for (const row of (questions ?? []) as Array<{
+    question_type: QuestionType;
+    difficulty: Difficulty;
+    bloom_level: BloomLevel;
+    points: number | null;
+    topic: { title: string } | { title: string }[] | null;
+  }>) {
+    const topicTitle =
+      (Array.isArray(row.topic) ? row.topic[0]?.title : row.topic?.title) ?? 'General';
+    const count = 1;
+
+    byType[row.question_type] = (byType[row.question_type] ?? 0) + count;
+    byDifficulty[row.difficulty] = (byDifficulty[row.difficulty] ?? 0) + count;
+    byBloom[row.bloom_level] = (byBloom[row.bloom_level] ?? 0) + count;
+    byTopicMap.set(topicTitle, (byTopicMap.get(topicTitle) ?? 0) + count);
+
+    const key = [topicTitle, row.question_type, row.difficulty, row.bloom_level].join('|');
+    const existing = cellMap.get(key);
+    if (existing) existing.count += count;
+    else {
+      cellMap.set(key, {
+        topic: topicTitle,
+        question_type: row.question_type,
+        difficulty: row.difficulty,
+        bloom_level: row.bloom_level,
+        count,
+      });
+    }
+  }
+
+  const totalItems = (questions ?? []).length;
+  const totalPoints = (questions ?? []).reduce((sum, q) => sum + ((q as { points?: number | null }).points ?? 0), 0);
+
+  const rows = [...cellMap.values()].sort((a, b) => {
+    const topicCmp = a.topic.localeCompare(b.topic);
+    if (topicCmp !== 0) return topicCmp;
+    const typeCmp = typeOrder.indexOf(a.question_type) - typeOrder.indexOf(b.question_type);
+    if (typeCmp !== 0) return typeCmp;
+    const diffCmp = diffOrder.indexOf(a.difficulty) - diffOrder.indexOf(b.difficulty);
+    if (diffCmp !== 0) return diffCmp;
+    return bloomOrder.indexOf(a.bloom_level) - bloomOrder.indexOf(b.bloom_level);
+  });
+
+  return {
+    data: {
+      assessmentTitle: assessment.title,
+      subjectLabel,
+      totalItems,
+      totalPoints,
+      rows,
+      byType,
+      byDifficulty,
+      byBloom,
+      byTopic: [...byTopicMap.entries()]
+        .map(([topic, count]) => ({ topic, count }))
+        .sort((a, b) => a.topic.localeCompare(b.topic)),
+    },
+  };
 }

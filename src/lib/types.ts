@@ -4,7 +4,7 @@
 
 export type UserRole = 'super_admin' | 'faculty' | 'student';
 
-export type QuestionType = 'multiple_choice' | 'identification';
+export type QuestionType = 'multiple_choice' | 'identification' | 'true_false';
 
 export type Difficulty = 'easy' | 'moderate' | 'difficult';
 
