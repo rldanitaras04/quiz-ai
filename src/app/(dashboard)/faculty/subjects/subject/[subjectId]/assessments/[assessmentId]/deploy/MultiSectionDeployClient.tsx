@@ -8,6 +8,13 @@ import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Table, THead, TBody, TR, TH, TD } from '@/components/ui/Table';
 import { notifySuccess, notifyError } from '@/components/ui/alerts';
 import { createDeployment } from '@/app/(dashboard)/faculty/subjects/[offeringId]/assessments/[assessmentId]/deploy/actions';
+import type { DeploymentLaunchMode } from '@/lib/types';
+
+const LAUNCH_OPTIONS: { value: DeploymentLaunchMode; label: string }[] = [
+  { value: 'now', label: 'Open right away' },
+  { value: 'scheduled', label: 'Schedule' },
+  { value: 'manual', label: 'Manual open / close' },
+];
 
 interface Offering {
   id: string;
@@ -20,6 +27,7 @@ interface MultiSectionDeployClientProps {
   subjectId: string;
   offerings: Offering[];
   assessmentTitle: string;
+  assessmentVersionId?: string;
   versionNumber: number;
   totalItems: number;
   totalPoints: number;
@@ -30,6 +38,7 @@ export default function MultiSectionDeployClient({
   subjectId,
   offerings,
   assessmentTitle,
+  assessmentVersionId = '',
   versionNumber,
   totalItems,
   totalPoints,
@@ -42,6 +51,7 @@ export default function MultiSectionDeployClient({
   const [results, setResults] = useState<{ offeringId: string; sectionName: string; success: boolean; error?: string }[]>([]);
 
   // Shared config for all deployments
+  const [launchMode, setLaunchMode] = useState<DeploymentLaunchMode>('scheduled');
   const [opensAt, setOpensAt] = useState(() => {
     const now = new Date();
     now.setHours(now.getHours() + 1);
@@ -80,6 +90,31 @@ export default function MultiSectionDeployClient({
       notifyError('No sections selected', 'Select at least one section to deploy to.');
       return;
     }
+    if (launchMode === 'scheduled' && (!opensAt || !closesAt)) {
+      notifyError('Schedule incomplete', 'Opening and closing times are required.');
+      return;
+    }
+    if (launchMode === 'scheduled' && new Date(opensAt) >= new Date(closesAt)) {
+      notifyError('Invalid schedule', 'Close time must be after open time.');
+      return;
+    }
+    if (launchMode === 'now' && !closesAt) {
+      notifyError('Closing time required', 'Set when this assessment should close.');
+      return;
+    }
+    if (launchMode === 'now' && new Date() >= new Date(closesAt)) {
+      notifyError('Invalid close time', 'Close time must be in the future.');
+      return;
+    }
+
+    const needsOpenTime = launchMode === 'scheduled';
+    const needsCloseTime = launchMode === 'scheduled' || launchMode === 'now';
+    const opensAtIso = needsOpenTime && opensAt
+      ? new Date(opensAt).toISOString()
+      : new Date().toISOString();
+    const closesAtIso = needsCloseTime && closesAt
+      ? new Date(closesAt).toISOString()
+      : new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString();
 
     setDeploying(true);
     setResults([]);
@@ -90,10 +125,11 @@ export default function MultiSectionDeployClient({
       const offering = offerings.find(o => o.id === offeringId);
       try {
         const result = await createDeployment(assessmentId, offeringId, {
-          assessment_version_id: '', // Will be resolved server-side
+          assessment_version_id: assessmentVersionId,
           subject_offering_id: offeringId,
-          opens_at: new Date(opensAt).toISOString(),
-          closes_at: new Date(closesAt).toISOString(),
+          launch_mode: launchMode,
+          opens_at: opensAtIso,
+          closes_at: closesAtIso,
           duration_minutes: durationMinutes,
           attempt_limit: attemptLimit,
           question_order_mode: 'shuffled',
@@ -224,23 +260,44 @@ export default function MultiSectionDeployClient({
         <CardContent>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-foreground mb-1">Opens At</label>
-              <input
-                type="datetime-local"
-                value={opensAt}
-                onChange={(e) => setOpensAt(e.target.value)}
+              <label className="block text-sm font-medium text-foreground mb-1">Launch mode</label>
+              <select
+                value={launchMode}
+                onChange={(e) => setLaunchMode(e.target.value as DeploymentLaunchMode)}
                 className="w-full rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-foreground)]"
-              />
+              >
+                {LAUNCH_OPTIONS.map(opt => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
             </div>
-            <div>
-              <label className="block text-sm font-medium text-foreground mb-1">Closes At</label>
-              <input
-                type="datetime-local"
-                value={closesAt}
-                onChange={(e) => setClosesAt(e.target.value)}
-                className="w-full rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-foreground)]"
-              />
-            </div>
+            {launchMode === 'scheduled' && (
+              <div>
+                <label className="block text-sm font-medium text-foreground mb-1">Opens At</label>
+                <input
+                  type="datetime-local"
+                  value={opensAt}
+                  onChange={(e) => setOpensAt(e.target.value)}
+                  className="w-full rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-foreground)]"
+                />
+              </div>
+            )}
+            {(launchMode === 'scheduled' || launchMode === 'now') && (
+              <div>
+                <label className="block text-sm font-medium text-foreground mb-1">Closes At</label>
+                <input
+                  type="datetime-local"
+                  value={closesAt}
+                  onChange={(e) => setClosesAt(e.target.value)}
+                  className="w-full rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-foreground)]"
+                />
+              </div>
+            )}
+            {launchMode === 'manual' && (
+              <div className="md:col-span-2 text-xs text-muted">
+                Creates a draft. Open and close each section manually from Deployments.
+              </div>
+            )}
             <div>
               <label className="block text-sm font-medium text-foreground mb-1">Duration (minutes)</label>
               <input

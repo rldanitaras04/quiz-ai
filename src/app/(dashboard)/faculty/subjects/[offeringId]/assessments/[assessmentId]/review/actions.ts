@@ -3,7 +3,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { recordAuditLog } from '@/lib/audit';
-import { isFacultyOfOffering } from '@/lib/auth';
+import { getFacultyAssessment, isFacultyOfOfferingOrSubject } from '@/lib/auth';
 
 async function requireUser() {
   const supabase = await createClient();
@@ -42,7 +42,9 @@ export async function getIdentificationResponsesNeedingReview(
     .single();
 
   if (!assessment) return { data: null, error: 'Assessment not found' };
-  if (!(await isFacultyOfOffering(supabase, userId, assessment.subject_offering_id))) {
+
+  const facultyAssessment = await getFacultyAssessment(supabase, userId, assessmentId);
+  if (!facultyAssessment) {
     return { data: null, error: 'Not authorized' };
   }
 
@@ -161,7 +163,7 @@ export async function scoreIdentificationResponse(
     .single();
 
   if (!deployment) return { success: false, error: 'Deployment not found' };
-  if (!(await isFacultyOfOffering(supabase, userId, deployment.subject_offering_id))) {
+  if (!(await isFacultyOfOfferingOrSubject(supabase, userId, deployment.subject_offering_id))) {
     return { success: false, error: 'Not authorized' };
   }
 

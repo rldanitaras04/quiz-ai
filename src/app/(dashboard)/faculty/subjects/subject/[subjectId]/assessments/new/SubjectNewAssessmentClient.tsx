@@ -12,6 +12,7 @@ import StepApprove from '@/components/assessment/StepApprove';
 import StepCreationMode from '@/components/assessment/StepCreationMode';
 import StepManualEntry from '@/components/assessment/StepManualEntry';
 import StepQuestionBank from '@/components/assessment/StepQuestionBank';
+import StepImportExam from '@/components/assessment/StepImportExam';
 import type {
   QuestionType,
   Difficulty,
@@ -84,7 +85,7 @@ const INITIAL_STATE: WizardState = {
   defaultTopicId: null,
 };
 
-type StepId = 'mode' | 'basic' | 'sources' | 'genConfig' | 'custom' | 'generate' | 'manual' | 'bank' | 'review' | 'approve';
+type StepId = 'mode' | 'basic' | 'sources' | 'genConfig' | 'custom' | 'generate' | 'manual' | 'bank' | 'importExam' | 'review' | 'approve';
 
 const STEP_CONFIG: Record<AssessmentCreationMode, { ids: StepId[]; labels: string[] }> = {
   ai: {
@@ -102,6 +103,10 @@ const STEP_CONFIG: Record<AssessmentCreationMode, { ids: StepId[]; labels: strin
   mixed: {
     ids: ['mode', 'basic', 'manual', 'bank', 'review', 'approve'],
     labels: ['Creation Mode', 'Basic Info', 'Manual Questions', 'Question Bank', 'Review & Edit', 'Approve & Schedule'],
+  },
+  upload: {
+    ids: ['mode', 'basic', 'importExam', 'review', 'approve'],
+    labels: ['Creation Mode', 'Basic Info', 'Upload Exam', 'Review & Edit', 'Approve & Schedule'],
   },
 };
 
@@ -212,8 +217,12 @@ export default function SubjectNewAssessmentClient({
           break;
         case 'bank':
           break;
+        case 'importExam':
+          if (state.generatedQuestions.length === 0)
+            errors.importExam = 'Parse and add at least one question. You can fill missing answer keys in the preview.';
+          break;
         case 'review':
-          if (state.generatedQuestions.length === 0) errors.review = 'No questions to review. Add some manually or from the bank, or generate with AI.';
+          if (state.generatedQuestions.length === 0) errors.review = 'No questions to review. Add some manually, from the bank, upload an exam, or generate with AI.';
           break;
         default:
           break;
@@ -289,6 +298,14 @@ export default function SubjectNewAssessmentClient({
             existingCount={state.generatedQuestions.length}
           />
         );
+      case 'importExam':
+        return (
+          <StepImportExam
+            questions={state.generatedQuestions}
+            onChange={(next) => updateState({ generatedQuestions: next })}
+            topics={topics}
+          />
+        );
       case 'review':
         return (
           <StepReview
@@ -336,7 +353,9 @@ export default function SubjectNewAssessmentClient({
                 ? 'Manually encode each item — categorized by topic, with optional images'
                 : state.creationMode === 'bank'
                   ? 'Pick reusable items from your question bank — grouped by topic'
-                  : 'Combine manual encoding and bank imports — no source files needed, with optional images'}
+                  : state.creationMode === 'upload'
+                    ? 'Paste or upload a ready-made exam — optional separate answer-key file, fill missing keys in preview'
+                    : 'Combine manual encoding and bank imports — no source files needed, with optional images'}
           </p>
         </div>
         <nav aria-label="Progress" className="mb-8">
@@ -393,6 +412,7 @@ export default function SubjectNewAssessmentClient({
         <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-[var(--radius-lg)] shadow-[var(--shadow-sm)] p-6">
           {renderStep()}
           {stepErrors.manual && <p className="mt-4 text-sm text-[var(--color-danger)]">{stepErrors.manual}</p>}
+          {stepErrors.importExam && <p className="mt-4 text-sm text-[var(--color-danger)]">{stepErrors.importExam}</p>}
           {stepErrors.review && <p className="mt-4 text-sm text-[var(--color-danger)]">{stepErrors.review}</p>}
         </div>
 
@@ -409,7 +429,7 @@ export default function SubjectNewAssessmentClient({
           </Button>
 
           <div className="text-sm text-[var(--color-muted)]">
-            Step {currentStep + 1} of {labels.length} · {state.creationMode === 'ai' ? 'AI' : state.creationMode === 'manual' ? 'Manual' : state.creationMode === 'bank' ? 'Bank' : 'Mixed'} mode
+            Step {currentStep + 1} of {labels.length} · {state.creationMode === 'ai' ? 'AI' : state.creationMode === 'manual' ? 'Manual' : state.creationMode === 'bank' ? 'Bank' : state.creationMode === 'upload' ? 'Upload' : 'Mixed'} mode
           </div>
 
           {!isLastStep && !isGenerateStep && !isReviewStep && !isApproveStep && (

@@ -3,9 +3,11 @@
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { isFacultyOfOffering } from '@/lib/auth';
+import { isFacultyOfOffering, isFacultyOfSubject } from '@/lib/auth';
 import { recordAuditLog } from '@/lib/audit';
 import type { QuestionType, Difficulty, BloomLevel, QuestionBankItem } from '@/lib/types';
+import { parseExamText, type ParsedExamItem } from '@/lib/import/exam-parse';
+import { extractFromDOCX, extractFromPDF, extractFromTXT } from '@/lib/ai/text-extraction';
 
 async function requireUser() {
   const supabase = await createClient();
@@ -38,10 +40,13 @@ export async function getQuestionBank(
   filters: QuestionBankFilters = {}
 ): Promise<QuestionBankItem[]> {
   const { supabase, userId } = await requireUser();
-  if (!(await isFacultyOfOffering(supabase, userId, offeringId))) {
+  const subjectId = await resolveSubjectId(supabase, offeringId);
+  const authorized =
+    (await isFacultyOfOffering(supabase, userId, offeringId)) ||
+    (await isFacultyOfSubject(supabase, userId, subjectId));
+  if (!authorized) {
     throw new Error('Not authorized for this offering');
   }
-  const subjectId = await resolveSubjectId(supabase, offeringId);
 
   let query = supabase
     .from('question_bank')
@@ -125,10 +130,13 @@ export async function createBankItem(
   }
 ): Promise<{ id: string }> {
   const { supabase, userId } = await requireUser();
-  if (!(await isFacultyOfOffering(supabase, userId, offeringId))) {
+  const subjectId = await resolveSubjectId(supabase, offeringId);
+  const authorized =
+    (await isFacultyOfOffering(supabase, userId, offeringId)) ||
+    (await isFacultyOfSubject(supabase, userId, subjectId));
+  if (!authorized) {
     throw new Error('Not authorized for this offering');
   }
-  const subjectId = await resolveSubjectId(supabase, offeringId);
   const text = data.question_text?.trim();
   if (!text) throw new Error('Question text is required');
   if (data.topic_id) {
@@ -219,6 +227,144 @@ export async function createBankItem(
   return { id: inserted.id };
 }
 
+/**
+ * Extract text from an uploaded ready-made exam (.docx / .txt / .md / .csv / .pdf).
+ * Parsing to items happens client-side (or via previewExamImport) so faculty can
+ * review before anything is written to the bank.
+ */
+export async function extractExamFile(
+  fileName: string,
+  fileBytes: ArrayBuffer
+): Promise<{ text: string }> {
+  await requireUser();
+  const lower = fileName.toLowerCase();
+  const buf = Buffer.from(fileBytes);
+  let text: string;
+  if (lower.endsWith('.docx')) {
+    text = await extractFromDOCX(buf);
+  } else if (lower.endsWith('.pdf')) {
+    text = await extractFromPDF(buf);
+  } else if (lower.endsWith('.csv') || lower.endsWith('.txt') || lower.endsWith('.md')) {
+    text = await extractFromTXT(buf);
+  } else {
+    throw new Error('Unsupported file type. Use .docx, .pdf, .txt, .md, or .csv');
+  }
+  if (!text.trim()) throw new Error('Could not extract text from that file');
+  return { text };
+}
+
+/** Server-side parse for paste preview (same parser as the client). */
+export async function previewExamImport(text: string): Promise<{
+  items: ParsedExamItem[];
+  errors: string[];
+}> {
+  await requireUser();
+  return parseExamText(text);
+}
+
+
+/**
+ * Insert a parsed ready-made exam into the question bank for this subject.
+ * Authorization + topic checks match `createBankItem`.
+ */
+export async function importExamToBank(
+  offeringId: string,
+  items: ParsedExamItem[],
+  options: { topic_id?: string | null; source_filename?: string } = {}
+): Promise<{ imported: number; errors: string[] }> {
+  const { supabase, userId } = await requireUser();
+  const subjectId = await resolveSubjectId(supabase, offeringId);
+  const authorized =
+    (await isFacultyOfOffering(supabase, userId, offeringId)) ||
+    (await isFacultyOfSubject(supabase, userId, subjectId));
+  if (!authorized) throw new Error('Not authorized for this offering');
+
+  if (!Array.isArray(items) || items.length === 0) {
+    throw new Error('No questions to import');
+  }
+  if (items.length > 200) {
+    throw new Error('Import is limited to 200 questions at a time');
+  }
+
+  const topicId = options.topic_id || null;
+  if (topicId) {
+    const { data: topic } = await supabase
+      .from('topics')
+      .select('id, subject_id')
+      .eq('id', topicId)
+      .single();
+    if (!topic || topic.subject_id !== subjectId) {
+      throw new Error('Invalid topic for this subject');
+    }
+  }
+
+  const errors: string[] = [];
+  let imported = 0;
+
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    const text = item.question_text?.trim();
+    if (!text) {
+      errors.push(`Item ${i + 1}: missing question text.`);
+      continue;
+    }
+
+    try {
+      const created = await createBankItem(offeringId, {
+        topic_id: topicId,
+        question_type: item.question_type,
+        question_text: text,
+        difficulty: item.difficulty || 'moderate',
+        bloom_level: item.bloom_level || 'understand',
+        points: item.points || 1,
+        choices: item.choices,
+        correct_choice_key: item.correct_choice_key,
+        canonical_answer: item.canonical_answer,
+      });
+
+      // Provenance for the import (file / paste).
+      if (options.source_filename || options.topic_id === undefined) {
+        await supabase
+          .from('question_bank')
+          .update({
+            source_metadata: {
+              imported_from: 'exam_import',
+              original_filename: options.source_filename ?? null,
+              imported_at: new Date().toISOString(),
+              import_index: i,
+            },
+          })
+          .eq('id', created.id);
+      }
+      imported += 1;
+    } catch (e) {
+      errors.push(`Item ${i + 1}: ${e instanceof Error ? e.message : 'failed'}`);
+    }
+  }
+
+  revalidatePath(`/faculty/subjects/${offeringId}/question-bank`);
+  revalidatePath('/faculty/subjects');
+
+  if (imported === 0) {
+    throw new Error(errors[0] ?? 'No questions were imported');
+  }
+
+  await recordAuditLog({
+    actorUserId: userId,
+    action: 'create',
+    entityType: 'question_bank',
+    entityId: `import-${imported}`,
+    metadata: {
+      subject_id: subjectId,
+      topic_id: topicId,
+      imported_count: imported,
+      source_filename: options.source_filename ?? null,
+    },
+  });
+
+  return { imported, errors };
+}
+
 export async function updateBankItem(
   bankItemId: string,
   data: {
@@ -231,7 +377,7 @@ export async function updateBankItem(
     image_storage_path?: string | null;
   }
 ) {
-  const { supabase, userId } = await requireUser();
+  const { supabase } = await requireUser();
   const { data: existing } = await supabase.from('question_bank').select('subject_id').eq('id', bankItemId).single();
   if (!existing) throw new Error('Bank item not found');
 
@@ -325,10 +471,13 @@ export async function saveAssessmentQuestionToBank(
   }
   if (!subjectId) throw new Error('Cannot determine subject for bank save');
 
-  // Check faculty permission
-  // If subject_offering_id exists, use offering check; else check subject faculty
+  // Check faculty permission: offering-scoped or any section of the subject
+  // (sibling sections share the bank and subject-level assessments).
   if (assess.subject_offering_id) {
-    if (!(await isFacultyOfOffering(supabase, userId, assess.subject_offering_id))) {
+    const authorized =
+      (await isFacultyOfOffering(supabase, userId, assess.subject_offering_id)) ||
+      (subjectId && (await isFacultyOfSubject(supabase, userId, subjectId)));
+    if (!authorized) {
       throw new Error('Not authorized');
     }
   }

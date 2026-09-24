@@ -53,8 +53,11 @@ export default async function ExamResultsPage({ params }: Props) {
     .single();
 
   const d = deployment as Record<string, unknown> & {
+    show_raw_score?: boolean;
+    show_percentage?: boolean;
     show_item_correctness?: boolean;
     show_correct_answers?: boolean;
+    show_explanations?: boolean;
     assessment_version?: {
       id?: string;
       total_items?: number;
@@ -62,12 +65,19 @@ export default async function ExamResultsPage({ params }: Props) {
       assessment?: { id?: string; title?: string };
     };
   };
+  const showRawScore = d.show_raw_score !== false;
+  const showPercentage = d.show_percentage !== false;
+  // Review always shows after submit so students can study their attempt.
+  // Green/red reflects their own answers (not the answer key).
+  const showCorrectAnswers = d.show_correct_answers === true;
   const assessment = d?.assessment_version?.assessment;
   const version = d?.assessment_version;
 
+  // Scores are only visible when released (immediate mode releases on submit).
+  const scoreVisible = !!result && result.status === 'released';
+
   // Breakdown (questions + answer keys) is fetched via a server action using
   // the service-role client; students have no direct SELECT on questions.
-  // Shown for any submitted attempt so students can review their answers.
   let responses: Awaited<ReturnType<typeof getAttemptBreakdown>>['data'] = [];
   const canReview =
     attempt.status === 'submitted' ||
@@ -102,22 +112,26 @@ export default async function ExamResultsPage({ params }: Props) {
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="lg:col-span-2 space-y-6">
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <Card>
-              <CardContent>
-                <p className="text-sm font-medium text-[var(--color-muted)]">Score</p>
-                <p className="mt-1 text-2xl font-bold text-[var(--color-foreground)]">
-                  {result ? `${result.raw_score}/${result.possible_score}` : 'N/A'}
-                </p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent>
-                <p className="text-sm font-medium text-[var(--color-muted)]">Percentage</p>
-                <p className="mt-1 text-2xl font-bold text-[var(--color-foreground)]">
-                  {result ? `${percentage}%` : 'N/A'}
-                </p>
-              </CardContent>
-            </Card>
+            {showRawScore && (
+              <Card>
+                <CardContent>
+                  <p className="text-sm font-medium text-[var(--color-muted)]">Score</p>
+                  <p className="mt-1 text-2xl font-bold text-[var(--color-foreground)]">
+                    {scoreVisible ? `${result.raw_score}/${result.possible_score}` : 'Pending'}
+                  </p>
+                </CardContent>
+              </Card>
+            )}
+            {showPercentage && (
+              <Card>
+                <CardContent>
+                  <p className="text-sm font-medium text-[var(--color-muted)]">Percentage</p>
+                  <p className="mt-1 text-2xl font-bold text-[var(--color-foreground)]">
+                    {scoreVisible ? `${percentage}%` : 'Pending'}
+                  </p>
+                </CardContent>
+              </Card>
+            )}
             <Card>
               <CardContent>
                 <p className="text-sm font-medium text-[var(--color-muted)]">Time Taken</p>
@@ -143,7 +157,7 @@ export default async function ExamResultsPage({ params }: Props) {
               <CardHeader>
                 <h2 className="text-lg font-semibold">Question Review</h2>
                 <p className="text-sm text-[var(--color-muted)]">
-                  Your answers for this attempt. Correct items are highlighted green; incorrect in red.
+                  Your answers for this attempt. Correct items are green; incorrect are red.
                 </p>
               </CardHeader>
               <CardContent className="p-0">
@@ -153,50 +167,76 @@ export default async function ExamResultsPage({ params }: Props) {
                       <TH align="right">#</TH>
                       <TH>Question</TH>
                       <TH>Your answer</TH>
-                      <TH>Correct answer</TH>
+                      {showCorrectAnswers && <TH>Correct answer</TH>}
                       <TH>Result</TH>
                       <TH align="right">Points</TH>
                     </TR>
                   </THead>
                   <TBody>
                     {responses.map((r, i) => {
-                      const isCorrect = r.earnedPoints !== null && r.earnedPoints === r.points;
+                      const scored = r.earnedPoints !== null;
+                      const isCorrect = scored && r.earnedPoints === r.points;
+                      const isIncorrect = scored && (r.earnedPoints ?? 0) < r.points;
                       const isChoiceBased =
                         r.questionType === 'multiple_choice' || r.questionType === 'true_false';
                       const selectedChoice = r.choices.find((c) => c.id === r.selectedChoiceId);
                       const correctChoice = r.choices.find((c) => c.id === r.correctChoiceId);
                       const givenAnswer = isChoiceBased
-                        ? selectedChoice?.choice_text
+                        ? selectedChoice
+                          ? `${selectedChoice.choice_key}. ${selectedChoice.choice_text}`
+                          : null
                         : r.textAnswer;
                       const correctAnswer = isChoiceBased
-                        ? correctChoice?.choice_text
+                        ? correctChoice
+                          ? `${correctChoice.choice_key}. ${correctChoice.choice_text}`
+                          : null
                         : r.canonicalAnswer;
                       const rowTint = isCorrect
                         ? 'bg-[var(--color-success-light)]'
-                        : 'bg-[var(--color-danger-light)]';
+                        : isIncorrect
+                          ? 'bg-[var(--color-danger-light)]'
+                          : '';
 
                       return (
-                        <TR key={r.questionId} className={`align-top ${rowTint}`}>
+                        <TR key={r.questionId} className={`align-top ${rowTint}`.trim()}>
                           <TD numeric className="text-[var(--color-muted)]">
                             {r.position ?? i + 1}
                           </TD>
-                          <TD className="text-[var(--color-foreground)]">{r.questionText}</TD>
+                          <TD className="text-[var(--color-foreground)]">
+                            <span className="whitespace-pre-wrap">{r.questionText}</span>
+                            {r.imageUrl && (
+                              <img
+                                src={r.imageUrl}
+                                alt=""
+                                className="mt-2 h-20 w-auto rounded border object-cover"
+                                loading="lazy"
+                              />
+                            )}
+                          </TD>
                           <TD
                             className={
                               isCorrect
                                 ? 'font-medium text-[var(--color-success)]'
-                                : 'font-medium text-[var(--color-danger)]'
+                                : isIncorrect
+                                  ? 'font-medium text-[var(--color-danger)]'
+                                  : 'text-[var(--color-foreground)]'
                             }
                           >
-                            {givenAnswer || 'No answer'}
+                            {givenAnswer || <span className="text-[var(--color-muted)]">No answer</span>}
                           </TD>
-                          <TD className="text-[var(--color-muted)]">
-                            {correctAnswer ?? '—'}
-                          </TD>
+                          {showCorrectAnswers && (
+                            <TD className="text-[var(--color-muted)]">
+                              {correctAnswer ?? '—'}
+                            </TD>
+                          )}
                           <TD>
-                            <Badge variant={isCorrect ? 'success' : 'danger'}>
-                              {isCorrect ? 'Correct' : 'Incorrect'}
-                            </Badge>
+                            {!scored ? (
+                              <Badge variant="default">—</Badge>
+                            ) : (
+                              <Badge variant={isCorrect ? 'success' : 'danger'}>
+                                {isCorrect ? 'Correct' : 'Incorrect'}
+                              </Badge>
+                            )}
                           </TD>
                           <TD numeric className="font-medium text-[var(--color-foreground)]">
                             {r.earnedPoints ?? 0}/{r.points}
@@ -214,7 +254,7 @@ export default async function ExamResultsPage({ params }: Props) {
             <Card>
               <CardContent>
                 <p className="text-sm text-[var(--color-muted)] text-center py-4">
-                  Question review is not available for this exam.
+                  No answers recorded for this attempt.
                 </p>
               </CardContent>
             </Card>
@@ -235,14 +275,22 @@ export default async function ExamResultsPage({ params }: Props) {
                 <span className="text-[var(--color-muted)]">Total Points</span>
                 <span className="font-medium tabular-nums">{version?.total_points ?? 0}</span>
               </div>
-              <div className="flex justify-between">
-                <span className="text-[var(--color-muted)]">Your Score</span>
-                <span className="font-medium tabular-nums">{result ? `${result.raw_score}/${result.possible_score}` : 'N/A'}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-[var(--color-muted)]">Percentage</span>
-                <span className="font-medium tabular-nums">{percentage}%</span>
-              </div>
+              {showRawScore && (
+                <div className="flex justify-between">
+                  <span className="text-[var(--color-muted)]">Your Score</span>
+                  <span className="font-medium tabular-nums">
+                    {scoreVisible ? `${result.raw_score}/${result.possible_score}` : 'Pending'}
+                  </span>
+                </div>
+              )}
+              {showPercentage && (
+                <div className="flex justify-between">
+                  <span className="text-[var(--color-muted)]">Percentage</span>
+                  <span className="font-medium tabular-nums">
+                    {scoreVisible ? `${percentage}%` : 'Pending'}
+                  </span>
+                </div>
+              )}
               <div className="flex justify-between">
                 <span className="text-[var(--color-muted)]">Attempt</span>
                 <span className="font-medium tabular-nums">#{attempt.attempt_number}</span>

@@ -81,11 +81,20 @@ export default async function SubjectOfferingDetailPage({ params }: Props) {
     };
   });
 
+  const { data: subjectOfferings } = await supabase
+    .from('subject_offerings')
+    .select('id')
+    .eq('subject_id', o.subject?.id ?? '');
+
+  const subjectOfferingIds = ((subjectOfferings ?? []) as Array<{ id: string }>).map((x) => x.id);
+
   const [enrollmentsCount, assessmentsCount, sourcesCount] = await Promise.all([
     supabase.from('enrollments').select('id', { count: 'exact', head: true })
       .eq('subject_offering_id', offeringId).eq('status', 'enrolled'),
-    supabase.from('assessments').select('id', { count: 'exact', head: true })
-      .eq('subject_offering_id', offeringId),
+    subjectOfferingIds.length > 0
+      ? supabase.from('assessments').select('id', { count: 'exact', head: true })
+          .in('subject_offering_id', subjectOfferingIds)
+      : { count: 0 },
     supabase.from('source_materials').select('id', { count: 'exact', head: true })
       .eq('subject_offering_id', offeringId),
   ]);

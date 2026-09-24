@@ -1,7 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';import PageHeader from '@/components/ui/PageHeader';
+import { useRouter } from 'next/navigation';
+import PageHeader from '@/components/ui/PageHeader';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
@@ -12,6 +13,7 @@ import { notifyError, notifySuccess } from '@/components/ui/alerts';
 import { createDeployment } from './actions';
 import type {
   AssessmentVersion,
+  DeploymentLaunchMode,
   QuestionOrderMode,
   ChoiceOrderMode,
   ScoreReleaseMode,
@@ -26,6 +28,12 @@ interface DeployPageProps {
   defaultVersionId: string;
 }
 
+const LAUNCH_OPTIONS: { value: DeploymentLaunchMode; label: string; hint: string }[] = [
+  { value: 'now', label: 'Open right away', hint: 'Students can start as soon as it is created.' },
+  { value: 'scheduled', label: 'Schedule', hint: 'Pick open and close times in advance.' },
+  { value: 'manual', label: 'Manual open / close', hint: 'Create as draft; open and close from Deployments.' },
+];
+
 export default function DeployClient({
   assessmentId,
   offeringId,
@@ -38,6 +46,7 @@ export default function DeployClient({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showPreview, setShowPreview] = useState(false);
+  const [launchMode, setLaunchMode] = useState<DeploymentLaunchMode>('scheduled');
 
   const [selectedVersionId, setSelectedVersionId] = useState(
     defaultVersionId ||
@@ -60,15 +69,28 @@ export default function DeployClient({
   const [requiresIdentityVerification, setRequiresIdentityVerification] = useState(false);
 
   const selectedVersion = versions.find((v) => v.id === selectedVersionId);
+  const needsOpenTime = launchMode === 'scheduled';
+  const needsCloseTime = launchMode === 'scheduled' || launchMode === 'now';
 
   const handleDeploy = async () => {
-    if (!selectedVersionId || !opensAt || !closesAt) {
-      setError('Please fill in all required fields');
+    if (!selectedVersionId) {
+      setError('Select an assessment version');
       return;
     }
-
-    if (new Date(opensAt) >= new Date(closesAt)) {
+    if (needsCloseTime && !closesAt) {
+      setError('Closing time is required');
+      return;
+    }
+    if (needsOpenTime && !opensAt) {
+      setError('Opening time is required');
+      return;
+    }
+    if (needsOpenTime && needsCloseTime && new Date(opensAt) >= new Date(closesAt)) {
       setError('Close time must be after open time');
+      return;
+    }
+    if (launchMode === 'now' && new Date() >= new Date(closesAt)) {
+      setError('Close time must be in the future');
       return;
     }
 
@@ -83,8 +105,9 @@ export default function DeployClient({
     const result = await createDeployment(assessmentId, offeringId, {
       assessment_version_id: selectedVersionId,
       subject_offering_id: offeringId,
-      opens_at: new Date(opensAt).toISOString(),
-      closes_at: new Date(closesAt).toISOString(),
+      launch_mode: launchMode,
+      opens_at: needsOpenTime && opensAt ? new Date(opensAt).toISOString() : new Date().toISOString(),
+      closes_at: needsCloseTime && closesAt ? new Date(closesAt).toISOString() : new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(),
       duration_minutes: durationMinutes,
       attempt_limit: attemptLimit,
       question_order_mode: questionOrderMode,
@@ -99,7 +122,14 @@ export default function DeployClient({
     });
 
     if (result.success) {
-      notifySuccess('Assessment deployed', 'Students can now take this assessment in the window you set.');
+      notifySuccess(
+        'Assessment deployed',
+        launchMode === 'manual'
+          ? 'Created as a draft. Open it from Deployments when you are ready.'
+          : launchMode === 'now'
+            ? 'Students can take this assessment until the window you set.'
+            : 'Students will be notified of the schedule you set.'
+      );
       router.push(`/faculty/subjects/${offeringId}/deployments`);
       router.refresh();
     } else {
@@ -109,6 +139,13 @@ export default function DeployClient({
       setLoading(false);
     }
   };
+
+  const scheduleSummary =
+    launchMode === 'manual'
+      ? 'Draft — open manually from Deployments'
+      : launchMode === 'now'
+        ? `Opens now → ${closesAt ? new Date(closesAt).toLocaleString() : '—'}`
+        : `${opensAt ? new Date(opensAt).toLocaleString() : '—'} → ${closesAt ? new Date(closesAt).toLocaleString() : '—'}`;
 
   return (
     <div>
@@ -127,9 +164,24 @@ export default function DeployClient({
         <div className="lg:col-span-2 space-y-6">
           <Card>
             <CardHeader>
-              <h2 className="text-lg font-semibold">Schedule & Duration</h2>
+              <h2 className="text-lg font-semibold">When to open</h2>
             </CardHeader>
             <CardContent className="space-y-4">
+              <Select
+                label="Launch mode"
+                value={launchMode}
+                onChange={(e) => setLaunchMode(e.target.value as DeploymentLaunchMode)}
+              >
+                {LAUNCH_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </Select>
+              <p className="text-xs text-[var(--color-muted)]">
+                {LAUNCH_OPTIONS.find((o) => o.value === launchMode)?.hint}
+              </p>
+
               {/* Without a picker the deployment always used the default
                   version, so "deploy version X" was impossible. */}
               <Select
@@ -146,11 +198,11 @@ export default function DeployClient({
               </Select>
               {selectedVersion && (
                 <p className="text-xs text-[var(--color-muted)]">
-                  Students will take this version. Only published or approved versions
-                  should normally be deployed.
+                  Students will take this version. The assessment must be published.
                 </p>
               )}
-              <div className="grid gap-4 sm:grid-cols-2">
+
+              {needsOpenTime && (
                 <Input
                   label="Opens at"
                   type="datetime-local"
@@ -158,6 +210,8 @@ export default function DeployClient({
                   onChange={(e) => setOpensAt(e.target.value)}
                   required
                 />
+              )}
+              {needsCloseTime && (
                 <Input
                   label="Closes at"
                   type="datetime-local"
@@ -165,7 +219,13 @@ export default function DeployClient({
                   onChange={(e) => setClosesAt(e.target.value)}
                   required
                 />
-              </div>
+              )}
+              {launchMode === 'manual' && (
+                <p className="text-xs text-[var(--color-muted)]">
+                  You choose when to open and close from the Deployments list.
+                </p>
+              )}
+
               <div className="grid gap-4 sm:grid-cols-2">
                 <Input
                   label="Duration (minutes)"
@@ -322,6 +382,10 @@ export default function DeployClient({
                   <span className="font-medium">{selectedVersion?.total_points ?? 0}</span>
                 </div>
                 <div className="flex justify-between">
+                  <span className="text-muted">Window</span>
+                  <span className="text-right text-xs">{scheduleSummary}</span>
+                </div>
+                <div className="flex justify-between">
                   <span className="text-muted">Duration</span>
                   <span className="font-medium">{durationMinutes} min</span>
                 </div>
@@ -384,12 +448,30 @@ export default function DeployClient({
           </p>
           <div className="rounded-lg bg-surface-hover p-4 space-y-2">
             <div className="flex justify-between">
+              <span className="text-muted">Launch</span>
+              <span>{LAUNCH_OPTIONS.find((o) => o.value === launchMode)?.label ?? launchMode}</span>
+            </div>
+            <div className="flex justify-between">
               <span className="text-muted">Opens</span>
-              <span>{opensAt ? new Date(opensAt).toLocaleString() : '-'}</span>
+              <span>
+                {launchMode === 'now'
+                  ? 'Now'
+                  : launchMode === 'manual'
+                    ? 'When you open from Deployments'
+                    : opensAt
+                      ? new Date(opensAt).toLocaleString()
+                      : '—'}
+              </span>
             </div>
             <div className="flex justify-between">
               <span className="text-muted">Closes</span>
-              <span>{closesAt ? new Date(closesAt).toLocaleString() : '-'}</span>
+              <span>
+                {launchMode === 'manual'
+                  ? 'When you close from Deployments'
+                  : closesAt
+                    ? new Date(closesAt).toLocaleString()
+                    : '—'}
+              </span>
             </div>
             <div className="flex justify-between">
               <span className="text-muted">Duration</span>
@@ -400,7 +482,11 @@ export default function DeployClient({
               <span>{attemptLimit}</span>
             </div>
           </div>
-          <p className="text-muted">Students will be able to start the assessment once it opens.</p>
+          <p className="text-muted">
+            {launchMode === 'manual'
+              ? 'Students will not see this until you open it from Deployments.'
+              : 'Students will be able to start the assessment once it opens.'}
+          </p>
         </div>
       </Modal>
     </div>

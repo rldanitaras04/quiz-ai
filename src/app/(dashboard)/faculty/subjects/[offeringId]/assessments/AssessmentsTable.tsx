@@ -7,7 +7,8 @@ import Badge from '@/components/ui/Badge';
 import Button from '@/components/ui/Button';
 import { Table, THead, TBody, TR, TH, TD } from '@/components/ui/Table';
 import { confirmAction, notifyError, notifySuccess } from '@/components/ui/alerts';
-import { ASSESSMENT_STATUS_LABELS } from '@/lib/constants';
+import { ASSESSMENT_STATUS_LABELS, QUESTION_TYPE_SHORT_LABELS, QUESTION_TYPE_GROUP_ORDER } from '@/lib/constants';
+import type { QuestionType } from '@/lib/types';
 import { deleteAssessments } from '@/app/(dashboard)/faculty/subjects/[offeringId]/assessments/actions';
 import DeleteAssessmentButton from '@/app/(dashboard)/faculty/subjects/[offeringId]/assessments/[assessmentId]/DeleteAssessmentButton';
 
@@ -20,6 +21,8 @@ export interface AssessmentListRow {
   total_items: number | null;
   total_points: number | null;
   section_label?: string;
+  /** Distinct question types in the current version, ordered MCQ → ID → TF. */
+  question_types?: string[];
   review_href: string;
   deploy_href?: string;
   show_deploy?: boolean;
@@ -40,6 +43,16 @@ function statusVariant(status: string): 'success' | 'warning' | 'info' | 'defaul
     case 'draft': return 'warning';
     default: return 'default';
   }
+}
+
+function typeLabel(type: QuestionType): string {
+  return QUESTION_TYPE_SHORT_LABELS[type] ?? type;
+}
+
+function formatTypes(types: string[] | undefined, fallback: string): string {
+  if (!types || types.length === 0) return typeLabel(fallback as QuestionType);
+  const ordered = QUESTION_TYPE_GROUP_ORDER.filter((t) => types.includes(t));
+  return ordered.map(typeLabel).join(', ');
 }
 
 export default function AssessmentsTable({ rows, toolbar }: Props): JSX.Element {
@@ -218,7 +231,7 @@ export default function AssessmentsTable({ rows, toolbar }: Props): JSX.Element 
                   </Link>
                 </TD>
                 <TD className="text-[var(--color-muted)]">
-                  {a.assessment_type === 'multiple_choice' ? 'MCQ' : a.assessment_type === 'true_false' ? 'TF' : 'ID'}
+                  {formatTypes(a.question_types, a.assessment_type)}
                 </TD>
                 <TD numeric className="text-[var(--color-foreground)]">
                   {a.total_items ?? '—'}

@@ -509,7 +509,7 @@ export type OfferingRosterResult =
       sectionId: string;
     };
 
-/** Full roster (every status) for one offering — the admin modal's data source. */
+/** Enrolled roster for one offering — the admin modal's data source. */
 export async function getOfferingRoster(offeringId: string): Promise<OfferingRosterResult> {
   const { supabase } = await requireAdminUser();
 
@@ -533,6 +533,7 @@ export async function getOfferingRoster(offeringId: string): Promise<OfferingRos
       student:student_profiles(student_number, profiles(full_name, email))
     `)
     .eq('subject_offering_id', offeringId)
+    .eq('status', 'enrolled')
     .order('enrolled_at', { ascending: true });
 
   if (error) return { error: 'Failed to load the roster.' };

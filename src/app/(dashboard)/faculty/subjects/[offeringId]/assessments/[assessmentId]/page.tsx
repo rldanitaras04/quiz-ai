@@ -1,5 +1,6 @@
 import { redirect, notFound } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
+import { assessmentSharesSubjectWithOffering } from '@/lib/auth';
 import { ASSESSMENT_STATUS_LABELS } from '@/lib/constants';
 import { getAssessmentDetail } from '../actions';
 import AssessmentWorkspaceClient from './AssessmentWorkspaceClient';
@@ -27,7 +28,15 @@ export default async function AssessmentDetailPage({ params }: Props) {
 
   // Authorizes against the offering: null means not faculty on this assessment.
   const detail = await getAssessmentDetail(assessmentId);
-  if (!detail || detail.subjectOfferingId !== offeringId) notFound();
+  if (!detail) notFound();
+
+  // Sibling sections of the same subject share subject-level assessments.
+  const sharesSubject = await assessmentSharesSubjectWithOffering(
+    supabase,
+    detail.subjectOfferingId,
+    offeringId
+  );
+  if (!sharesSubject) notFound();
 
   const { data: offering } = await supabase
     .from('subject_offerings')

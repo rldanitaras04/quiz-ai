@@ -7,7 +7,8 @@ import Spinner from '@/components/ui/Spinner';
 import Input from '@/components/ui/Input';
 import Select from '@/components/ui/Select';
 import { notifySuccess, notifyError, confirmAction } from '@/components/ui/alerts';
-import { getQuestionBank, deleteBankItem, createBankItem, saveAssessmentQuestionToBank } from '@/app/(dashboard)/faculty/subjects/[offeringId]/question-bank/actions';
+import { getQuestionBank, deleteBankItem, createBankItem } from '@/app/(dashboard)/faculty/subjects/[offeringId]/question-bank/actions';
+import ImportExamModal from '@/components/assessment/ImportExamModal';
 import type { QuestionBankItem, Topic, QuestionType, Difficulty, BloomLevel } from '@/lib/types';
 
 interface Props {
@@ -140,9 +141,12 @@ export default function QuestionBankManager({ offeringId, topics }: Props): JSX.
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h3 className="text-sm font-semibold text-[var(--color-foreground)]">Question Bank — {items.length} items</h3>
-          <p className="text-xs text-[var(--color-muted)]">Reusable items per subject, grouped by topic. Approve questions from assessments to grow this pool.</p>
+          <p className="text-xs text-[var(--color-muted)]">Reusable items per subject, grouped by topic. Add manually, import a ready-made exam, or approve questions from assessments.</p>
         </div>
-        <Button size="sm" variant="primary" onClick={() => setShowAdd((v) => !v)}>{showAdd ? 'Close' : 'Add to bank'}</Button>
+        <div className="flex items-center gap-2">
+          <ImportExamModal offeringId={offeringId} topics={topics} onImported={() => void load()} />
+          <Button size="sm" variant="primary" onClick={() => setShowAdd((v) => !v)}>{showAdd ? 'Close' : 'Add to bank'}</Button>
+        </div>
       </div>
 
       {showAdd && (
@@ -258,7 +262,7 @@ export default function QuestionBankManager({ offeringId, topics }: Props): JSX.
         <div className="flex flex-col items-center py-8 gap-2"><Spinner size="md" /><p className="text-sm text-[var(--color-muted)]">Loading bank…</p></div>
       ) : items.length === 0 ? (
         <div className="text-center py-8 rounded-[var(--radius-lg)] border border-dashed border-[var(--color-border)]">
-          <p className="text-sm text-[var(--color-muted)]">No items match the filters. Add one above or approve questions from an assessment to populate the bank.</p>
+          <p className="text-sm text-[var(--color-muted)]">No items match the filters. Add one above, import a ready-made exam, or approve questions from an assessment.</p>
         </div>
       ) : (
         <div className="space-y-3">

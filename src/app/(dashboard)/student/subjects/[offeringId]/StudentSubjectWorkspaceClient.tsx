@@ -10,6 +10,7 @@ import Link from 'next/link';
 import { useNavigationContext } from '@/components/layout/NavigationContext';
 import { getStudentSubjectNav, type NavigationItem } from '@/config/navigation';
 import { getDeploymentStatus } from '@/lib/deployment-status';
+import { handleSamePathHashClick } from '@/lib/hash-navigation';
 
 interface StudentSubjectWorkspaceClientProps {
   offeringId: string;
@@ -335,6 +336,9 @@ export default function StudentSubjectWorkspaceClient({
           <Link
             key={tab.id}
             href={tab.href ?? '#'}
+            onClick={(event) => {
+              if (tab.href) handleSamePathHashClick(event, tab.href);
+            }}
             className={`px-4 py-2.5 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${
               (tab.href ?? '') === currentPath
                 ? 'border-[var(--color-primary)] text-[var(--color-primary)]'

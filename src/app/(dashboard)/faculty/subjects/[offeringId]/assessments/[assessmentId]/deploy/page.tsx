@@ -1,5 +1,9 @@
 import { redirect, notFound } from 'next/navigation';
+import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
+import PageHeader from '@/components/ui/PageHeader';
+import Button from '@/components/ui/Button';
+import EmptyState from '@/components/ui/EmptyState';
 import DeployClient from './DeployClient';
 import type { AssessmentVersion } from '@/lib/types';
 
@@ -10,6 +14,7 @@ interface Props {
 interface AssessmentHeading {
   id: string;
   title: string;
+  status: string;
   current_version_id: string | null;
 }
 
@@ -39,6 +44,7 @@ export default async function DeployPage({ params }: Props) {
     .select(`
       id,
       title,
+      status,
       current_version_id,
       current_version:assessment_versions!assessments_current_version_id_fkey(id, version_number, status, total_items, total_points)
     `)
@@ -46,6 +52,34 @@ export default async function DeployPage({ params }: Props) {
     .single();
 
   if (!assessment) notFound();
+
+  const a = assessment as unknown as AssessmentHeading;
+
+  // Only published assessments may be deployed.
+  if (a.status !== 'published') {
+    return (
+      <div className="space-y-6">
+        <PageHeader
+          breadcrumbs={[
+            { label: 'Subjects', href: '/faculty/subjects' },
+            { label: a.title, href: `/faculty/subjects/${offeringId}/assessments/${assessmentId}` },
+            { label: 'Deploy' },
+          ]}
+          title="Deploy Assessment"
+          description="This assessment is not published yet"
+        />
+        <EmptyState
+          title="Publish before deploying"
+          description="Only published assessments can be deployed to students. Publish the assessment, then return here to schedule or open it."
+        />
+        <div className="flex justify-center">
+          <Link href={`/faculty/subjects/${offeringId}/assessments/${assessmentId}`}>
+            <Button variant="primary">Go to assessment</Button>
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
   const { data: versions } = await supabase
     .from('assessment_versions')
@@ -59,7 +93,6 @@ export default async function DeployPage({ params }: Props) {
     .eq('id', offeringId)
     .single();
 
-  const a = assessment as unknown as AssessmentHeading;
   const versionsList = (versions ?? []) as unknown as AssessmentVersion[];
   const offeringHeading = offering as unknown as OfferingHeading | null;
 

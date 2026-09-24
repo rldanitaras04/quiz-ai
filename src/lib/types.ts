@@ -66,6 +66,9 @@ export type DeploymentStatus =
   | 'closed'
   | 'archived';
 
+/** How a deployment becomes available to students. */
+export type DeploymentLaunchMode = 'now' | 'scheduled' | 'manual';
+
 export type EnrollmentStatus = 'enrolled' | 'dropped' | 'withdrawn' | 'completed';
 
 export type OfferingStatus = 'active' | 'inactive' | 'archived';
@@ -615,7 +618,7 @@ export interface QuestionBankItem {
   canonical_answer?: string | null;
 }
 
-export type AssessmentCreationMode = 'ai' | 'manual' | 'bank' | 'mixed';
+export type AssessmentCreationMode = 'ai' | 'manual' | 'bank' | 'mixed' | 'upload';
 
 export interface DeploymentWithDetails extends AssessmentDeployment {
   assessment_version: AssessmentVersion & { assessment: Assessment };
@@ -646,6 +649,8 @@ export interface CreateAssessmentInput {
 export interface CreateDeploymentInput {
   assessment_version_id: string;
   subject_offering_id: string;
+  /** Defaults to `scheduled`. `manual` creates a draft the faculty opens/closes. */
+  launch_mode?: DeploymentLaunchMode;
   opens_at: string;
   closes_at: string;
   duration_minutes: number;

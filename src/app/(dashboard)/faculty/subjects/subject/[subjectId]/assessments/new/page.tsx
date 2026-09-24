@@ -64,8 +64,21 @@ export default async function SubjectNewAssessmentPage({ params }: Props) {
     );
   }
 
-  // Use the first offering ID for creating the assessment
-  const primaryOfferingId = offeringList[0].id;
+  // Home offering: prefer a section the caller is assigned to (RLS can return
+  // sibling sections of the subject); fall back to any active offering.
+  const { data: myAssignments } = await supabase
+    .from('faculty_assignments')
+    .select('subject_offering_id')
+    .eq('faculty_id', user.id);
+
+  const assignedIds = new Set(
+    ((myAssignments ?? []) as Array<{ subject_offering_id: string }>).map(
+      (a) => a.subject_offering_id
+    )
+  );
+  const primaryOffering =
+    offeringList.find((o) => assignedIds.has(o.id)) ?? offeringList[0];
+  const primaryOfferingId = primaryOffering.id;
 
   return (
     <div>

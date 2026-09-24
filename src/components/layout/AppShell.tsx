@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useContext, useState, useSyncExternalStore, type JSX, type ReactNode } from 'react';
+import { useCallback, useState, useSyncExternalStore, type JSX, type ReactNode } from 'react';
 import Link from 'next/link';
 import Sidebar from './Sidebar';
 import ContextualSidebar from './ContextualSidebar';
@@ -17,6 +17,7 @@ import {
   subscribeDesktop,
   subscribeSidebarCollapsed,
 } from '@/lib/ui-preferences';
+import { handleSamePathHashClick } from '@/lib/hash-navigation';
 
 interface AppShellProps {
   children: ReactNode;
@@ -162,7 +163,10 @@ export default function AppShell({
                     <Link
                       key={item.id}
                       href={item.href ?? '#'}
-                      onClick={closeMobileContextualNav}
+                      onClick={(event) => {
+                        if (item.href) handleSamePathHashClick(event, item.href);
+                        closeMobileContextualNav();
+                      }}
                       className={`flex-shrink-0 px-4 py-2 text-sm font-medium whitespace-nowrap rounded-[var(--radius-md)] transition-colors ${
                         item.exact
                           ? contextualNavPath === item.href

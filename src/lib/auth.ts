@@ -91,6 +91,28 @@ export async function isFacultyOfOffering(
 }
 
 /**
+ * True when the user is assigned to any offering of the subject.
+ * Subject-level assessment access uses this so sibling sections share content.
+ */
+export async function isFacultyOfSubject(
+  supabase: SupabaseClient,
+  userId: string,
+  subjectId: string
+): Promise<boolean> {
+  if (!subjectId) return false;
+
+  const { data } = await supabase
+    .from('faculty_assignments')
+    .select('id, subject_offerings!inner(subject_id)')
+    .eq('faculty_id', userId)
+    .eq('subject_offerings.subject_id', subjectId)
+    .limit(1)
+    .maybeSingle();
+
+  return Boolean(data);
+}
+
+/**
  * True when the user may add/remove/restore enrollment rows on the offering:
  * the assigned faculty, or any super administrator (RLS already grants
  * `Admin can manage enrollments`; this keeps the action-level error message
@@ -122,7 +144,7 @@ export interface FacultyAssessment {
   currentVersionId: string | null;
 }
 
-/** The assessment, when the user is faculty on its offering; null otherwise. */
+/** The assessment, when the user is faculty on its offering or subject; null otherwise. */
 export async function getFacultyAssessment(
   supabase: SupabaseClient,
   userId: string,
@@ -137,8 +159,16 @@ export async function getFacultyAssessment(
     .maybeSingle();
 
   if (!assessment) return null;
+
   if (!(await isFacultyOfOffering(supabase, userId, assessment.subject_offering_id))) {
-    return null;
+    const { data: offering } = await supabase
+      .from('subject_offerings')
+      .select('subject_id')
+      .eq('id', assessment.subject_offering_id)
+      .maybeSingle();
+
+    if (!offering?.subject_id) return null;
+    if (!(await isFacultyOfSubject(supabase, userId, offering.subject_id))) return null;
   }
 
   return {
@@ -151,8 +181,55 @@ export async function getFacultyAssessment(
 }
 
 /**
+ * True when the assessment's home offering and the given offering belong to
+ * the same subject (sibling sections share subject-level assessments).
+ */
+export async function assessmentSharesSubjectWithOffering(
+  supabase: SupabaseClient,
+  assessmentOfferingId: string,
+  offeringId: string
+): Promise<boolean> {
+  if (!assessmentOfferingId || !offeringId) return false;
+  if (assessmentOfferingId === offeringId) return true;
+
+  const [assessmentOffering, offering] = await Promise.all([
+    supabase.from('subject_offerings').select('subject_id').eq('id', assessmentOfferingId).maybeSingle(),
+    supabase.from('subject_offerings').select('subject_id').eq('id', offeringId).maybeSingle(),
+  ]);
+
+  return Boolean(
+    assessmentOffering.data?.subject_id &&
+    offering.data?.subject_id &&
+    assessmentOffering.data.subject_id === offering.data.subject_id
+  );
+}
+
+/**
+ * True when the user is faculty on the offering, or on any offering of its
+ * subject (sibling sections share subject-level assessment deployments and
+ * content for faculty of the subject).
+ */
+export async function isFacultyOfOfferingOrSubject(
+  supabase: SupabaseClient,
+  userId: string,
+  offeringId: string
+): Promise<boolean> {
+  if (!offeringId) return false;
+  if (await isFacultyOfOffering(supabase, userId, offeringId)) return true;
+
+  const { data: offering } = await supabase
+    .from('subject_offerings')
+    .select('subject_id')
+    .eq('id', offeringId)
+    .maybeSingle();
+
+  if (!offering?.subject_id) return false;
+  return isFacultyOfSubject(supabase, userId, offering.subject_id);
+}
+
+/**
  * The assessment a question belongs to (question → version → assessment), when
- * the user is faculty on its offering; null otherwise.
+ * the user is faculty on its offering or subject; null otherwise.
  */
 export async function getFacultyAssessmentForQuestion(
   supabase: SupabaseClient,

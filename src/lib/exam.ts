@@ -71,6 +71,12 @@ export async function startExamAttempt(
     return { error: 'Deployment not found', status: 404 };
   }
 
+  // Manual deployments sit in 'draft' until the faculty opens them; closed /
+  // archived rows stay unavailable regardless of the timestamp window.
+  if (deployment.status === 'draft' || deployment.status === 'closed' || deployment.status === 'archived') {
+    return { error: 'Assessment is not currently available', status: 403 };
+  }
+
   // Server time is authoritative: the device clock never decides eligibility.
   const now = new Date();
   const opensAt = new Date(deployment.opens_at);
@@ -108,7 +114,6 @@ export async function startExamAttempt(
   let effectiveClosesAt = closesAt;
   let effectiveAttemptLimit = deployment.attempt_limit;
 
-  const nowISO = now.toISOString();
   for (const ex of (exceptions ?? []) as AssessmentException[]) {
     // Skip expired exceptions
     if (ex.expires_at && new Date(ex.expires_at) < now) continue;

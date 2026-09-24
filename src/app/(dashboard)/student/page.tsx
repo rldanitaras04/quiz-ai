@@ -5,6 +5,8 @@ import PageHeader from '@/components/ui/PageHeader';
 import { Card, CardContent } from '@/components/ui/Card';
 import Badge from '@/components/ui/Badge';
 import EmptyState from '@/components/ui/EmptyState';
+import ViewNotificationLink from '@/app/(dashboard)/notifications/ViewNotificationLink';
+import DeleteNotificationButton from '@/app/(dashboard)/notifications/DeleteNotificationButton';
 
 export default async function StudentDashboardPage() {
   const supabase = await createClient();
@@ -139,14 +141,25 @@ export default async function StudentDashboardPage() {
                           <Badge variant={n.type === 'result_released' || n.type === 'submission_confirmed' ? 'success' : n.type === 'assessment_closed' || n.type === 'reminder' ? 'warning' : 'info'}>
                             {n.type.replace(/_/g, ' ')}
                           </Badge>
+                          {typeof data?.subject_label === 'string' && data.subject_label ? (
+                            <Badge variant="outline">{data.subject_label}</Badge>
+                          ) : null}
                         </div>
                         <p className="text-sm text-[var(--color-muted)] mt-1">{n.body}</p>
                         <p className="text-xs text-[var(--color-muted-light)] mt-1">
                           {new Date(n.created_at).toLocaleString()}
                         </p>
-                        <Link href={href} className="mt-2 inline-block text-sm font-medium text-[var(--color-primary)] hover:underline">
-                          View
-                        </Link>
+                        <div className="mt-2 flex items-center gap-3">
+                          <ViewNotificationLink
+                            notificationId={n.id}
+                            href={href}
+                            isRead={Boolean(n.read_at)}
+                            className="text-sm font-medium text-[var(--color-primary)] hover:underline"
+                          >
+                            View
+                          </ViewNotificationLink>
+                          <DeleteNotificationButton notificationId={n.id} />
+                        </div>
                       </div>
                     </CardContent>
                   </Card>

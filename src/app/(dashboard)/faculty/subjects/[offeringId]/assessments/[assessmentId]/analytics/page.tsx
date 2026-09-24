@@ -1,7 +1,6 @@
 import { Suspense } from 'react';
 import { notFound } from 'next/navigation';
-import { createClient } from '@/lib/supabase/server';
-import { requireRole } from '@/lib/auth';
+import { requireRole, assessmentSharesSubjectWithOffering } from '@/lib/auth';
 import PageHeader from '@/components/ui/PageHeader';
 import AnalyticsClient from './AnalyticsClient';
 
@@ -18,28 +17,30 @@ export default async function AnalyticsPage({
 
   const { data: assessment } = await supabase
     .from('assessments')
-    .select('title, subject_offering_id')
+    .select('title, subject_offering_id, current_version_id')
     .eq('id', assessmentId)
-    .single();
+    .maybeSingle();
 
-  if (!assessment || assessment.subject_offering_id !== offeringId) notFound();
+  if (!assessment) notFound();
 
-  // Get the latest deployment for this assessment to show analytics
-  const { data: deployment } = await supabase
-    .from('assessment_deployments')
-    .select('id')
-    .eq('assessment_version_id',
-      (await supabase
-        .from('assessments')
-        .select('current_version_id')
-        .eq('id', assessmentId)
-        .single()
-      ).data?.current_version_id ?? ''
-    )
-    .eq('subject_offering_id', offeringId)
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .single();
+  const sharesSubject = await assessmentSharesSubjectWithOffering(
+    supabase,
+    assessment.subject_offering_id,
+    offeringId
+  );
+  if (!sharesSubject) notFound();
+
+  // Latest deployment of this assessment in the current section (per-section data).
+  const { data: deployment } = assessment.current_version_id
+    ? await supabase
+        .from('assessment_deployments')
+        .select('id')
+        .eq('assessment_version_id', assessment.current_version_id)
+        .eq('subject_offering_id', offeringId)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+    : { data: null };
 
   return (
     <div className="space-y-6">

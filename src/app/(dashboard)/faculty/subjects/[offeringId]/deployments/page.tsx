@@ -7,6 +7,8 @@ import EmptyState from '@/components/ui/EmptyState';
 import { Table, THead, TBody, TR, TH, TD } from '@/components/ui/Table';
 import CancelDeploymentButton from './CancelDeploymentButton';
 import ReleaseResultsButton from './ReleaseResultsButton';
+import OpenDeploymentButton from './OpenDeploymentButton';
+import CloseDeploymentButton from './CloseDeploymentButton';
 import WorkspaceNavSetter from '@/components/layout/WorkspaceNavSetter';
 
 interface Props {
@@ -42,6 +44,7 @@ function deploymentVariant(status: string): 'success' | 'warning' | 'info' | 'de
     case 'active': return 'success';
     case 'scheduled': return 'info';
     case 'closed': return 'default';
+    case 'draft': return 'warning';
     default: return 'warning';
   }
 }
@@ -175,17 +178,21 @@ export default async function DeploymentsPage({ params }: Props) {
                     </TD>
                     <TD>
                       <div className="flex items-center justify-end gap-1">
+                        {d.status === 'draft' && (
+                          <OpenDeploymentButton deploymentId={d.id} />
+                        )}
+                        {(d.status === 'draft' || d.status === 'scheduled' || d.status === 'active') && (
+                          <CloseDeploymentButton deploymentId={d.id} />
+                        )}
                         {(d.status === 'scheduled' || d.status === 'active') && (
                           <CancelDeploymentButton deploymentId={d.id} />
                         )}
                         {(d.status === 'active' || d.status === 'closed') && (
                           <ReleaseResultsButton deploymentId={d.id} />
                         )}
-                        {d.status !== 'scheduled' &&
-                          d.status !== 'active' &&
-                          d.status !== 'closed' && (
-                            <span className="text-xs text-[var(--color-muted)]">—</span>
-                          )}
+                        {d.status === 'closed' && (
+                          <span className="text-xs text-[var(--color-muted)]">—</span>
+                        )}
                       </div>
                     </TD>
                   </TR>
@@ -197,7 +204,7 @@ export default async function DeploymentsPage({ params }: Props) {
       ) : (
         <EmptyState
           title="No deployments yet"
-          description="Deploy an approved assessment to make it available to students."
+          description="Deploy a published assessment to make it available to students."
         />
       )}
     </div>

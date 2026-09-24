@@ -52,6 +52,16 @@ const MODES: Array<{ id: AssessmentCreationMode; title: string; description: str
       </svg>
     ),
   },
+  {
+    id: 'upload',
+    title: 'Upload Ready-Made',
+    description: 'Paste or upload an existing exam (.docx / .pdf / .txt / .md / .csv), with an optional separate answer-key file. Fill any missing keys in preview.',
+    icon: (
+      <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+      </svg>
+    ),
+  },
 ];
 
 export default function StepCreationMode({ value, onChange }: Props): JSX.Element {
@@ -62,7 +72,7 @@ export default function StepCreationMode({ value, onChange }: Props): JSX.Elemen
         <p className="text-sm text-[var(--color-muted)]">Pick a starting point — you can always mix methods later in Review.</p>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         {MODES.map((m) => {
           const active = value === m.id;
           return (

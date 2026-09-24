@@ -21,7 +21,11 @@ interface SubjectInfo {
 
 interface OfferingInfo {
   id: string;
-  section: { name: string } | null;
+  section: {
+    name: string;
+    program: { code: string } | null;
+    year_level: { name: string } | null;
+  } | null;
   semester: { name: string } | null;
 }
 
@@ -33,6 +37,22 @@ interface AssessmentRow {
   created_at: string;
   subject_offering_id: string;
   current_version: { id: string; total_items: number; total_points: number } | null;
+}
+
+/** Section badge format: `BSIT 2 - NT` (program code · year · section name). */
+function sectionLabel(
+  section: {
+    name: string;
+    program: { code: string } | null;
+    year_level: { name: string } | null;
+  } | null
+): string {
+  if (!section) return '—';
+  const programCode = section.program?.code?.trim();
+  const year = section.year_level?.name?.match(/\d+/)?.[0];
+  if (programCode && year) return `${programCode} ${year} - ${section.name}`;
+  if (programCode) return `${programCode} - ${section.name}`;
+  return section.name;
 }
 
 export default async function SubjectAssessmentsPage({ params }: Props) {
@@ -58,7 +78,7 @@ export default async function SubjectAssessmentsPage({ params }: Props) {
     .from('subject_offerings')
     .select(`
       id,
-      section:sections(name),
+      section:sections(name, program:programs(code), year_level:year_levels(name)),
       semester:semesters(name)
     `)
     .eq('subject_id', subjectId)
@@ -104,8 +124,25 @@ export default async function SubjectAssessmentsPage({ params }: Props) {
 
   const assessmentRows = (assessments ?? []) as unknown as AssessmentRow[];
 
+  // Distinct question types per current version (MCQ / ID / TF).
+  const versionIds = assessmentRows
+    .map((a) => a.current_version?.id)
+    .filter((id): id is string => Boolean(id));
+  const questionTypesByVersion = new Map<string, Set<string>>();
+  if (versionIds.length > 0) {
+    const { data: questionRows } = await supabase
+      .from('questions')
+      .select('assessment_version_id, question_type')
+      .in('assessment_version_id', versionIds);
+    for (const q of ((questionRows ?? []) as unknown as Array<{ assessment_version_id: string; question_type: string }>)) {
+      const set = questionTypesByVersion.get(q.assessment_version_id) ?? new Set<string>();
+      set.add(q.question_type);
+      questionTypesByVersion.set(q.assessment_version_id, set);
+    }
+  }
+
   // List every assessment (do not collapse by title — separate drafts can share a title).
-  const offeringSectionById = new Map(offeringList.map((o) => [o.id, o.section?.name ?? '—']));
+  const offeringSectionById = new Map(offeringList.map((o) => [o.id, sectionLabel(o.section)]));
   const uniqueAssessments = assessmentRows.map((assessment) => ({
     id: assessment.id,
     title: assessment.title,
@@ -115,6 +152,9 @@ export default async function SubjectAssessmentsPage({ params }: Props) {
     offeringIds: [assessment.subject_offering_id],
     sectionLabel: offeringSectionById.get(assessment.subject_offering_id) ?? '—',
     version: assessment.current_version,
+    questionTypes: assessment.current_version
+      ? [...(questionTypesByVersion.get(assessment.current_version.id) ?? [])]
+      : undefined,
   }));
 
   const listRows: AssessmentListRow[] = uniqueAssessments.map((assessment) => ({
@@ -126,6 +166,7 @@ export default async function SubjectAssessmentsPage({ params }: Props) {
     total_items: assessment.version?.total_items ?? null,
     total_points: assessment.version?.total_points ?? null,
     section_label: assessment.sectionLabel,
+    question_types: assessment.questionTypes,
     review_href: `/faculty/subjects/subject/${subjectId}/assessments/${assessment.id}`,
     deploy_href: `/faculty/subjects/subject/${subjectId}/assessments/${assessment.id}/deploy`,
     show_deploy: true,
@@ -141,7 +182,7 @@ export default async function SubjectAssessmentsPage({ params }: Props) {
           { label: `${s.code} - ${s.title}` },
         ]}
         title={`${s.code} - ${s.title}`}
-        description={`${offeringList.length} section${offeringList.length !== 1 ? 's' : ''}: ${offeringList.map(o => o.section?.name ?? '—').join(', ')}`}
+        description={`${offeringList.length} section${offeringList.length !== 1 ? 's' : ''}: ${offeringList.map(o => sectionLabel(o.section)).join(', ')}`}
         actions={
           <Link href={`/faculty/subjects/subject/${subjectId}/assessments/new`}>
             <Button variant="primary">New Assessment</Button>
@@ -158,7 +199,7 @@ export default async function SubjectAssessmentsPage({ params }: Props) {
           <div className="flex flex-wrap gap-2">
             {offeringList.map((offering) => (
               <Badge key={offering.id} variant="default">
-                {offering.section?.name ?? '—'} · {offering.semester?.name ?? '—'}
+                {sectionLabel(offering.section)} · {offering.semester?.name ?? '—'}
               </Badge>
             ))}
           </div>

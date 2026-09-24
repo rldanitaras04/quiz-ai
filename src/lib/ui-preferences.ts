@@ -63,3 +63,59 @@ export function getIsDesktop(): boolean {
 export function getIsDesktopServerSnapshot(): boolean {
   return false;
 }
+
+// ---------------------------------------------------------------------------
+// Color theme (light / dark)
+// ---------------------------------------------------------------------------
+
+const THEME_KEY = 'mimo:theme';
+
+export type ThemePreference = 'light' | 'dark';
+
+const themeListeners = new Set<() => void>();
+
+function applyThemeClass(theme: ThemePreference): void {
+  if (typeof document === 'undefined') return;
+  document.documentElement.classList.toggle('dark', theme === 'dark');
+}
+
+function systemPrefersDark(): boolean {
+  if (typeof window === 'undefined') return false;
+  return window.matchMedia('(prefers-color-scheme: dark)').matches;
+}
+
+export function subscribeTheme(listener: () => void): () => void {
+  themeListeners.add(listener);
+
+  const onStorage = (event: StorageEvent) => {
+    if (event.key === THEME_KEY) listener();
+  };
+  window.addEventListener('storage', onStorage);
+
+  return () => {
+    themeListeners.delete(listener);
+    window.removeEventListener('storage', onStorage);
+  };
+}
+
+/** Resolved theme: stored preference, else the OS preference. */
+export function getTheme(): ThemePreference {
+  if (typeof window === 'undefined') return 'light';
+  const stored = window.localStorage.getItem(THEME_KEY);
+  if (stored === 'dark' || stored === 'light') return stored;
+  return systemPrefersDark() ? 'dark' : 'light';
+}
+
+export function getThemeServerSnapshot(): ThemePreference {
+  return 'light';
+}
+
+export function setTheme(theme: ThemePreference): void {
+  window.localStorage.setItem(THEME_KEY, theme);
+  applyThemeClass(theme);
+  for (const listener of themeListeners) listener();
+}
+
+export function toggleTheme(): void {
+  setTheme(getTheme() === 'dark' ? 'light' : 'dark');
+}

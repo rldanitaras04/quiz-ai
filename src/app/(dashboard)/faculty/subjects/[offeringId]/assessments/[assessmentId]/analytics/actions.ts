@@ -2,7 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { isFacultyOfOffering } from '@/lib/auth';
+import { isFacultyOfOfferingOrSubject } from '@/lib/auth';
 
 async function requireUser() {
   const supabase = await createClient();
@@ -96,7 +96,7 @@ export async function getDeploymentAnalytics(
     .single();
 
   if (!deployment) return { data: null, error: 'Deployment not found' };
-  if (!(await isFacultyOfOffering(supabase, userId, deployment.subject_offering_id))) {
+  if (!(await isFacultyOfOfferingOrSubject(supabase, userId, deployment.subject_offering_id))) {
     return { data: null, error: 'Not authorized' };
   }
 

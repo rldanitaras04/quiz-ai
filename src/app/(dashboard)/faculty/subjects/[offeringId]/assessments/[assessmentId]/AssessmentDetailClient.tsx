@@ -21,6 +21,7 @@ import {
 import {
   addQuestion,
   createNewVersion,
+  deleteAssessmentVersion,
   deleteQuestion,
   publishAssessment,
   updateAssessment,
@@ -32,6 +33,7 @@ import {
 } from '@/app/(dashboard)/faculty/subjects/[offeringId]/assessments/actions';
 import { getTopicsForOffering } from '@/app/(dashboard)/faculty/subjects/[offeringId]/topics/actions';
 import { saveAssessmentQuestionToBank } from '@/app/(dashboard)/faculty/subjects/[offeringId]/question-bank/actions';
+import ImportExamModal from '@/components/assessment/ImportExamModal';
 import DeleteAssessmentButton from '@/app/(dashboard)/faculty/subjects/[offeringId]/assessments/[assessmentId]/DeleteAssessmentButton';
 import DownloadTosButton from '@/app/(dashboard)/faculty/subjects/[offeringId]/assessments/[assessmentId]/DownloadTosButton';
 import type { DraftQuestion, DraftQuestionChoice, Topic } from '@/lib/types';
@@ -153,6 +155,7 @@ export default function AssessmentDetailClient({
   const [savingDetails, setSavingDetails] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [creatingVersion, setCreatingVersion] = useState(false);
+  const [discardingVersionId, setDiscardingVersionId] = useState<string | null>(null);
 
   const [sourceModalOpen, setSourceModalOpen] = useState(false);
   const [sourceQuestionText, setSourceQuestionText] = useState('');
@@ -345,7 +348,7 @@ export default function AssessmentDetailClient({
   const handleCreateNewVersion = async () => {
     const confirmed = await confirmAction({
       title: 'Create a new version?',
-      text: 'This creates a blank draft version you can fill with new questions. Existing deployments are unaffected.',
+      text: 'This creates a draft version with a copy of the current questions (plus choices and answer keys). You can add, edit, delete, or upload ready-made questions. Existing deployments are unaffected.',
       confirmText: 'Create version',
     });
     if (!confirmed) return;
@@ -356,7 +359,12 @@ export default function AssessmentDetailClient({
       if (!result.success) {
         throw new Error(result.error);
       }
-      notifySuccess('New version created', 'You can now add or generate questions for this version.');
+      notifySuccess(
+        'New version created',
+        result.copiedQuestions
+          ? `Copied ${result.copiedQuestions} question${result.copiedQuestions === 1 ? '' : 's'} from the previous version. Edit, delete, or add more as needed.`
+          : 'You can now add or import questions for this version.'
+      );
       router.refresh();
     } catch (error) {
       notifyError(
@@ -365,6 +373,41 @@ export default function AssessmentDetailClient({
       );
     } finally {
       setCreatingVersion(false);
+    }
+  };
+
+  const handleDiscardVersion = async (
+    version: { id: string; versionNumber: number; status: string }
+  ) => {
+    const isCurrent = version.id === detail.version?.id;
+    const confirmed = await confirmAction({
+      title: `Discard draft v${version.versionNumber}?`,
+      text: isCurrent
+        ? 'This removes only the draft version and its questions. The assessment returns to the previous version. Published history is unaffected.'
+        : 'This removes only this draft version and its questions. Other versions stay.',
+      confirmText: 'Discard version',
+      destructive: true,
+    });
+    if (!confirmed) return;
+
+    setDiscardingVersionId(version.id);
+    try {
+      const result = await deleteAssessmentVersion(detail.id, version.id);
+      if (!result.success) {
+        throw new Error(result.error);
+      }
+      notifySuccess(
+        `Draft v${version.versionNumber} discarded`,
+        isCurrent ? 'Restored the previous version as current.' : undefined
+      );
+      router.refresh();
+    } catch (error) {
+      notifyError(
+        'Could not discard version',
+        error instanceof Error ? error.message : 'Unknown error'
+      );
+    } finally {
+      setDiscardingVersionId(null);
     }
   };
 
@@ -506,35 +549,60 @@ export default function AssessmentDetailClient({
                 <TH>Status</TH>
                 <TH align="right">Items</TH>
                 <TH align="right">Points</TH>
+                <TH align="right">Actions</TH>
               </TR>
             </THead>
             <TBody>
-              {detail.versions.map((v) => (
-                <TR
-                  key={v.id}
-                  className={v.id === detail.version?.id ? 'bg-[var(--color-primary-light)]' : ''}
-                >
-                  <TD numeric className="font-medium text-[var(--color-foreground)]">
-                    v{v.versionNumber}
-                    {v.id === detail.version?.id && (
-                      <span className="ml-1.5 text-xs text-[var(--color-primary)]">(current)</span>
-                    )}
-                  </TD>
-                  <TD>
-                    <Badge variant={v.status === 'published' ? 'success' : v.status === 'approved' ? 'info' : 'warning'}>
-                      {ASSESSMENT_STATUS_LABELS[v.status as keyof typeof ASSESSMENT_STATUS_LABELS] ?? v.status}
-                    </Badge>
-                  </TD>
-                  <TD numeric className="text-[var(--color-foreground)]">
-                    {v.totalItems}
-                  </TD>
-                  <TD numeric className="text-[var(--color-foreground)]">
-                    {v.totalPoints}
-                  </TD>
-                </TR>
-              ))}
+              {detail.versions.map((v) => {
+                const canDiscard =
+                  v.status === 'draft' && detail.versions.length > 1;
+                const isDiscarding = discardingVersionId === v.id;
+                return (
+                  <TR
+                    key={v.id}
+                    className={v.id === detail.version?.id ? 'bg-[var(--color-primary-light)]' : ''}
+                  >
+                    <TD numeric className="font-medium text-[var(--color-foreground)]">
+                      v{v.versionNumber}
+                      {v.id === detail.version?.id && (
+                        <span className="ml-1.5 text-xs text-[var(--color-primary)]">(current)</span>
+                      )}
+                    </TD>
+                    <TD>
+                      <Badge variant={v.status === 'published' ? 'success' : v.status === 'approved' ? 'info' : 'warning'}>
+                        {ASSESSMENT_STATUS_LABELS[v.status as keyof typeof ASSESSMENT_STATUS_LABELS] ?? v.status}
+                      </Badge>
+                    </TD>
+                    <TD numeric className="text-[var(--color-foreground)]">
+                      {v.totalItems}
+                    </TD>
+                    <TD numeric className="text-[var(--color-foreground)]">
+                      {v.totalPoints}
+                    </TD>
+                    <TD align="right" className="whitespace-nowrap">
+                      {canDiscard ? (
+                        <button
+                          type="button"
+                          onClick={() => void handleDiscardVersion(v)}
+                          disabled={isDiscarding || discardingVersionId !== null}
+                          className="text-xs font-medium text-[var(--color-danger)] hover:underline disabled:opacity-50"
+                        >
+                          {isDiscarding ? 'Discarding…' : 'Discard draft'}
+                        </button>
+                      ) : (
+                        <span className="text-xs text-[var(--color-muted)]">—</span>
+                      )}
+                    </TD>
+                  </TR>
+                );
+              })}
             </TBody>
           </Table>
+          {detail.versions.length === 1 && detail.versions[0]?.status === 'draft' && (
+            <p className="px-4 pb-4 text-xs text-[var(--color-muted)]">
+              This is the only version. Use Delete assessment (header) to remove it entirely.
+            </p>
+          )}
         </Card>
       )}
 
@@ -598,14 +666,23 @@ export default function AssessmentDetailClient({
               Read-only — this version is published or already deployed
             </span>
           ) : (
-            <Button
-              variant="primary"
-              size="sm"
-              onClick={openNewQuestion}
-              disabled={!detail.version}
-            >
-              Add question
-            </Button>
+            <div className="flex flex-wrap items-center gap-2">
+              <ImportExamModal
+                offeringId={detail.subjectOfferingId}
+                topics={topics}
+                assessmentId={detail.id}
+                buttonLabel="Upload questions"
+                onImported={() => router.refresh()}
+              />
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={openNewQuestion}
+                disabled={!detail.version}
+              >
+                Add question
+              </Button>
+            </div>
           )}
         </CardHeader>
 
@@ -725,7 +802,7 @@ export default function AssessmentDetailClient({
         ) : (
           <EmptyState
             title="No questions yet"
-            description="Generate questions with the authoring wizard, or add one here by hand."
+            description="Upload a ready-made exam, add one by hand, or import from the question bank."
           />
         )}
 

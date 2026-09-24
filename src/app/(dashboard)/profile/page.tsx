@@ -5,6 +5,7 @@ import PageHeader from '@/components/ui/PageHeader';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import Badge from '@/components/ui/Badge';
 import ProfileForm from './ProfileForm';
+import ProfileNotificationsList from './ProfileNotificationsList';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,6 +27,23 @@ export default async function ProfilePage() {
     .eq('user_id', user.id);
 
   const role = getPrimaryRole(roles?.map((r) => r.role) ?? []);
+
+  const { data: notifications } = await supabase
+    .from('notifications')
+    .select('id, type, title, body, data, read_at, created_at')
+    .eq('user_id', user.id)
+    .order('created_at', { ascending: false })
+    .limit(10);
+
+  const notificationRows = (notifications ?? []) as unknown as Array<{
+    id: string;
+    type: string;
+    title: string;
+    body: string;
+    data: Record<string, unknown> | null;
+    read_at: string | null;
+    created_at: string;
+  }>;
 
   // Role-specific detail rows (null-safe: sections may not exist yet).
   interface StudentDetailRow {
@@ -137,6 +155,15 @@ export default async function ProfilePage() {
               </CardContent>
             </Card>
           )}
+
+          <Card>
+            <CardHeader>
+              <h2 className="text-lg font-semibold">Notifications</h2>
+            </CardHeader>
+            <CardContent>
+              <ProfileNotificationsList notifications={notificationRows} limit={5} />
+            </CardContent>
+          </Card>
 
           <Card>
             <CardHeader>

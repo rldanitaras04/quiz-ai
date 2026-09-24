@@ -1,7 +1,6 @@
 import { Suspense } from 'react';
 import { notFound } from 'next/navigation';
-import { createClient } from '@/lib/supabase/server';
-import { requireRole } from '@/lib/auth';
+import { requireRole, assessmentSharesSubjectWithOffering } from '@/lib/auth';
 import PageHeader from '@/components/ui/PageHeader';
 import ReviewClient from './ReviewClient';
 
@@ -20,9 +19,16 @@ export default async function ReviewPage({
     .from('assessments')
     .select('title, subject_offering_id')
     .eq('id', assessmentId)
-    .single();
+    .maybeSingle();
 
-  if (!assessment || assessment.subject_offering_id !== offeringId) notFound();
+  if (!assessment) notFound();
+
+  const sharesSubject = await assessmentSharesSubjectWithOffering(
+    supabase,
+    assessment.subject_offering_id,
+    offeringId
+  );
+  if (!sharesSubject) notFound();
 
   return (
     <div className="space-y-6">

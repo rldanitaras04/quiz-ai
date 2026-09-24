@@ -55,8 +55,7 @@ export default async function StudentSubjectDetailPage({ params }: Props) {
     ? facultyProfilesRaw[0]
     : facultyProfilesRaw) as Record<string, unknown> | undefined;
 
-  // Fetch deployments for this offering (all windows — the workspace shows
-  // Available/Upcoming/Closed status per row).
+  // Fetch deployments for this offering (exclude unpublished drafts).
   const { data: deployments } = await supabase
     .from('assessment_deployments')
     .select(`
@@ -74,7 +73,7 @@ export default async function StudentSubjectDetailPage({ params }: Props) {
         )
     `)
     .eq('subject_offering_id', offeringId)
-    .neq('status', 'archived')
+    .in('status', ['active', 'scheduled', 'closed'])
     .order('opens_at', { ascending: true });
 
   // Fetch student's attempts for these deployments.

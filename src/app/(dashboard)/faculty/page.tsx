@@ -41,15 +41,27 @@ export default async function FacultyDashboardPage() {
     .map((a) => a.subject_offering?.id)
     .filter((id): id is string => Boolean(id));
 
+  const subjectIds = assignmentRows
+    .map((a) => a.subject_offering?.subject?.id)
+    .filter((id): id is string => Boolean(id));
+
+  // Subject-level assessments: count every section of subjects the faculty teaches.
+  const { data: subjectOfferings } = subjectIds.length > 0
+    ? await supabase.from('subject_offerings').select('id').in('subject_id', subjectIds)
+    : { data: [] };
+
+  const allOfferingIds = ((subjectOfferings ?? []) as Array<{ id: string }>).map((x) => x.id);
+  const countOfferingIds = allOfferingIds.length > 0 ? allOfferingIds : offeringIds;
+
   const [enrollmentsCount, assessmentsCount, deploymentsCount] = await Promise.all([
     offeringIds.length > 0
       ? supabase.from('enrollments').select('id', { count: 'exact', head: true })
           .in('subject_offering_id', offeringIds)
           .eq('status', 'enrolled')
       : { count: 0 },
-    offeringIds.length > 0
+    countOfferingIds.length > 0
       ? supabase.from('assessments').select('id', { count: 'exact', head: true })
-          .in('subject_offering_id', offeringIds)
+          .in('subject_offering_id', countOfferingIds)
       : { count: 0 },
     offeringIds.length > 0
       ? supabase.from('assessment_deployments').select('id', { count: 'exact', head: true })

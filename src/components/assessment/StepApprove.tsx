@@ -50,12 +50,21 @@ export default function StepApprove({
     }
     return Array.from(map.entries());
   })();
-  const creationModeLabel = (state as any).creationMode === 'manual' ? 'Manual' : (state as any).creationMode === 'bank' ? 'Question Bank' : (state as any).creationMode === 'mixed' ? 'Mixed' : 'AI';
+  const creationModeLabel =
+    state.creationMode === 'manual'
+      ? 'Manual'
+      : state.creationMode === 'bank'
+        ? 'Question Bank'
+        : state.creationMode === 'mixed'
+          ? 'Mixed'
+          : state.creationMode === 'upload'
+            ? 'Upload'
+            : 'AI';
   const isDraft = state.draftStatus === 'draft';
 
   const handleApprove = async () => {
     if (questions.length === 0) {
-      setError('No questions to save. Add some via AI, manual encoding, or the question bank first.');
+      setError('No questions to save. Add some via AI, manual encoding, question bank, or upload first.');
       return;
     }
     if (!state.title.trim()) {

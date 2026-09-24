@@ -48,14 +48,19 @@ export default async function SubjectAssessmentDetailPage({ params }: Props) {
     .eq('status', 'active');
 
   const offeringList = (offerings ?? []) as unknown as OfferingInfo[];
-  const offeringIds = offeringList.map((o) => o.id);
 
   // Get assessment detail using the first offering that this assessment belongs to
   const detail = await getAssessmentDetail(assessmentId);
   if (!detail) notFound();
 
-  // Verify assessment belongs to one of this subject's offerings
-  if (!offeringIds.includes(detail.subjectOfferingId)) notFound();
+  // Verify assessment belongs to this subject (home offering may be a sibling section).
+  const { data: homeOffering } = await supabase
+    .from('subject_offerings')
+    .select('subject_id')
+    .eq('id', detail.subjectOfferingId)
+    .maybeSingle();
+
+  if (!homeOffering || homeOffering.subject_id !== subjectId) notFound();
 
   const sectionNames = offeringList.map(o => o.section?.name ?? '—').join(', ');
 
