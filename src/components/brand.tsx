@@ -1,8 +1,8 @@
 import type { JSX } from 'react';
 import { APP_NAME } from '@/lib/constants';
 
-const ICON_SRC = '/seams_ai_ico.png';
-const LOGO_SRC = '/SEAMSAI_logo.png';
+const ICON_SRC = '/seams_ai_logo_notext.png';
+const LOGO_SRC = '/seams_ai_logo_text.png';
 
 interface BrandProps {
   /** Which asset to render. */
@@ -66,11 +66,9 @@ export function Brand({
   }
 
   return (
-    <span className={`inline-flex items-center gap-2.5 ${className}`}>
+    <span className={`inline-flex items-center gap-2 ${className}`}>
       <BrandIcon alt={alt} className="h-8 w-8 md:h-9 md:w-9" />
-      <span className="text-lg md:text-xl font-bold text-[var(--color-foreground)] tracking-tight">
-        {APP_NAME}
-      </span>
+      <BrandLogo alt="" className="h-5 w-auto md:h-6" />
     </span>
   );
 }
