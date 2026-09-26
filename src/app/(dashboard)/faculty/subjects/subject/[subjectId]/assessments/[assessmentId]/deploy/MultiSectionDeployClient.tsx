@@ -132,7 +132,7 @@ export default function MultiSectionDeployClient({
           closes_at: closesAtIso,
           duration_minutes: durationMinutes,
           attempt_limit: attemptLimit,
-          question_order_mode: 'shuffled',
+          question_order_mode: 'fixed',
           choice_order_mode: 'shuffled',
           score_release_mode: 'immediate',
           show_raw_score: true,

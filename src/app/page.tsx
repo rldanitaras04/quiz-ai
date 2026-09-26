@@ -204,7 +204,7 @@ export default async function Home(): Promise<JSX.Element> {
                 AI-assisted assessment, built for academic integrity
               </h2>
               <p className="mb-4 text-[15px] leading-relaxed text-[var(--color-muted)]">
-                SEAMS AI is an AI-Assisted Secure Assessment and Examination Management System for
+                SEAMS AI is an AI-Assisted Secure Examination and Assessment Management System for
                 schools and universities. It connects the whole assessment lifecycle &mdash; source
                 materials, Table of Specifications, question generation, faculty approval, secure
                 deployment, results, and analytics &mdash; in one platform.
@@ -268,7 +268,7 @@ export default async function Home(): Promise<JSX.Element> {
         <div className="mb-3 flex justify-center">
           <Brand />
         </div>
-        <p>SEAMS AI &mdash; AI-Assisted Secure Assessment and Examination Management System</p>
+        <p>SEAMS AI &mdash; AI-Assisted Secure Examination and Assessment Management System</p>
       </footer>
     </div>
   );

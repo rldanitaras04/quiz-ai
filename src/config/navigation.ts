@@ -14,41 +14,21 @@ import {
   Pulse,
   Gear,
   UserCircle,
-  SignOut,
-  BookOpen,
   ChalkboardTeacher,
-  FileText,
   ListChecks,
-  GitBranch,
-  Clock,
   Warning,
   ChartLineUp,
-  Target,
-  Gauge,
-  Play,
-  Lock,
-  Eye,
-  PencilSimple,
-  CheckCircle,
   CalendarBlank,
-  CaretRight,
+  CalendarCheck,
+  Buildings,
+  UsersThree,
   House,
   Student,
   Clipboard,
-  FileDoc,
-  Bookmarks,
-  FunnelSimple,
-  ArrowUUpLeft,
   TreeStructure,
-  Certificate,
-  TrendUp,
-  IdentificationCard,
   Wrench,
-  ShieldCheck,
   FolderOpen,
   Stack,
-  ChartPieSlice,
-  Article,
 } from '@phosphor-icons/react';
 
 // ============================================================================
@@ -72,6 +52,10 @@ export interface NavigationItem {
   disabled?: boolean;
   /** Badge count or label (e.g., notification count). */
   badge?: string | number;
+  /** Compact label for the mobile bottom bar (falls back to `label`). */
+  shortLabel?: string;
+  /** Kept off the mobile bottom bar; surfaced through the "More" sheet instead. */
+  hideOnBottom?: boolean;
 }
 
 export interface NavigationGroup {
@@ -110,11 +94,20 @@ export const ROUTES = {
   adminDashboard: '/admin',
   adminMonitoring: '/admin/monitoring',
   adminAcademic: '/admin/academic',
+  adminAcademicYears: '/admin/academic/years',
+  adminAcademicSemesters: '/admin/academic/semesters',
+  adminAcademicPrograms: '/admin/academic/programs',
+  adminAcademicYearLevels: '/admin/academic/year-levels',
+  adminAcademicSections: '/admin/academic/sections',
   adminSubjects: '/admin/subjects',
+  adminOfferings: '/admin/subjects/offerings',
   adminUsers: '/admin/users',
+  adminUsersFaculty: '/admin/users/faculty',
+  adminUsersStudents: '/admin/users/students',
   adminAuditLogs: '/admin/audit-logs',
   adminSettings: '/admin/settings',
   adminAiConfig: '/admin/ai-config',
+  adminAiUsage: '/admin/ai-usage',
 
   // Faculty
   facultyDashboard: '/faculty',
@@ -125,6 +118,7 @@ export const ROUTES = {
   studentSubjects: '/student/subjects',
   studentAssessments: '/student/assessments',
   studentResults: '/student/results',
+  studentSettings: '/student/settings',
 
   // Shared
   notifications: '/notifications',
@@ -146,11 +140,20 @@ export const routes = {
     dashboard: () => ROUTES.adminDashboard,
     monitoring: () => ROUTES.adminMonitoring,
     academic: () => ROUTES.adminAcademic,
+    academicYears: () => ROUTES.adminAcademicYears,
+    academicSemesters: () => ROUTES.adminAcademicSemesters,
+    academicPrograms: () => ROUTES.adminAcademicPrograms,
+    academicYearLevels: () => ROUTES.adminAcademicYearLevels,
+    academicSections: () => ROUTES.adminAcademicSections,
     subjects: () => ROUTES.adminSubjects,
+    offerings: () => ROUTES.adminOfferings,
     users: () => ROUTES.adminUsers,
+    usersFaculty: () => ROUTES.adminUsersFaculty,
+    usersStudents: () => ROUTES.adminUsersStudents,
     auditLogs: () => ROUTES.adminAuditLogs,
     settings: () => ROUTES.adminSettings,
     aiConfig: () => ROUTES.adminAiConfig,
+    aiUsage: () => ROUTES.adminAiUsage,
   },
 
   // Faculty
@@ -164,6 +167,7 @@ export const routes = {
     subjectTopics: (offeringId: string) => `/faculty/subjects/${offeringId}/topics` as const,
     subjectQuestionBank: (offeringId: string) => `/faculty/subjects/${offeringId}/question-bank` as const,
     subjectDeployments: (offeringId: string) => `/faculty/subjects/${offeringId}/deployments` as const,
+    subjectResults: (offeringId: string) => `/faculty/subjects/${offeringId}/results` as const,
     assessment: (offeringId: string, assessmentId: string) =>
       `/faculty/subjects/${offeringId}/assessments/${assessmentId}` as const,
     assessmentReview: (offeringId: string, assessmentId: string) =>
@@ -190,6 +194,7 @@ export const routes = {
     examResults: (assessmentId: string, attemptId: string) =>
       `/student/assessments/${assessmentId}/exam/${attemptId}/results` as const,
     results: () => ROUTES.studentResults,
+    settings: () => ROUTES.studentSettings,
   },
 
   // Shared
@@ -207,71 +212,114 @@ export const GLOBAL_NAVIGATION: Record<UserRole, NavigationGroup[]> = {
       label: 'Overview',
       items: [
         { id: 'admin-dashboard', label: 'Dashboard', href: ROUTES.adminDashboard, icon: SquaresFour, exact: true },
-        { id: 'admin-monitoring', label: 'System Monitoring', href: ROUTES.adminMonitoring, icon: Pulse },
       ],
     },
     {
-      label: 'Academic',
+      label: 'User & Access',
       items: [
-        { id: 'admin-academic', label: 'Academic Structure', href: ROUTES.adminAcademic, icon: TreeStructure },
-        { id: 'admin-subjects', label: 'Subjects / Offerings', href: ROUTES.adminSubjects, icon: Books },
+        {
+          id: 'admin-users-group',
+          label: 'User Management',
+          icon: Users,
+          children: [
+            { id: 'admin-users', label: 'All Users', href: ROUTES.adminUsers, icon: Users, exact: true },
+            { id: 'admin-users-faculty', label: 'Faculty', href: ROUTES.adminUsersFaculty, icon: ChalkboardTeacher },
+            { id: 'admin-users-students', label: 'Students', href: ROUTES.adminUsersStudents, icon: Student },
+          ],
+        },
       ],
     },
     {
-      label: 'Access',
+      label: 'Academic Setup',
       items: [
-        { id: 'admin-users', label: 'Users', href: ROUTES.adminUsers, icon: Users },
-        { id: 'admin-audit', label: 'Audit Logs', href: ROUTES.adminAuditLogs, icon: ListMagnifyingGlass },
+        {
+          id: 'admin-academic-group',
+          label: 'Academic Management',
+          icon: GraduationCap,
+          children: [
+            { id: 'admin-academic-years', label: 'Academic Years', href: ROUTES.adminAcademicYears, icon: CalendarBlank },
+            { id: 'admin-academic-semesters', label: 'Semesters', href: ROUTES.adminAcademicSemesters, icon: CalendarCheck },
+            { id: 'admin-academic-programs', label: 'Programs', href: ROUTES.adminAcademicPrograms, icon: Buildings },
+            { id: 'admin-academic-year-levels', label: 'Year Levels', href: ROUTES.adminAcademicYearLevels, icon: TreeStructure },
+            { id: 'admin-academic-sections', label: 'Sections', href: ROUTES.adminAcademicSections, icon: UsersThree },
+            { id: 'admin-subjects', label: 'Subjects', href: ROUTES.adminSubjects, icon: Books },
+            { id: 'admin-offerings', label: 'Subject Offerings', href: ROUTES.adminOfferings, icon: ClipboardText },
+          ],
+        },
       ],
     },
     {
-      label: 'System',
+      label: 'AI & Automation',
       items: [
-        { id: 'admin-settings', label: 'System Settings', href: ROUTES.adminSettings, icon: Gear },
-        { id: 'admin-ai', label: 'AI Configuration', href: ROUTES.adminAiConfig, icon: Brain },
+        {
+          id: 'admin-ai-group',
+          label: 'AI Management',
+          icon: Brain,
+          children: [
+            { id: 'admin-ai-config', label: 'AI Configuration', href: ROUTES.adminAiConfig, icon: Wrench },
+            { id: 'admin-ai-usage', label: 'AI Usage', href: ROUTES.adminAiUsage, icon: ChartLineUp },
+          ],
+        },
       ],
     },
     {
-      label: 'Account',
+      label: 'System & Security',
+      items: [
+        { id: 'admin-audit', label: 'Audit Logs', href: ROUTES.adminAuditLogs, icon: ListMagnifyingGlass, exact: true },
+        { id: 'admin-monitoring', label: 'System Monitoring', href: ROUTES.adminMonitoring, icon: Pulse, exact: true },
+        { id: 'admin-settings', label: 'Settings', href: ROUTES.adminSettings, icon: Gear, exact: true },
+      ],
+    },
+    {
+      label: 'Communication',
       items: [
         { id: 'notifications', label: 'Notifications', href: ROUTES.notifications, icon: Bell },
-        { id: 'profile', label: 'Profile', href: ROUTES.profile, icon: UserCircle },
       ],
     },
   ],
 
   faculty: [
     {
-      label: 'Teaching',
+      label: 'Overview',
       items: [
         { id: 'faculty-dashboard', label: 'Dashboard', href: ROUTES.facultyDashboard, icon: SquaresFour, exact: true },
-        { id: 'faculty-subjects', label: 'My Subjects', href: ROUTES.facultySubjects, icon: Books },
+      ],
+    },
+    {
+      label: 'Assessments',
+      items: [
+        { id: 'faculty-subjects', label: 'My Subjects', href: ROUTES.facultySubjects, icon: Books, shortLabel: 'Subjects' },
       ],
     },
     {
       label: 'Account',
       items: [
         { id: 'notifications', label: 'Notifications', href: ROUTES.notifications, icon: Bell },
-        { id: 'profile', label: 'Profile', href: ROUTES.profile, icon: UserCircle },
+        { id: 'profile', label: 'Profile', href: ROUTES.profile, icon: UserCircle, hideOnBottom: true },
       ],
     },
   ],
 
   student: [
     {
-      label: 'Learning',
+      label: 'Overview',
       items: [
         { id: 'student-dashboard', label: 'Dashboard', href: ROUTES.studentDashboard, icon: SquaresFour, exact: true },
-        { id: 'student-subjects', label: 'My Subjects', href: ROUTES.studentSubjects, icon: Books },
-        { id: 'student-assessments', label: 'Assessments', href: ROUTES.studentAssessments, icon: ClipboardText },
-        { id: 'student-results', label: 'My Results', href: ROUTES.studentResults, icon: ChartBar },
+      ],
+    },
+    {
+      label: 'Academic',
+      items: [
+        { id: 'student-subjects', label: 'My Subjects', href: ROUTES.studentSubjects, icon: Books, shortLabel: 'Subjects' },
+        { id: 'student-assessments', label: 'My Assessments', href: ROUTES.studentAssessments, icon: ClipboardText, shortLabel: 'Assessments' },
+        { id: 'student-results', label: 'My Results', href: ROUTES.studentResults, icon: ChartBar, shortLabel: 'Results' },
       ],
     },
     {
       label: 'Account',
       items: [
-        { id: 'notifications', label: 'Notifications', href: ROUTES.notifications, icon: Bell },
-        { id: 'profile', label: 'Profile', href: ROUTES.profile, icon: UserCircle },
+        { id: 'notifications', label: 'Notifications', href: ROUTES.notifications, icon: Bell, hideOnBottom: false },
+        { id: 'profile', label: 'Profile', href: ROUTES.profile, icon: UserCircle, hideOnBottom: true },
       ],
     },
   ],
@@ -290,6 +338,7 @@ export function getSubjectWorkspaceNav(offeringId: string): NavigationItem[] {
     { id: 'subject-topics', label: 'Topics', href: `/faculty/subjects/${offeringId}/topics` as const, icon: Stack },
     { id: 'subject-bank', label: 'Question Bank', href: `/faculty/subjects/${offeringId}/question-bank` as const, icon: Database },
     { id: 'subject-deployments', label: 'Deployments', href: routes.faculty.subjectDeployments(offeringId), icon: CalendarBlank },
+    { id: 'subject-results', label: 'Results', href: routes.faculty.subjectResults(offeringId), icon: ChartBar },
   ];
 }
 
@@ -338,13 +387,84 @@ export function getFlatNavigation(role: UserRole): NavigationItem[] {
   return GLOBAL_NAVIGATION[role]?.flatMap((group) => group.items) ?? [];
 }
 
+// ============================================================================
+// Mobile Bottom Navigation
+// ============================================================================
+
+/**
+ * Ids that sit on the mobile bottom bar, in order. Referenced from
+ * `GLOBAL_NAVIGATION` by id so the bottom bar can never define a second route:
+ * resolving an unknown id simply drops the slot.
+ */
+const BOTTOM_NAV_IDS: Partial<Record<UserRole, string[]>> = {
+  student: ['student-dashboard', 'student-subjects', 'student-assessments', 'student-results'],
+  faculty: ['faculty-dashboard', 'faculty-subjects', 'notifications'],
+};
+
+export interface BottomNavigation {
+  /** Primary slots pinned to the bottom bar (may be fewer than requested). */
+  primary: NavigationItem[];
+  /** Everything else, surfaced inside the "More" sheet. */
+  overflow: NavigationItem[];
+}
+
+/**
+ * Resolve the mobile bottom navigation for a role from the one centralized
+ * configuration. Desktop sidebar, mobile drawer, and bottom bar all read the
+ * same `GLOBAL_NAVIGATION` rows.
+ */
+export function getBottomNavigationForRole(role: UserRole): BottomNavigation {
+  const ids = BOTTOM_NAV_IDS[role];
+  const flat = getFlatNavigation(role);
+  if (!ids || ids.length === 0) return { primary: [], overflow: flat };
+
+  const byId = new Map(flat.map((item) => [item.id, item]));
+  const primary = ids
+    .map((id) => byId.get(id))
+    .filter((item): item is NavigationItem => Boolean(item) && !item!.disabled);
+
+  const primaryIds = new Set(primary.map((item) => item.id));
+  const overflow = flat.filter((item) => !primaryIds.has(item.id) && !item.hideOnBottom);
+
+  return { primary, overflow };
+}
+
+/** Slot count for the bar: primary entries plus the trailing "More" control. */
+export function hasBottomNavigation(role: UserRole): boolean {
+  return (BOTTOM_NAV_IDS[role]?.length ?? 0) > 0;
+}
+
+// ============================================================================
+// Full-screen routes (navigation chrome is suppressed here)
+// ============================================================================
+
+const SECURE_EXAM_ROUTE = /^\/student\/assessments\/[^/]+\/exam(\/|$)/;
+
+/**
+ * Routes that must render without any application chrome: no sidebar, no top
+ * bar, no bottom navigation. Matches the route segment, never a bare substring.
+ */
+export function isFullScreenRoute(pathname: string): boolean {
+  return SECURE_EXAM_ROUTE.test(pathname);
+}
+
 /**
  * Check if a navigation item is active given the current pathname.
+ * Items with children are active when any descendant matches, so nested
+ * routes light up both the child and its parent group context.
+ *
+ * Prefix matches are segment-aware: `/student/assessments` matches
+ * `/student/assessments/abc` but not `/student/assessments-archive`.
  */
 export function isNavActive(item: NavigationItem, pathname: string): boolean {
+  if (item.children && item.children.length > 0) {
+    return item.children.some((child) => isNavActive(child, pathname));
+  }
   if (!item.href) return false;
-  if (item.exact) return pathname === item.href;
-  return pathname.startsWith(item.href);
+  const [target] = item.href.split('#');
+  if (item.exact) return pathname === target || pathname === `${target}/`;
+  if (pathname === target) return true;
+  return pathname.startsWith(`${target.replace(/\/$/, '')}/`);
 }
 
 /**

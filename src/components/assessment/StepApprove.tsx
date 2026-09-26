@@ -7,6 +7,7 @@ import Badge from '@/components/ui/Badge';
 import Input from '@/components/ui/Input';
 import { notifyError, notifySuccess } from '@/components/ui/alerts';
 import { approveAssessment, createAssessment, saveGeneratedQuestions } from '@/app/(dashboard)/faculty/subjects/[offeringId]/assessments/actions';
+import { saveAssessmentQuestionsToBank } from '@/app/(dashboard)/faculty/subjects/[offeringId]/question-bank/actions';
 import type { WizardState } from '@/app/(dashboard)/faculty/subjects/[offeringId]/assessments/new/page';
 import type { Topic } from '@/lib/types';
 
@@ -100,6 +101,7 @@ export default function StepApprove({
           topic_id: (q as any).topic_id ?? null,
           image_url: (q as any).image_url ?? null,
           image_storage_path: (q as any).image_storage_path ?? null,
+          generation_metadata: q.generation_metadata ?? null,
           question_choices: q.question_choices?.map((c) => ({
             choice_key: c.choice_key,
             choice_text: c.choice_text,
@@ -120,6 +122,28 @@ export default function StepApprove({
       await approveAssessment(assessmentId);
       setApproved(true);
       notifySuccess('Assessment approved', 'Review it, then deploy when you are ready.');
+
+      // 3. Explicit opt-in only: copy the saved questions into the question bank.
+      //    Bank failures never undo the approval — surface them as a warning.
+      if (state.saveToBank) {
+        try {
+          const bankResult = await saveAssessmentQuestionsToBank(assessmentId);
+          if (bankResult.saved > 0) {
+            notifySuccess(
+              'Saved to question bank',
+              `${bankResult.saved} question${bankResult.saved === 1 ? '' : 's'} added as reusable bank items${bankResult.skipped > 0 ? ` (${bankResult.skipped} already in the bank)` : ''}.`
+            );
+          }
+        } catch (bankErr) {
+          notifyError(
+            'Bank save failed',
+            bankErr instanceof Error
+              ? bankErr.message
+              : 'The assessment was approved, but the questions could not be copied to the question bank.'
+          );
+        }
+      }
+
       setTimeout(() => {
         // The review surface: questions can be edited and published from there.
         router.push(
@@ -232,6 +256,29 @@ export default function StepApprove({
             {topicCounts.length === 0 && <span className="text-xs text-[var(--color-muted)]">No topic categorization</span>}
           </div>
         </div>
+      </div>
+
+      {/* Question bank opt-in — nothing is ever saved to the bank automatically. */}
+      <div className="p-5 rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface-hover)]">
+        <h3 className="text-base font-semibold text-[var(--color-foreground)] mb-1">
+          Question Bank
+        </h3>
+        <p className="text-sm text-[var(--color-muted)] mb-3">
+          Questions are only added to your subject&apos;s question bank when you ask for it —
+          approval on its own never touches the bank.
+        </p>
+        <label className="flex items-start gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={state.saveToBank}
+            onChange={(e) => onUpdate({ saveToBank: e.target.checked })}
+            className="mt-0.5 h-4 w-4 rounded border-[var(--color-border)] text-[var(--color-primary)]"
+          />
+          <span className="text-sm text-[var(--color-foreground)]">
+            Also save these {questions.length} question{questions.length === 1 ? '' : 's'} to the
+            question bank as reusable items
+          </span>
+        </label>
       </div>
 
       {/* Scheduling — skipped for draft saves; schedule later on Deploy */}

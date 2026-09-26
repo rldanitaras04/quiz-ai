@@ -1,4 +1,4 @@
-# AI-Assisted Secure Assessment System
+# AI-Assisted Secure Examination and Assessment System
 
 ## UI/UX Constitution
 

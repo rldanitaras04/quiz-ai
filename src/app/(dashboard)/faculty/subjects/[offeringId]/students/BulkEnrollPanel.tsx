@@ -8,6 +8,8 @@ import Spinner from '@/components/ui/Spinner';
 import { notifyError, notifySuccess } from '@/components/ui/alerts';
 import { describeSummary } from '@/lib/enrollment-summary';
 import {
+  addStudentsToOffering,
+  enrollSectionStudents,
   enrollStudentsByIds,
   listSectionStudents,
   searchStudents,
@@ -49,6 +51,10 @@ export default function BulkEnrollPanel({
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [enrolling, setEnrolling] = useState(false);
+  /** Raw pasted text for the "paste student numbers" bulk-add path. */
+  const [pasted, setPasted] = useState('');
+  const [addingByNumber, setAddingByNumber] = useState(false);
+  const [enrollingSection, setEnrollingSection] = useState(false);
   const searchSeq = useRef(0);
 
   const load = useCallback(async () => {
@@ -225,6 +231,51 @@ export default function BulkEnrollPanel({
     }
   };
 
+  const handleEnrollWholeSection = async () => {
+    setEnrollingSection(true);
+    setLoadingList(true);
+    const result = await enrollSectionStudents(offeringId);
+    setEnrollingSection(false);
+
+    if (result.error) {
+      notifyError('Could not enroll section', result.error);
+      setError(result.error);
+      setLoadingList(false);
+      return;
+    }
+    if (result.summary) {
+      notifySuccess(
+        result.sectionName ? `Enrolled ${result.sectionName}` : 'Section enrolled',
+        describeSummary(result.summary)
+      );
+      await load();
+      onChanged?.();
+    }
+  };
+
+  const handleBulkAddByNumber = async () => {
+    const numbers = pasted.split(/[\s,;]+/).filter(Boolean);
+    if (numbers.length === 0) return;
+
+    setAddingByNumber(true);
+    setLoadingList(true);
+    const result = await addStudentsToOffering(offeringId, numbers);
+    setAddingByNumber(false);
+
+    if (result.error) {
+      notifyError('Could not add students', result.error);
+      setError(result.error);
+      setLoadingList(false);
+      return;
+    }
+    if (result.summary) {
+      notifySuccess('Students enrolled', describeSummary(result.summary));
+      setPasted('');
+      await load();
+      onChanged?.();
+    }
+  };
+
   return (
     <div className="space-y-5">
       <section>
@@ -236,6 +287,17 @@ export default function BulkEnrollPanel({
             ) : null}
           </h3>
           <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              loading={enrollingSection}
+              disabled={loadingList || enrollable.length === 0}
+              title="Enroll every student assigned to this section"
+              onClick={() => void handleEnrollWholeSection()}
+            >
+              Enroll whole section
+            </Button>
             <Button
               type="button"
               variant="outline"
@@ -391,6 +453,45 @@ export default function BulkEnrollPanel({
             ))}
           </ul>
         )}
+      </section>
+
+      <section className="border-t border-[var(--color-border)] pt-4">
+        <h3 className="text-sm font-semibold text-[var(--color-foreground)] mb-1">
+          Paste student numbers
+        </h3>
+        <p className="text-sm text-[var(--color-muted)] mb-3">
+          Paste a list of student numbers separated by commas, spaces, or new lines.
+          Numbers that are not found are reported without blocking the rest.
+        </p>
+
+        <div className="flex flex-col gap-1.5">
+          <label
+            htmlFor="bulk-student-numbers"
+            className="text-sm font-medium text-[var(--color-foreground)]"
+          >
+            Student numbers
+          </label>
+          <textarea
+            id="bulk-student-numbers"
+            rows={3}
+            value={pasted}
+            onChange={(e) => setPasted(e.target.value)}
+            placeholder={'2024-0001, 2024-0002\n2024-0003'}
+            disabled={addingByNumber}
+            className="w-full rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 font-mono text-sm text-[var(--color-foreground)] placeholder:text-[var(--color-muted-light)] transition-colors focus:border-[var(--color-primary)] focus:ring-2 focus:ring-[var(--color-focus-ring)] focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 resize-none"
+          />
+        </div>
+
+        <div className="mt-3 flex justify-end">
+          <Button
+            type="button"
+            loading={addingByNumber}
+            disabled={addingByNumber || pasted.trim().length === 0}
+            onClick={() => void handleBulkAddByNumber()}
+          >
+            Add student numbers
+          </Button>
+        </div>
       </section>
 
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[var(--color-border)] pt-4">

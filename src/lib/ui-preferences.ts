@@ -65,18 +65,31 @@ export function getIsDesktopServerSnapshot(): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// Color theme (light / dark)
+// Color theme (light / dark / system)
 // ---------------------------------------------------------------------------
 
 const THEME_KEY = 'mimo:theme';
 
-export type ThemePreference = 'light' | 'dark';
+/** Stored user preference. A missing/unknown key means "system". */
+export type ThemePreference = 'light' | 'dark' | 'system';
+
+/** What the theme actually resolves to once OS preference is applied. */
+export type ResolvedTheme = 'light' | 'dark';
 
 const themeListeners = new Set<() => void>();
 
-function applyThemeClass(theme: ThemePreference): void {
+/**
+ * Apply the stored preference to the document. Both signals are written:
+ * the `.dark` class (consumed by Tailwind's dark variant and the `.dark` token
+ * block) and `data-theme` (consumed by the system-dark media query, so an
+ * explicit Light choice is never overridden by a dark OS setting).
+ */
+function applyTheme(preference: ThemePreference): void {
   if (typeof document === 'undefined') return;
-  document.documentElement.classList.toggle('dark', theme === 'dark');
+  const resolved: ResolvedTheme =
+    preference === 'system' ? (systemPrefersDark() ? 'dark' : 'light') : preference;
+  document.documentElement.classList.toggle('dark', resolved === 'dark');
+  document.documentElement.dataset.theme = preference;
 }
 
 function systemPrefersDark(): boolean {
@@ -98,24 +111,46 @@ export function subscribeTheme(listener: () => void): () => void {
   };
 }
 
-/** Resolved theme: stored preference, else the OS preference. */
-export function getTheme(): ThemePreference {
-  if (typeof window === 'undefined') return 'light';
-  const stored = window.localStorage.getItem(THEME_KEY);
-  if (stored === 'dark' || stored === 'light') return stored;
-  return systemPrefersDark() ? 'dark' : 'light';
+// While the preference is "system", follow live OS changes.
+if (typeof window !== 'undefined') {
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+    if (getThemePreference() !== 'system') return;
+    applyTheme('system');
+    for (const listener of themeListeners) listener();
+  });
 }
 
-export function getThemeServerSnapshot(): ThemePreference {
+/** The stored preference: explicit light/dark, or system when unset. */
+export function getThemePreference(): ThemePreference {
+  if (typeof window === 'undefined') return 'system';
+  const stored = window.localStorage.getItem(THEME_KEY);
+  if (stored === 'dark' || stored === 'light') return stored;
+  return 'system';
+}
+
+export function getThemePreferenceServerSnapshot(): ThemePreference {
+  return 'system';
+}
+
+/** Resolved theme: the stored preference, else the OS preference. */
+export function getTheme(): ResolvedTheme {
+  if (typeof window === 'undefined') return 'light';
+  const preference = getThemePreference();
+  if (preference === 'system') return systemPrefersDark() ? 'dark' : 'light';
+  return preference;
+}
+
+export function getThemeServerSnapshot(): ResolvedTheme {
   return 'light';
 }
 
 export function setTheme(theme: ThemePreference): void {
   window.localStorage.setItem(THEME_KEY, theme);
-  applyThemeClass(theme);
+  applyTheme(theme);
   for (const listener of themeListeners) listener();
 }
 
+/** Quick light/dark flip used by the header shortcut. */
 export function toggleTheme(): void {
   setTheme(getTheme() === 'dark' ? 'light' : 'dark');
 }

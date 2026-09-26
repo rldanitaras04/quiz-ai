@@ -15,6 +15,15 @@ interface AttemptDetails {
   attempt: ExamAttempt;
   manifest: ExamManifest;
   questions: QuestionWithChoices[];
+  /** Already-synced answers, so a reload restores what the server holds. */
+  responses: StoredResponse[];
+}
+
+interface StoredResponse {
+  questionId: string;
+  selectedChoiceId: string | null;
+  textAnswer: string | null;
+  serverRevision: number;
 }
 
 /**
@@ -41,7 +50,8 @@ export async function startExamAttemptAction(
 }
 
 export async function getAttemptDetails(
-  attemptId: string
+  attemptId: string,
+  assessmentId?: string
 ): Promise<{ data?: AttemptDetails; error?: string }> {
   const supabase = await createClient();
 
@@ -72,6 +82,22 @@ export async function getAttemptDetails(
   // question content is fetched via the service-role client. Ownership was
   // already verified above; the manifest pins exactly which questions load.
   const admin = createAdminClient();
+
+  // The URL segment must belong to this attempt. Ownership alone would still
+  // let a tampered /student/assessments/{otherAssessment}/exam/{ownAttempt}
+  // render the wrong context around a real attempt.
+  if (assessmentId) {
+    const { data: dep } = await admin
+      .from('assessment_deployments')
+      .select('assessment_version:assessment_versions(assessment_id)')
+      .eq('id', attempt.deployment_id)
+      .maybeSingle();
+    const linked = dep?.assessment_version as { assessment_id?: string } | null;
+    if (linked?.assessment_id !== assessmentId) {
+      return { error: 'This attempt does not belong to that assessment' };
+    }
+  }
+
   const { data: questions, error: questionsError } = await admin
     .from('questions')
     .select('id, question_type, question_text, difficulty, bloom_level, points, position, image_url, image_storage_path, question_choices(id, choice_key, choice_text, position)')
@@ -84,11 +110,29 @@ export async function getAttemptDetails(
     .map((id: string) => questions.find((q) => q.id === id))
     .filter(Boolean) as QuestionWithChoices[];
 
+  // Previously-saved answers (RLS scopes this read to the caller's own rows).
+  // Combined with the local IndexedDB copy on the client so a reload never
+  // shows a blank paper.
+  const { data: responseRows } = await supabase
+    .from('student_responses')
+    .select('question_id, selected_choice_id, text_answer, server_revision')
+    .eq('attempt_id', attemptId);
+
+  const responses: StoredResponse[] = (responseRows ?? []).map(
+    (row: Record<string, unknown>) => ({
+      questionId: row.question_id as string,
+      selectedChoiceId: (row.selected_choice_id as string | null) ?? null,
+      textAnswer: (row.text_answer as string | null) ?? null,
+      serverRevision: Number(row.server_revision ?? 0),
+    })
+  );
+
   return {
     data: {
       attempt,
       manifest,
       questions: orderedQuestions,
+      responses,
     },
   };
 }
@@ -106,7 +150,7 @@ export async function submitExam(
 
   const { data: attempt, error: attemptError } = await supabase
     .from('exam_attempts')
-    .select('id, student_id, status, deployment_id')
+    .select('id, student_id, status, deployment_id, expires_at')
     .eq('id', attemptId)
     .maybeSingle();
 
@@ -119,12 +163,17 @@ export async function submitExam(
   const admin = createAdminClient();
   const now = new Date().toISOString();
 
+  // A submit after the server-defined window is recorded as an automatic
+  // submission, so the expiry is what the database reflects — not a manual
+  // turn-in the student was no longer entitled to make.
+  const isExpired = Boolean(attempt.expires_at && attempt.expires_at < now);
+
   // 1. Mark the attempt submitted. Status transitions are enforced by app
   //    logic here; the RLS layer blocks direct client tampering.
   const { error: submitError } = await admin
     .from('exam_attempts')
     .update({
-      status: 'submitted',
+      status: isExpired ? 'auto_submitted' : 'submitted',
       submitted_at: now,
       updated_at: now,
     })
@@ -142,7 +191,7 @@ export async function submitExam(
     action: 'submit',
     entityType: 'exam_attempt',
     entityId: attemptId,
-    metadata: { deployment_id: attempt.deployment_id },
+    metadata: { deployment_id: attempt.deployment_id, auto_submitted: isExpired },
   });
 
   // 2. Score in-process (no HTTP self-call). Failures are reported but do
@@ -267,30 +316,74 @@ export interface BreakdownResponse {
   canonicalAnswer: string | null;
 }
 
-export async function getAttemptBreakdown(
-  attemptId: string
-): Promise<{ data?: BreakdownResponse[]; error?: string }> {
-  const supabase = await createClient();
+/**
+ * Which review columns the deployment actually permits. Returned alongside the
+ * items so the client never receives a field it is not allowed to render.
+ */
+export interface BreakdownMeta {
+  showItemCorrectness: boolean;
+  showCorrectAnswers: boolean;
+}
 
-  const { data: { user }, error: authError } = await supabase.auth.getUser();
-  if (authError || !user) return { error: 'Not authenticated' };
+export type BreakdownResult = {
+  data?: BreakdownResponse[];
+  meta?: BreakdownMeta;
+  /** Machine-readable reason, e.g. `pending_release`. */
+  code?: string;
+  error?: string;
+};
+
+/**
+ * Per-attempt review gate. Every path that can surface a student's answers,
+ * per-item scores, or the answer key must go through this: it enforces
+ * ownership, submission state, and — critically — the faculty score-release
+ * setting and the deployment's `show_item_correctness` / `show_correct_answers`
+ * display flags. Hidden values are stripped before the payload is built, so
+ * unreleased or key data never reaches the browser.
+ */
+export async function loadAttemptBreakdown(
+  attemptId: string,
+  callerId: string
+): Promise<BreakdownResult> {
+  const supabase = await createClient();
 
   const { data: attempt } = await supabase
     .from('exam_attempts')
-    .select('student_id, status')
+    .select('student_id, status, deployment_id')
     .eq('id', attemptId)
     .maybeSingle();
 
-  if (!attempt) return { error: 'Attempt not found' };
-  if (attempt.student_id !== user.id) return { error: 'Forbidden' };
+  if (!attempt) return { error: 'Attempt not found', code: 'not_found' };
+  if (attempt.student_id !== callerId) return { error: 'Forbidden', code: 'forbidden' };
   if (attempt.status === 'in_progress') {
-    return { error: 'Breakdown is only available after submission' };
+    return { error: 'Breakdown is only available after submission', code: 'in_progress' };
   }
 
-  // RLS denies students SELECT on questions/answer_keys (by design), so the
-  // breakdown is fetched with the service-role client after the ownership and
-  // submission-state checks above.
+  // Score-release control is enforced here, not in the UI: a result row that
+  // has not been released by faculty exposes nothing at all.
+  const { data: result } = await supabase
+    .from('assessment_results')
+    .select('id, status')
+    .eq('attempt_id', attemptId)
+    .maybeSingle();
 
+  if (!result || result.status !== 'released') {
+    return { error: 'Result pending release', code: 'pending_release' };
+  }
+
+  const { data: deployment } = await supabase
+    .from('assessment_deployments')
+    .select('show_item_correctness, show_correct_answers')
+    .eq('id', attempt.deployment_id)
+    .maybeSingle();
+
+  const showItemCorrectness = deployment?.show_item_correctness === true;
+  const showCorrectAnswers = deployment?.show_correct_answers === true;
+  const meta: BreakdownMeta = { showItemCorrectness, showCorrectAnswers };
+
+  // RLS denies students SELECT on questions/answer_keys (by design), so the
+  // breakdown is fetched with the service-role client only after every gate
+  // above has passed.
   const admin = createAdminClient();
 
   const { data: responses } = await admin
@@ -298,17 +391,24 @@ export async function getAttemptBreakdown(
     .select('question_id, selected_choice_id, text_answer, earned_points')
     .eq('attempt_id', attemptId);
 
-  if (!responses || responses.length === 0) return { data: [] };
+  if (!responses || responses.length === 0) return { data: [], meta };
 
   const questionIds = responses.map((r) => r.question_id);
 
+  // The answer key is only selected when the deployment permits revealing it —
+  // otherwise it is never read out of the database for this caller.
   const { data: questions } = await admin
     .from('questions')
-    .select('id, question_text, question_type, points, position, image_url, question_choices(id, choice_key, choice_text), answer_key:answer_keys(correct_choice_id, canonical_answer)')
+    .select(
+      `id, question_text, question_type, points, position, image_url,
+       question_choices(id, choice_key, choice_text)${
+         showCorrectAnswers ? ', answer_key:answer_keys(correct_choice_id, canonical_answer)' : ''
+       }`
+    )
     .in('id', questionIds)
     .order('position', { ascending: true });
 
-  if (!questions) return { error: 'Failed to load breakdown' };
+  if (!questions) return { error: 'Failed to load breakdown', code: 'load_failed' };
 
   interface BreakdownQuestionRow {
     id: string;
@@ -317,30 +417,47 @@ export async function getAttemptBreakdown(
     points: number;
     position: number | null;
     image_url?: string | null;
-    question_choices:
-      | { id: string; choice_key: string; choice_text: string }[]
-      | null;
-    answer_key: { correct_choice_id: string | null; canonical_answer: string | null } | null;
+    question_choices: { id: string; choice_key: string; choice_text: string }[] | null;
+    answer_key?: { correct_choice_id: string | null; canonical_answer: string | null } | null;
   }
 
-  const data: BreakdownResponse[] = (questions as unknown as BreakdownQuestionRow[]).map((q) => ({
-    questionId: q.id,
-    position: q.position,
-    questionText: q.question_text,
-    questionType: q.question_type,
-    points: q.points,
-    imageUrl: q.image_url ?? null,
-    selectedChoiceId: responses.find((r) => r.question_id === q.id)?.selected_choice_id ?? null,
-    textAnswer: responses.find((r) => r.question_id === q.id)?.text_answer ?? null,
-    earnedPoints: responses.find((r) => r.question_id === q.id)?.earned_points ?? null,
-    choices: (q.question_choices ?? []).map((c) => ({
-      id: c.id,
-      choice_key: c.choice_key,
-      choice_text: c.choice_text,
-    })),
-    correctChoiceId: q.answer_key?.correct_choice_id ?? null,
-    canonicalAnswer: q.answer_key?.canonical_answer ?? null,
-  }));
+  const data: BreakdownResponse[] = (questions as unknown as BreakdownQuestionRow[]).map((q) => {
+    const response = responses.find((r) => r.question_id === q.id);
+    return {
+      questionId: q.id,
+      position: q.position,
+      questionText: q.question_text,
+      questionType: q.question_type,
+      points: q.points,
+      imageUrl: q.image_url ?? null,
+      selectedChoiceId: response?.selected_choice_id ?? null,
+      textAnswer: response?.text_answer ?? null,
+      earnedPoints: showItemCorrectness ? (response?.earned_points ?? null) : null,
+      choices: (q.question_choices ?? []).map((c) => ({
+        id: c.id,
+        choice_key: c.choice_key,
+        choice_text: c.choice_text,
+      })),
+      correctChoiceId: showCorrectAnswers ? (q.answer_key?.correct_choice_id ?? null) : null,
+      canonicalAnswer: showCorrectAnswers ? (q.answer_key?.canonical_answer ?? null) : null,
+    };
+  });
 
-  return { data };
+  return { data, meta };
+}
+
+/**
+ * Callable wrapper kept for the exam results screen. Delegates to
+ * `loadAttemptBreakdown` so no second authorization path exists.
+ */
+export async function getAttemptBreakdown(attemptId: string): Promise<BreakdownResult> {
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser();
+  if (authError || !user) return { error: 'Not authenticated', code: 'unauthenticated' };
+
+  return loadAttemptBreakdown(attemptId, user.id);
 }

@@ -8,6 +8,8 @@ import Select from '@/components/ui/Select';
 import Badge from '@/components/ui/Badge';
 import EmptyState from '@/components/ui/EmptyState';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
+import { Table, THead, TBody, TR, TH, TD } from '@/components/ui/Table';
+import Pagination from '@/components/ui/Pagination';
 import { confirmAction, notifyError, notifySuccess } from '@/components/ui/alerts';
 import { ROLE_LABELS } from '@/lib/constants';
 import type { UserRole } from '@/lib/types';
@@ -29,6 +31,8 @@ const roleVariant: Record<string, 'info' | 'default' | 'outline'> = {
 
 const ASSIGNABLE_ROLES = ['super_admin', 'faculty', 'student'] as const;
 
+const PAGE_SIZE = 25;
+
 interface SectionChoice {
   id: string;
   label: string;
@@ -40,15 +44,19 @@ interface UsersManagerProps {
   currentUserId: string;
   /** Labeled academic-section choices for the per-student Section column. */
   sections: SectionChoice[];
+  /** Table heading — defaults to "All Users"; role views pass their own. */
+  title?: string;
 }
 
 export default function UsersManager({
   users,
   currentUserId,
   sections,
+  title = 'All Users',
 }: UsersManagerProps): JSX.Element {
   const router = useRouter();
   const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
 
   const query = search.toLowerCase();
   const filtered = query
@@ -60,13 +68,21 @@ export default function UsersManager({
       )
     : users;
 
+  // Clamp so deleting/acting on the last row of the final page never shows a blank page.
+  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const safePage = Math.min(page, pageCount);
+  const paged = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+
   return (
     <>
       <div className="mb-4">
         <Input
           placeholder="Search by name, email, or role…"
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e) => {
+            setSearch(e.target.value);
+            setPage(1);
+          }}
           className="max-w-md"
         />
       </div>
@@ -74,7 +90,7 @@ export default function UsersManager({
       <Card>
         <CardHeader>
           <h2 className="text-lg font-semibold text-[var(--color-foreground)]">
-            All Users ({filtered.length})
+            {title} ({filtered.length})
           </h2>
         </CardHeader>
         <CardContent>
@@ -86,21 +102,21 @@ export default function UsersManager({
               }
             />
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-[var(--color-border)]">
-                    <th className="text-left py-3 px-4 font-medium text-[var(--color-muted)]">Name</th>
-                    <th className="text-left py-3 px-4 font-medium text-[var(--color-muted)]">Email</th>
-                    <th className="text-left py-3 px-4 font-medium text-[var(--color-muted)]">Roles</th>
-                    <th className="text-left py-3 px-4 font-medium text-[var(--color-muted)]">Section</th>
-                    <th className="text-left py-3 px-4 font-medium text-[var(--color-muted)]">Status</th>
-                    <th className="text-left py-3 px-4 font-medium text-[var(--color-muted)]">Verification</th>
-                    <th className="text-left py-3 px-4 font-medium text-[var(--color-muted)]">Joined</th>
-                  </tr>
-                </thead>
-                <tbody>
-                      {filtered.map((user) => (
+            <>
+              <Table cards caption={title}>
+                <THead>
+                  <TR>
+                    <TH>Name</TH>
+                    <TH>Email</TH>
+                    <TH>Roles</TH>
+                    <TH>Section</TH>
+                    <TH>Status</TH>
+                    <TH>Verification</TH>
+                    <TH>Joined</TH>
+                  </TR>
+                </THead>
+                <TBody>
+                  {paged.map((user) => (
                     <UserRow
                       key={user.id}
                       user={user}
@@ -109,9 +125,15 @@ export default function UsersManager({
                       onChanged={() => router.refresh()}
                     />
                   ))}
-                </tbody>
-              </table>
-            </div>
+                </TBody>
+              </Table>
+              <Pagination
+                page={safePage}
+                pageSize={PAGE_SIZE}
+                total={filtered.length}
+                onPageChange={setPage}
+              />
+            </>
           )}
         </CardContent>
       </Card>
@@ -140,17 +162,17 @@ function UserRow({
   );
 
   return (
-    <tr className="border-b border-[var(--color-border)] last:border-0 align-top hover:bg-[var(--color-surface-hover)]">
-      <td className="py-3 px-4 font-medium text-[var(--color-foreground)]">
+    <TR className="align-top hover:bg-[var(--color-surface-hover)]">
+      <TD primary label="Name" className="font-medium text-[var(--color-foreground)]">
         {user.fullName}
         {isSelf && <span className="ml-2 text-xs text-[var(--color-muted)]">(you)</span>}
         {user.studentNumber && (
           <span className="block text-xs text-[var(--color-muted)]">{user.studentNumber}</span>
         )}
-      </td>
-      <td className="py-3 px-4 text-[var(--color-muted)]">{user.email}</td>
+      </TD>
+      <TD label="Email" className="text-[var(--color-muted)]">{user.email}</TD>
 
-      <td className="py-3 px-4">
+      <TD label="Roles">
         <div className="flex flex-wrap items-center gap-1">
           {user.roles.length === 0 && (
             <span className="text-xs text-[var(--color-muted)]">No roles</span>
@@ -206,9 +228,9 @@ function UserRow({
             </Select>
           )}
         </div>
-      </td>
+      </TD>
 
-      <td className="py-3 px-4">
+      <TD label="Section">
         {isStudent ? (
           <Select
             aria-label="Academic section"
@@ -240,9 +262,9 @@ function UserRow({
         ) : (
           <span className="text-xs text-[var(--color-muted)]">—</span>
         )}
-      </td>
+      </TD>
 
-      <td className="py-3 px-4">
+      <TD label="Status">
         <div className="flex flex-col gap-1">
           <Badge variant={statusVariant[user.status] ?? 'default'}>{user.status}</Badge>
           <div className="flex items-center gap-1">
@@ -272,9 +294,9 @@ function UserRow({
             )}
           </div>
         </div>
-      </td>
+      </TD>
 
-      <td className="py-3 px-4">
+      <TD label="Verification">
         {isStudent ? (
           <Select
             aria-label="Identity verification"
@@ -300,12 +322,12 @@ function UserRow({
         ) : (
           <span className="text-xs text-[var(--color-muted)]">—</span>
         )}
-      </td>
+      </TD>
 
-      <td className="py-3 px-4 text-[var(--color-muted)]">
+      <TD label="Joined" hideOnMobile className="text-[var(--color-muted)]">
         {user.createdAt ? new Date(user.createdAt).toLocaleDateString() : '—'}
-      </td>
-    </tr>
+      </TD>
+    </TR>
   );
 }
 

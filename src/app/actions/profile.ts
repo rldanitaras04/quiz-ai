@@ -42,8 +42,11 @@ export async function updateProfile(
 
 /**
  * Upload an avatar image for the logged-in user to
- * `quiz-ai-bucket/avatar/<user_id>.<ext>` and record the path on the profile.
- * The bucket is public, so the client reads it by path directly.
+ * `quiz-ai-bucket/avatar/<user_id>/avatar.<ext>` and record the path on the
+ * profile. The bucket is public, so the client reads it by path directly.
+ * The `avatar/<uid>/` folder layout is required by the storage RLS policies,
+ * which match on (storage.foldername(name))[2] = auth.uid() — foldername()
+ * returns only folder segments, so the uid must be a folder, not a filename.
  */
 export async function uploadAvatar(
   file: File
@@ -66,7 +69,7 @@ export async function uploadAvatar(
       : file.type === 'image/gif'
         ? 'gif'
         : 'jpg';
-  const path = `${AVATAR_FOLDER}/${user.id}.${ext}`;
+  const path = `${AVATAR_FOLDER}/${user.id}/avatar.${ext}`;
 
   const { error: uploadError } = await supabase.storage
     .from(AVATAR_BUCKET)

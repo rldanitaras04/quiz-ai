@@ -21,14 +21,20 @@ export function Table({
   children,
   className = '',
   caption,
+  cards = false,
 }: {
   children: ReactNode;
   className?: string;
   /** Visually hidden description of the table's contents, for screen readers. */
   caption?: string;
+  /**
+   * Below `lg`, each row renders as a card (labelled by `TD` `label` props)
+   * instead of a horizontally scrollable grid. Desktop is unaffected.
+   */
+  cards?: boolean;
 }): JSX.Element {
   return (
-    <div className="overflow-x-auto">
+    <div className={`overflow-x-auto ${cards ? 'table-cards' : ''}`}>
       <table className={`w-full text-sm ${className}`}>
         {caption && <caption className="sr-only">{caption}</caption>}
         {children}
@@ -86,6 +92,9 @@ export function TD({
   numeric = false,
   className = '',
   colSpan,
+  label,
+  primary = false,
+  hideOnMobile = false,
 }: {
   children?: ReactNode;
   align?: Align;
@@ -93,11 +102,20 @@ export function TD({
   numeric?: boolean;
   className?: string;
   colSpan?: number;
+  /** Field name shown beside the value when the table renders as mobile cards. */
+  label?: string;
+  /** Card title treatment in mobile card mode (drops the label). */
+  primary?: boolean;
+  /** Drop this column entirely when the table renders as mobile cards. */
+  hideOnMobile?: boolean;
 }): JSX.Element {
   return (
     <td
       colSpan={colSpan}
-      className={`px-4 py-3 ${numeric ? 'text-right tabular-nums' : ALIGN[align]} ${className}`}
+      data-label={label}
+      className={`px-4 py-3 ${numeric ? 'text-right tabular-nums' : ALIGN[align]} ${className} ${
+        primary ? 'td-primary' : ''
+      } ${hideOnMobile ? 'td-hide-mobile' : ''}`}
     >
       {children}
     </td>

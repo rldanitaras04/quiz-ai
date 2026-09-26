@@ -1,10 +1,8 @@
 'use client';
 
 import { useState, useEffect, useRef, useSyncExternalStore, type JSX } from 'react';
-import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { useSupabase } from '@/lib/hooks';
-import { signOut } from '@/app/actions/auth';
+import { useSignOut } from '@/lib/hooks';
 import type { UserRole } from '@/lib/types';
 import { ROLE_LABELS } from '@/lib/constants';
 import {
@@ -53,10 +51,8 @@ export default function TopBar({
   navExpanded,
   notificationCount,
 }: TopBarProps): JSX.Element {
-  const router = useRouter();
-  const supabase = useSupabase();
+  const { signOut, signingOut: loggingOut } = useSignOut();
   const [menuOpen, setMenuOpen] = useState(false);
-  const [loggingOut, setLoggingOut] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const theme = useSyncExternalStore(subscribeTheme, getTheme, getThemeServerSnapshot);
   const isDark = theme === 'dark';
@@ -91,16 +87,7 @@ export default function TopBar({
 
   const handleLogout = async () => {
     setMenuOpen(false);
-    setLoggingOut(true);
-    try {
-      await signOut();
-      await supabase.auth.signOut();
-      // Land on the public homepage after logout (not /login).
-      router.push('/');
-      router.refresh();
-    } finally {
-      setLoggingOut(false);
-    }
+    await signOut();
   };
 
   return (
@@ -116,12 +103,16 @@ export default function TopBar({
         <List className="h-6 w-6" weight="regular" />
       </button>
 
-      <div className="flex items-center gap-2 min-w-0 mr-3 lg:hidden">
-        <BrandIcon className="h-6 w-6" alt={APP_NAME} />
-        <h1 className="text-lg font-semibold text-[var(--color-foreground)] truncate">{title}</h1>
-      </div>
+      {title && (
+        <div className="flex items-center gap-2 min-w-0 mr-3 lg:hidden">
+          <BrandIcon className="h-6 w-6" alt={APP_NAME} />
+          <h1 className="text-lg font-semibold text-[var(--color-foreground)] truncate">{title}</h1>
+        </div>
+      )}
 
-      <h1 className="hidden lg:block text-lg font-semibold text-[var(--color-foreground)] truncate">{title}</h1>
+      {title && (
+        <h1 className="hidden lg:block text-lg font-semibold text-[var(--color-foreground)] truncate">{title}</h1>
+      )}
 
       <div className="ml-auto flex items-center">
         {/* Notifications bell with badge */}

@@ -1,7 +1,9 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
+import { signOut as signOutAction } from '@/app/actions/auth';
 import type { Profile, UserRoleRow } from '@/lib/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
@@ -12,6 +14,30 @@ export function useSupabase(): SupabaseClient {
     supabaseInstance = createClient();
   }
   return supabaseInstance;
+}
+
+/**
+ * Shared sign-out flow for chrome components (top bar, sidebar footer):
+ * clears the server session, signs out of Supabase, and returns home.
+ */
+export function useSignOut(): { signOut: () => Promise<void>; signingOut: boolean } {
+  const router = useRouter();
+  const supabase = useSupabase();
+  const [signingOut, setSigningOut] = useState(false);
+
+  const execute = useCallback(async () => {
+    setSigningOut(true);
+    try {
+      await signOutAction();
+      await supabase.auth.signOut();
+      router.push('/');
+      router.refresh();
+    } finally {
+      setSigningOut(false);
+    }
+  }, [router, supabase]);
+
+  return { signOut: execute, signingOut };
 }
 
 interface UserProfile {

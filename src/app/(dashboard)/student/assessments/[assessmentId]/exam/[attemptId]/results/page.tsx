@@ -67,26 +67,31 @@ export default async function ExamResultsPage({ params }: Props) {
   };
   const showRawScore = d.show_raw_score !== false;
   const showPercentage = d.show_percentage !== false;
-  // Review always shows after submit so students can study their attempt.
-  // Green/red reflects their own answers (not the answer key).
-  const showCorrectAnswers = d.show_correct_answers === true;
   const assessment = d?.assessment_version?.assessment;
   const version = d?.assessment_version;
 
   // Scores are only visible when released (immediate mode releases on submit).
   const scoreVisible = !!result && result.status === 'released';
+  const resultPending = !scoreVisible && (attempt.status === 'submitted' || attempt.status === 'auto_submitted' || attempt.status === 'expired');
 
-  // Breakdown (questions + answer keys) is fetched via a server action using
-  // the service-role client; students have no direct SELECT on questions.
-  let responses: Awaited<ReturnType<typeof getAttemptBreakdown>>['data'] = [];
   const canReview =
     attempt.status === 'submitted' ||
     attempt.status === 'auto_submitted' ||
     attempt.status === 'expired';
-  if (canReview) {
+
+  // The server action re-checks ownership, submission state, the faculty
+  // score-release setting and the deployment display flags, then strips every
+  // field this student may not see — so nothing hidden reaches the browser.
+  let responses: Awaited<ReturnType<typeof getAttemptBreakdown>>['data'] = [];
+  let reviewMeta: { showItemCorrectness: boolean; showCorrectAnswers: boolean } | undefined;
+  if (canReview && scoreVisible) {
     const breakdown = await getAttemptBreakdown(attemptId);
     responses = breakdown.data ?? [];
+    reviewMeta = breakdown.meta;
   }
+
+  const showItemCorrectness = reviewMeta?.showItemCorrectness ?? false;
+  const showCorrectAnswers = reviewMeta?.showCorrectAnswers ?? false;
 
   const startTime = new Date(attempt.started_at);
   const endTime = attempt.submitted_at ? new Date(attempt.submitted_at) : new Date();
@@ -152,12 +157,28 @@ export default async function ExamResultsPage({ params }: Props) {
             </Card>
           </div>
 
+          {resultPending && (
+            <Card>
+              <CardContent>
+                <div className="flex flex-col items-center gap-2 py-6 text-center">
+                  <Badge variant="warning">Result Pending Release</Badge>
+                  <p className="max-w-md text-sm text-[var(--color-muted)]">
+                    Your instructor has not released this result yet. Your score and answer
+                    review will appear here once it is released.
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
           {responses.length > 0 && (
             <Card>
               <CardHeader>
                 <h2 className="text-lg font-semibold">Question Review</h2>
                 <p className="text-sm text-[var(--color-muted)]">
-                  Your answers for this attempt. Correct items are green; incorrect are red.
+                  {showItemCorrectness
+                    ? 'Your answers for this attempt. Correct items are green; incorrect are red.'
+                    : 'Your answers for this attempt.'}
                 </p>
               </CardHeader>
               <CardContent className="p-0">
@@ -168,7 +189,7 @@ export default async function ExamResultsPage({ params }: Props) {
                       <TH>Question</TH>
                       <TH>Your answer</TH>
                       {showCorrectAnswers && <TH>Correct answer</TH>}
-                      <TH>Result</TH>
+                      {showItemCorrectness && <TH>Result</TH>}
                       <TH align="right">Points</TH>
                     </TR>
                   </THead>
@@ -229,17 +250,21 @@ export default async function ExamResultsPage({ params }: Props) {
                               {correctAnswer ?? '—'}
                             </TD>
                           )}
-                          <TD>
-                            {!scored ? (
-                              <Badge variant="default">—</Badge>
-                            ) : (
-                              <Badge variant={isCorrect ? 'success' : 'danger'}>
-                                {isCorrect ? 'Correct' : 'Incorrect'}
-                              </Badge>
-                            )}
-                          </TD>
+                          {showItemCorrectness && (
+                            <TD>
+                              {!scored ? (
+                                <Badge variant="default">—</Badge>
+                              ) : (
+                                <Badge variant={isCorrect ? 'success' : 'danger'}>
+                                  {isCorrect ? 'Correct' : 'Incorrect'}
+                                </Badge>
+                              )}
+                            </TD>
+                          )}
                           <TD numeric className="font-medium text-[var(--color-foreground)]">
-                            {r.earnedPoints ?? 0}/{r.points}
+                            {showItemCorrectness && scored
+                              ? `${r.earnedPoints ?? 0}/${r.points}`
+                              : r.points}
                           </TD>
                         </TR>
                       );

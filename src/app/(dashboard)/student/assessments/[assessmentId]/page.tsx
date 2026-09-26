@@ -8,6 +8,11 @@ import Link from 'next/link';
 import StartExamButton from './StartExamButton';
 import { ATTEMPT_STATUS_LABELS } from '@/lib/constants';
 import { countUsedAttempts } from '@/lib/attempt-limit';
+import {
+  applyAssessmentExceptions,
+  type EffectiveDeploymentWindow,
+} from '@/lib/assessment-exceptions';
+import type { AssessmentException } from '@/lib/types';
 
 interface Props {
   params: Promise<{ assessmentId: string }>;
@@ -112,27 +117,68 @@ export default async function AssessmentDetailPage({ params }: Props) {
   (results ?? []).forEach((r: Record<string, unknown>) => resultsByAttempt.set(r.attempt_id as string, r));
 
   const now = new Date();
-  // A deployment is startable when its time window is open — 'scheduled'
-  // deployments never transition to 'active' (no scheduler exists), so the
-  // time window, not the status column, is the source of truth here.
+
+  // The caller's own faculty-granted exceptions (RLS scopes the read), merged
+  // into an effective window per deployment by the same helper the server-side
+  // exam start uses — so an approved schedule override or extra attempt both
+  // unlocks the button here and authorizes at the API.
+  const { data: exceptionRows } = deploymentIds.length > 0
+    ? await supabase
+      .from('assessment_exceptions')
+      .select('*')
+      .in('deployment_id', deploymentIds)
+      .eq('student_id', user.id)
+    : { data: [] };
+
+  const exceptionsByDeployment = new Map<string, AssessmentException[]>();
+  for (const ex of (exceptionRows ?? []) as AssessmentException[]) {
+    const list = exceptionsByDeployment.get(ex.deployment_id) ?? [];
+    list.push(ex);
+    exceptionsByDeployment.set(ex.deployment_id, list);
+  }
+
+  const effectiveByDeployment = new Map<string, EffectiveDeploymentWindow>();
+  for (const d of (deployments ?? []) as Array<Record<string, unknown>>) {
+    effectiveByDeployment.set(
+      d.id as string,
+      applyAssessmentExceptions(
+        {
+          opens_at: d.opens_at as string,
+          closes_at: d.closes_at as string,
+          duration_minutes: d.duration_minutes as number,
+          attempt_limit: d.attempt_limit as number,
+        },
+        exceptionsByDeployment.get(d.id as string) ?? [],
+        now
+      )
+    );
+  }
+
+  const effectiveFor = (deploymentId: string): EffectiveDeploymentWindow | undefined =>
+    effectiveByDeployment.get(deploymentId);
+
+  // A deployment is startable when its effective time window is open —
+  // 'scheduled' deployments never transition to 'active' (no scheduler exists),
+  // so the time window, not the status column, is the source of truth here.
   const activeDeployment = (deployments ?? []).find((d: Record<string, unknown>) => {
-    const opensAt = new Date(d.opens_at as string);
-    const closesAt = new Date(d.closes_at as string);
+    const effective = effectiveFor(d.id as string);
+    if (!effective) return false;
     const studentAttempts = (attempts ?? []).filter((a: Record<string, unknown>) => a.deployment_id === d.id);
     const usedCount = countUsedAttempts(studentAttempts);
     const hasInProgress = studentAttempts.some((a) => a.status === 'in_progress');
     return (
-      now >= opensAt &&
-      now <= closesAt &&
+      now >= effective.opensAt &&
+      now <= effective.closesAt &&
       !hasInProgress &&
-      usedCount < (d.attempt_limit as number)
+      usedCount < effective.attemptLimit
     );
   });
 
   const resumableDeployment = (deployments ?? []).find((d: Record<string, unknown>) => {
-    const closesAt = new Date(d.closes_at as string);
+    const effective = effectiveFor(d.id as string);
+    if (!effective) return false;
     return (attempts ?? []).some((a: Record<string, unknown>) =>
-      a.deployment_id === d.id && a.status === 'in_progress') && now <= closesAt;
+      a.deployment_id === d.id && a.status === 'in_progress') && now <= effective.closesAt;
   });
 
   const resumeAttemptId = resumableDeployment
@@ -194,8 +240,9 @@ export default async function AssessmentDetailPage({ params }: Props) {
               <CardContent className="space-y-4">
                 {deployments.map((d: Record<string, unknown>) => {
                   const version = d.assessment_version as Record<string, unknown> | undefined;
-                  const opensAt = new Date(d.opens_at as string);
-                  const closesAt = new Date(d.closes_at as string);
+                  const effective = effectiveFor(d.id as string);
+                  const opensAt = effective?.opensAt ?? new Date(d.opens_at as string);
+                  const closesAt = effective?.closesAt ?? new Date(d.closes_at as string);
                   const isPast = now > closesAt;
                   // The time window — not the status column — decides whether a
                   // deployment is open: nothing transitions 'scheduled' to
@@ -204,19 +251,24 @@ export default async function AssessmentDetailPage({ params }: Props) {
 
                   return (
                     <div key={d.id as string} className="p-3 rounded-lg border border-[var(--color-border)] space-y-2">
-                      <div className="flex items-center justify-between">
+                      <div className="flex items-center justify-between gap-2">
                         <span className="font-medium text-sm">
-                          Version {version?.version_number as number} \u00B7 {version?.total_items as number} items \u00B7 {version?.total_points as number} pts
+                          Version {version?.version_number as number} · {version?.total_items as number} items · {version?.total_points as number} pts
                         </span>
-                        <Badge variant={isOpen ? 'success' : isPast ? 'default' : 'info'}>
-                          {isOpen ? 'Open' : isPast ? 'Closed' : 'Scheduled'}
-                        </Badge>
+                        <div className="flex items-center gap-1.5">
+                          {effective?.hasException && (
+                            <Badge variant="info">Exception granted</Badge>
+                          )}
+                          <Badge variant={isOpen ? 'success' : isPast ? 'default' : 'info'}>
+                            {isOpen ? 'Open' : isPast ? 'Closed' : 'Scheduled'}
+                          </Badge>
+                        </div>
                       </div>
                       <p className="text-xs text-[var(--color-muted)]">
                         {opensAt.toLocaleDateString()} {opensAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                         {' \u2014 '}
                         {closesAt.toLocaleDateString()} {closesAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        {` \u00B7 ${d.duration_minutes} min`}
+                        {` \u00B7 ${effective?.durationMinutes ?? (d.duration_minutes as number)} min`}
                       </p>
                     </div>
                   );
@@ -270,11 +322,25 @@ export default async function AssessmentDetailPage({ params }: Props) {
                 <div className="space-y-2 text-sm">
                   <div className="flex justify-between">
                     <span className="text-[var(--color-muted)]">Duration</span>
-                    <span className="font-medium">{(activeDeployment ?? resumableDeployment)?.duration_minutes as number} min</span>
+                    <span className="font-medium">
+                      {(activeDeployment ?? resumableDeployment) &&
+                        `${
+                          effectiveFor((activeDeployment ?? resumableDeployment)!.id as string)
+                            ?.durationMinutes ??
+                          ((activeDeployment ?? resumableDeployment)!.duration_minutes as number)
+                        } min`}
+                    </span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-[var(--color-muted)]">Attempts</span>
-                    <span className="font-medium">{(activeDeployment ?? resumableDeployment)?.attempt_limit as number}</span>
+                    <span className="font-medium">
+                      {(activeDeployment ?? resumableDeployment) &&
+                        `${
+                          effectiveFor((activeDeployment ?? resumableDeployment)!.id as string)
+                            ?.attemptLimit ??
+                          ((activeDeployment ?? resumableDeployment)!.attempt_limit as number)
+                        }`}
+                    </span>
                   </div>
                 </div>
                 {resumableDeployment && resumeAttemptId ? (

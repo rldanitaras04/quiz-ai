@@ -1,4 +1,4 @@
-# AI-Assisted Secure Assessment and Examination Management System
+# AI-Assisted Secure Examination and Assessment Management System
 
 ## Features and Scope of Work
 

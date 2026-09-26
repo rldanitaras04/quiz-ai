@@ -5,7 +5,7 @@ import Button from '@/components/ui/Button';
 import Badge from '@/components/ui/Badge';
 import Spinner from '@/components/ui/Spinner';
 import { notifyError, notifySuccess } from '@/components/ui/alerts';
-import { getQuestionBank } from '@/app/(dashboard)/faculty/subjects/[offeringId]/question-bank/actions';
+import { getQuestionBank, touchBankItems } from '@/app/(dashboard)/faculty/subjects/[offeringId]/question-bank/actions';
 import type { QuestionBankItem, Topic, DraftQuestion, QuestionType, Difficulty } from '@/lib/types';
 
 interface Props {
@@ -139,14 +139,20 @@ export default function StepQuestionBank({ offeringId, topics, onImport, existin
     });
   };
 
-  const handleImport = () => {
-    const chosen = items.filter(i => selected.has(i.id));
+  const handleImport = async () => {
+    // Preserve the on-screen topic-grouped order (the server list is newest-first).
+    const chosen = grouped.flatMap((g) => g.items.filter((i) => selected.has(i.id)));
     if (chosen.length === 0) {
       notifyError('Nothing selected', 'Pick at least one item to import.');
       return;
     }
     const drafts = chosen.map((b, idx) => mapBankToDraft(b, existingCount + idx + 1));
     onImport(drafts);
+    try {
+      await touchBankItems(offeringId, chosen.map((c) => c.id));
+    } catch {
+      // Usage stats are best-effort — the import itself already succeeded.
+    }
     notifySuccess('Imported from bank', `${drafts.length} question${drafts.length === 1 ? '' : 's'} added to your draft.`);
     setSelected(new Set());
   };

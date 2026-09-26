@@ -179,6 +179,18 @@ export default async function FacultySubjectsPage() {
                         <TD className="whitespace-nowrap text-right">
                           <div className="flex items-center justify-end gap-3">
                             <Link
+                              href={`/faculty/subjects/${offering.offeringId}/students`}
+                              className="text-sm font-medium text-[var(--color-primary)] hover:underline"
+                            >
+                              Students
+                            </Link>
+                            <Link
+                              href={`/faculty/subjects/${offering.offeringId}/results`}
+                              className="text-sm font-medium text-[var(--color-primary)] hover:underline"
+                            >
+                              Results
+                            </Link>
+                            <Link
                               href={`/faculty/subjects/${offering.offeringId}`}
                               className="text-sm font-medium text-[var(--color-primary)] hover:underline"
                             >

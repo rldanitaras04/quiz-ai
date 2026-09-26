@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useState, useCallback, type JSX, type ReactNode, type Context } from 'react';
+import { createContext, useContext, useState, useCallback, type JSX, type ReactNode } from 'react';
 import type { NavigationItem } from '@/config/navigation';
 
 interface NavigationContextValue {

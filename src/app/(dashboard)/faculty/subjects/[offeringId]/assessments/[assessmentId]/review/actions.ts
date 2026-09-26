@@ -48,9 +48,7 @@ export async function getIdentificationResponsesNeedingReview(
     return { data: null, error: 'Not authorized' };
   }
 
-  const admin = createAdminClient();
-
-  const { data: versions } = await admin
+  const { data: versions } = await supabase
     .from('assessment_versions')
     .select('id')
     .eq('assessment_id', assessmentId);
@@ -58,7 +56,7 @@ export async function getIdentificationResponsesNeedingReview(
   const versionIds = (versions ?? []).map(v => v.id);
   if (versionIds.length === 0) return { data: [] };
 
-  const { data: questions } = await admin
+  const { data: questions } = await supabase
     .from('questions')
     .select('id, question_text, points')
     .in('assessment_version_id', versionIds)
@@ -67,14 +65,14 @@ export async function getIdentificationResponsesNeedingReview(
   const questionIds = (questions ?? []).map(q => q.id);
   if (questionIds.length === 0) return { data: [] };
 
-  const { data: answerKeys } = await admin
+  const { data: answerKeys } = await supabase
     .from('answer_keys')
     .select('question_id, canonical_answer, accepted_answers')
     .in('question_id', questionIds);
 
   const answerKeyMap = new Map((answerKeys ?? []).map(ak => [ak.question_id, ak]));
 
-  const { data: responses } = await admin
+  const { data: responses } = await supabase
     .from('student_responses')
     .select('id, attempt_id, question_id, text_answer, normalized_answer, earned_points, scoring_status')
     .in('question_id', questionIds)
@@ -84,7 +82,7 @@ export async function getIdentificationResponsesNeedingReview(
   if (!responses || responses.length === 0) return { data: [] };
 
   const attemptIds = [...new Set(responses.map(r => r.attempt_id))];
-  const { data: attempts } = await admin
+  const { data: attempts } = await supabase
     .from('exam_attempts')
     .select('id, student_id, status')
     .in('id', attemptIds);
@@ -92,7 +90,7 @@ export async function getIdentificationResponsesNeedingReview(
   const attemptMap = new Map((attempts ?? []).map(a => [a.id, a]));
 
   const studentIds = [...new Set((attempts ?? []).map(a => a.student_id))];
-  const { data: profiles } = await admin
+  const { data: profiles } = await supabase
     .from('profiles')
     .select('id, full_name, email')
     .in('id', studentIds);
@@ -140,7 +138,7 @@ export async function scoreIdentificationResponse(
   const { supabase, userId } = await requireUser();
   const admin = createAdminClient();
 
-  const { data: response } = await admin
+  const { data: response } = await supabase
     .from('student_responses')
     .select('id, attempt_id, question_id')
     .eq('id', responseId)
@@ -148,7 +146,7 @@ export async function scoreIdentificationResponse(
 
   if (!response) return { success: false, error: 'Response not found' };
 
-  const { data: attempt } = await admin
+  const { data: attempt } = await supabase
     .from('exam_attempts')
     .select('deployment_id')
     .eq('id', response.attempt_id)
@@ -156,7 +154,7 @@ export async function scoreIdentificationResponse(
 
   if (!attempt) return { success: false, error: 'Attempt not found' };
 
-  const { data: deployment } = await admin
+  const { data: deployment } = await supabase
     .from('assessment_deployments')
     .select('subject_offering_id')
     .eq('id', attempt.deployment_id)
@@ -167,7 +165,7 @@ export async function scoreIdentificationResponse(
     return { success: false, error: 'Not authorized' };
   }
 
-  const { data: question } = await admin
+  const { data: question } = await supabase
     .from('questions')
     .select('points')
     .eq('id', response.question_id)

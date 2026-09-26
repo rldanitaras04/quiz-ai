@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 // Imported before globals.css so the design-token overrides there win over
 // SweetAlert2's own defaults.
@@ -18,12 +18,29 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "SEAMS AI — AI-Assisted Assessment",
-  description: "AI-Assisted Secure Assessment System",
-  icons: {
-    icon: "/seams_ai_ico.png",
-    shortcut: "/seams_ai_ico.png",
-    apple: "/seams_ai_ico.png",
+  description: "AI-Assisted Secure Examination and Assessment System",
+  manifest: "/manifest.webmanifest",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "SEAMS AI",
   },
+  icons: {
+    icon: "/icons/icon-192.png",
+    shortcut: "/seams_ai_ico.png",
+    apple: "/icons/icon-192.png",
+  },
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+  colorScheme: "light dark",
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#f8fafc" },
+    { media: "(prefers-color-scheme: dark)", color: "#0f172a" },
+  ],
 };
 
 export default function RootLayout({ children }: { children: ReactNode }): JSX.Element {
@@ -34,10 +51,12 @@ export default function RootLayout({ children }: { children: ReactNode }): JSX.E
       suppressHydrationWarning
     >
       <head>
-        {/* Apply the stored (or system) theme before first paint to avoid a flash. */}
+        {/* Apply the stored (or system) theme before first paint to avoid a flash.
+            `data-theme` records the raw preference so an explicit Light choice is
+            never overridden by a dark OS setting. */}
         <script
           dangerouslySetInnerHTML={{
-            __html: `(function(){try{var t=localStorage.getItem('mimo:theme');var dark=t==='dark'||(t!=='light'&&window.matchMedia('(prefers-color-scheme: dark)').matches);document.documentElement.classList.toggle('dark',dark);}catch(e){}})();`,
+            __html: `(function(){try{var t=localStorage.getItem('mimo:theme');if(t!=='light'&&t!=='dark'){t='system';}var dark=t==='dark'||(t==='system'&&window.matchMedia('(prefers-color-scheme: dark)').matches);document.documentElement.classList.toggle('dark',dark);document.documentElement.dataset.theme=t;}catch(e){}})();`,
           }}
         />
       </head>

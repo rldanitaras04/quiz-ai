@@ -565,14 +565,14 @@ const { data: deployment } = await supabase
     // Backfill missing result rows: submit used to fail inserting `percentage`
     // (a GENERATED column), so some attempts are submitted with responses
     // scored but no assessment_results row — Release then had nothing to publish.
-    const { data: submittedAttempts } = await admin
+    const { data: submittedAttempts } = await supabase
       .from('exam_attempts')
       .select('id, student_id, status')
       .eq('deployment_id', deploymentId)
       .in('status', ['submitted', 'auto_submitted']);
 
     for (const attempt of submittedAttempts ?? []) {
-      const { data: existing } = await admin
+      const { data: existing } = await supabase
         .from('assessment_results')
         .select('id')
         .eq('attempt_id', attempt.id)
@@ -613,7 +613,7 @@ const { data: deployment } = await supabase
     const rows = released ?? [];
 
     if (rows.length > 0) {
-      const { data: assessmentVersion } = await admin
+      const { data: assessmentVersion } = await supabase
         .from('assessment_versions')
         .select('assessment:assessments!assessment_versions_assessment_id_fkey(id, title)')
         .eq('id', deployment.assessment_version_id)
@@ -631,7 +631,7 @@ const { data: deployment } = await supabase
       }
 
       // Subject name on the notification (same context as notifyOfferingStudents).
-      const { data: offeringRow } = await admin
+      const { data: offeringRow } = await supabase
         .from('subject_offerings')
         .select('subject:subjects(code, title), section:sections(name)')
         .eq('id', deployment.subject_offering_id)

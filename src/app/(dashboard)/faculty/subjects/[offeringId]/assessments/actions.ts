@@ -1109,6 +1109,7 @@ export async function saveGeneratedQuestions(
     question_choices?: { choice_key: string; choice_text: string; is_correct?: boolean }[];
     canonical_answer?: string;
     accepted_answers?: string[];
+    generation_metadata?: Record<string, unknown> | null;
     sourceChunkIds?: string[];
   }[]
 ): Promise<{ success: boolean; saved?: number; error?: string }> {
@@ -1148,6 +1149,7 @@ export async function saveGeneratedQuestions(
         position: i + 1,
         status: 'active',
         is_ai_generated: q.is_ai_generated ?? false,
+        generation_metadata: q.generation_metadata ?? null,
         topic_id: q.topic_id ?? null,
         image_url: q.image_url ?? null,
         image_storage_path: q.image_storage_path ?? null,

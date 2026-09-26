@@ -1,7 +1,6 @@
 'use server';
 
 import { createClient } from '@/lib/supabase/server';
-import { createAdminClient } from '@/lib/supabase/admin';
 import { isFacultyOfOfferingOrSubject } from '@/lib/auth';
 
 async function requireUser() {
@@ -100,10 +99,8 @@ export async function getDeploymentAnalytics(
     return { data: null, error: 'Not authorized' };
   }
 
-  const admin = createAdminClient();
-
   // Get assessment title
-  const { data: version } = await admin
+  const { data: version } = await supabase
     .from('assessment_versions')
     .select('id, assessment_id, assessment:assessments!assessment_versions_assessment_id_fkey(title)')
     .eq('id', deployment.assessment_version_id)
@@ -112,14 +109,14 @@ export async function getDeploymentAnalytics(
   const assessmentTitle = (version?.assessment as { title?: string })?.title ?? 'Unknown';
 
   // Get enrolled students
-  const { count: enrolledCount } = await admin
+  const { count: enrolledCount } = await supabase
     .from('enrollments')
     .select('id', { count: 'exact', head: true })
     .eq('subject_offering_id', deployment.subject_offering_id)
     .eq('status', 'enrolled');
 
   // Get attempts
-  const { data: attempts } = await admin
+  const { data: attempts } = await supabase
     .from('exam_attempts')
     .select('id, student_id, status')
     .eq('deployment_id', deploymentId);
@@ -131,7 +128,7 @@ export async function getDeploymentAnalytics(
   // Get results
   const attemptIds = submittedAttempts.map(a => a.id);
   const { data: results } = attemptIds.length > 0
-    ? await admin
+    ? await supabase
         .from('assessment_results')
         .select('id, attempt_id, raw_score, possible_score, percentage')
         .in('attempt_id', attemptIds)
@@ -170,7 +167,7 @@ export async function getDeploymentAnalytics(
   }));
 
   // Item analysis
-  const { data: questions } = await admin
+  const { data: questions } = await supabase
     .from('questions')
     .select('id, question_text, question_type, difficulty, bloom_level, points, position')
     .eq('assessment_version_id', deployment.assessment_version_id)
@@ -179,7 +176,7 @@ export async function getDeploymentAnalytics(
   const questionIds = (questions ?? []).map(q => q.id);
 
   const { data: answerKeys } = questionIds.length > 0
-    ? await admin
+    ? await supabase
         .from('answer_keys')
         .select('question_id, correct_choice_id, canonical_answer, accepted_answers')
         .in('question_id', questionIds)
@@ -188,7 +185,7 @@ export async function getDeploymentAnalytics(
   const answerKeyMap = new Map((answerKeys ?? []).map(ak => [ak.question_id, ak]));
 
   const { data: allChoices } = questionIds.length > 0
-    ? await admin
+    ? await supabase
         .from('question_choices')
         .select('id, question_id, choice_key, choice_text, position')
         .in('question_id', questionIds)
@@ -202,7 +199,7 @@ export async function getDeploymentAnalytics(
   }
 
   const { data: allResponses } = attemptIds.length > 0
-    ? await admin
+    ? await supabase
         .from('student_responses')
         .select('attempt_id, question_id, selected_choice_id, text_answer, earned_points')
         .in('attempt_id', attemptIds)

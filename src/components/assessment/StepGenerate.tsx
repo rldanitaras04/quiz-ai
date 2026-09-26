@@ -40,17 +40,17 @@ interface GeneratedQuestionPayload {
 }
 
 /** Convert the AI API's GeneratedQuestion shape to the wizard's DraftQuestion shape. */
-function mapGeneratedQuestion(raw: GeneratedQuestionPayload, position: number): DraftQuestion {
+function mapGeneratedQuestion(raw: GeneratedQuestionPayload, position: number, requestedType: QuestionType): DraftQuestion {
   const id = `gen-${Date.now()}-${position}`;
+  const rawType = raw.questionType ?? raw.question_type;
+  const question_type: QuestionType =
+    rawType === 'identification' || rawType === 'true_false' || rawType === 'multiple_choice'
+      ? rawType
+      : requestedType;
   return {
     id,
     assessment_version_id: '',
-    question_type:
-      raw.questionType === 'identification'
-        ? 'identification'
-        : raw.questionType === 'true_false'
-          ? 'true_false'
-          : 'multiple_choice',
+    question_type,
     question_text: raw.questionText ?? raw.question_text ?? '',
     difficulty: raw.difficulty ?? 'moderate',
     bloom_level: raw.bloomLevel ?? raw.bloom_level ?? 'understand',
@@ -77,6 +77,24 @@ function mapGeneratedQuestion(raw: GeneratedQuestionPayload, position: number): 
   };
 }
 import type { WizardState } from '@/app/(dashboard)/faculty/subjects/[offeringId]/assessments/new/page';
+
+/** Expand a {value: count} distribution into a sequence, round-robining across
+ * buckets so consecutive questions don't all share one value. */
+function expandDistribution(dist: Record<string, number>, order: readonly string[]): string[] {
+  const buckets = order
+    .filter((k) => (dist[k] ?? 0) > 0)
+    .map((k) => Array.from({ length: dist[k] }, () => k));
+  const out: string[] = [];
+  let i = 0;
+  while (buckets.some((b) => i < b.length)) {
+    for (const b of buckets) if (i < b.length) out.push(b[i]);
+    i++;
+  }
+  return out;
+}
+
+const DIFFICULTY_ORDER = ['easy', 'moderate', 'difficult'] as const;
+const BLOOM_ORDER = ['remember', 'understand', 'apply', 'analyze', 'evaluate', 'create'] as const;
 
 interface StepGenerateProps {
   state: WizardState;
@@ -176,18 +194,19 @@ export default function StepGenerate({
       const errors: string[] = [];
       let questionIndex = 0;
 
+      // Global schedules honoring the configured distributions (they sum to
+      // totalQ across all types — genConfig validation guarantees it).
+      const difficultyQueue = expandDistribution(state.difficultyDistribution, DIFFICULTY_ORDER);
+      const bloomQueue = expandDistribution(state.bloomDistribution, BLOOM_ORDER);
+
       for (const questionType of state.questionTypes) {
         const count = state.countPerType[questionType] || 0;
         if (count === 0) continue;
 
-        // Determine difficulty and bloom distribution for this batch
-        const difficulties: Difficulty[] = ['easy', 'moderate', 'difficult'];
-        const blooms: BloomLevel[] = ['remember', 'understand', 'apply', 'analyze', 'evaluate', 'create'];
-
         for (let i = 0; i < count; i++) {
-          const difficulty = difficulties[i % difficulties.length];
-          const bloomLevel = blooms[i % blooms.length];
           questionIndex++;
+          const difficulty = (difficultyQueue[questionIndex - 1] ?? 'moderate') as Difficulty;
+          const bloomLevel = (bloomQueue[questionIndex - 1] ?? 'understand') as BloomLevel;
           setGenerationProgress({ current: questionIndex, total: totalQ });
 
           try {
@@ -219,7 +238,7 @@ export default function StepGenerate({
             const data = await response.json();
             if (data.questions && data.questions.length > 0) {
               allGeneratedQuestions.push(
-                mapGeneratedQuestion(data.questions[0], allGeneratedQuestions.length + 1)
+                mapGeneratedQuestion(data.questions[0], allGeneratedQuestions.length + 1, questionType)
               );
             }
           } catch (err) {

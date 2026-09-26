@@ -1,4 +1,4 @@
-# AI-Assisted Secure Assessment System
+# AI-Assisted Secure Examination and Assessment System
 
 ## Database Architecture and Supabase Security Specification
 

@@ -1,16 +1,21 @@
 'use client';
 
+import { useState, type JSX } from 'react';
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
-import type { JSX } from 'react';
+import { CaretDown, X } from '@phosphor-icons/react';
 import type { UserRole } from '@/lib/types';
-import { APP_NAME } from '@/lib/constants';
+import { APP_NAME, ROLE_LABELS } from '@/lib/constants';
 import { BrandIcon } from '@/components/brand';
 import {
-  GLOBAL_NAVIGATION,
+  getSidebarCollapsed,
+  setSidebarCollapsed,
+} from '@/lib/ui-preferences';
+import {
+  getNavigationForRole,
   isNavActive,
-  type NavigationItem,
   type NavigationGroup,
+  type NavigationItem,
 } from '@/config/navigation';
 
 interface SidebarProps {
@@ -18,94 +23,249 @@ interface SidebarProps {
   collapsed?: boolean;
   /** When provided, a close button is shown (mobile drawer). */
   onClose?: () => void;
+  /** Unread notification badge shared with the top-bar bell. */
+  notificationCount?: number;
 }
 
 function NavIcon({ icon: Icon }: { icon: NavigationItem['icon'] }): JSX.Element {
-  return <Icon className="h-5 w-5" weight="regular" />;
+  return <Icon className="h-5 w-5 shrink-0" weight="regular" />;
 }
 
 /**
- * Primary navigation, grouped by area of work. Identity and the account menu
- * live in the top bar, so the sidebar carries navigation only.
+ * Role-aware primary navigation rendered from the single centralized
+ * configuration in `@/config/navigation` — the same source feeds the desktop
+ * rail, the mobile drawer, and the mobile bottom bar.
  *
- * Collapsing is driven by the hamburger in the top bar; this component just
- * renders the requested width.
+ * Groups with `children` render as collapsible parents that stay expanded
+ * while one of their routes is active. Collapsing (width) is driven by the
+ * hamburger in the top bar; this component just renders the requested width.
  */
-export default function Sidebar({ role, collapsed = false, onClose }: SidebarProps): JSX.Element {
+export default function Sidebar({
+  role,
+  collapsed = false,
+  onClose,
+  notificationCount,
+}: SidebarProps): JSX.Element {
   const pathname = usePathname();
-  const groups: NavigationGroup[] = GLOBAL_NAVIGATION[role] ?? [];
+  const groups: NavigationGroup[] = getNavigationForRole(role);
 
   return (
     <aside
-      className={`flex flex-col h-full bg-[var(--color-surface)] border-r border-[var(--color-border)] transition-[width] duration-200 ${
-        collapsed ? 'w-[68px]' : 'w-64'
+      className={`flex h-full flex-col border-r border-[var(--color-border)] bg-[var(--color-surface)] transition-[width] duration-200 ${
+        collapsed ? 'w-[76px]' : 'w-64'
       }`}
       aria-label="Sidebar navigation"
     >
+      {/* Brand */}
       <div
-        className={`flex items-center h-16 border-b border-[var(--color-border)] ${
-          collapsed ? 'justify-center px-2' : 'gap-3 px-4'
+        className={`flex h-16 shrink-0 items-center gap-3 border-b border-[var(--color-border)] ${
+          collapsed ? 'justify-center px-2' : 'px-4'
         }`}
       >
-        <BrandIcon className="h-8 w-8 flex-shrink-0" alt={APP_NAME} />
+        <BrandIcon className="h-8 w-8 shrink-0" alt={APP_NAME} />
         {!collapsed && (
-          <span className="text-lg font-semibold text-[var(--color-foreground)] flex-1">{APP_NAME}</span>
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-bold leading-tight text-[var(--color-foreground)]">
+              {APP_NAME}
+            </p>
+            <p className="truncate text-[11px] leading-tight text-[var(--color-muted)]">
+              {ROLE_LABELS[role]}
+            </p>
+          </div>
         )}
         {onClose && (
           <button
             type="button"
             onClick={onClose}
-            className="ml-auto flex items-center justify-center h-8 w-8 rounded-[var(--radius-md)] text-[var(--color-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-foreground)] transition-colors lg:hidden"
+            className={`flex h-8 w-8 items-center justify-center rounded-[var(--radius-md)] text-[var(--color-muted)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-foreground)] lg:hidden ${
+              collapsed ? '' : 'ml-auto'
+            }`}
             aria-label="Close navigation"
           >
-            <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-              <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
-            </svg>
+            <X className="h-5 w-5" weight="regular" />
           </button>
         )}
       </div>
 
-      <nav className="flex-1 overflow-y-auto py-3 px-2" aria-label="Main navigation">
+      <nav className="flex-1 overflow-y-auto px-2 py-3" aria-label="Main navigation">
         {groups.map((group, groupIndex) => (
           <div key={group.label} className={groupIndex > 0 ? 'mt-4' : undefined}>
             {collapsed ? (
               groupIndex > 0 && (
-                <div
-                  className="mx-2 mb-2 h-px bg-[var(--color-border)]"
-                  aria-hidden="true"
-                />
+                <div className="mx-2 mb-2 h-px bg-[var(--color-border)]" aria-hidden="true" />
               )
             ) : (
-              <p className="px-3 pb-1 text-xs font-semibold uppercase tracking-wide text-[var(--color-muted-light)]">
+              <p className="px-3 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--color-muted-light)]">
                 {group.label}
               </p>
             )}
 
             <ul className="flex flex-col gap-0.5">
-              {group.items.map((item) => {
-                const active = isNavActive(item, pathname);
-                return (
-                  <li key={item.id}>
-                    <Link
-                      href={item.href ?? '#'}
-                      className={`flex items-center gap-3 rounded-[var(--radius-md)] px-3 py-2 text-sm font-medium transition-colors ${
-                        active
-                          ? 'bg-[var(--color-primary-light)] text-[var(--color-primary)]'
-                          : 'text-[var(--color-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-foreground)]'
-                      } ${collapsed ? 'justify-center' : ''}`}
-                      title={collapsed ? item.label : undefined}
-                      aria-current={active ? 'page' : undefined}
-                    >
-                      <NavIcon icon={item.icon} />
-                      {!collapsed && <span>{item.label}</span>}
-                    </Link>
-                  </li>
-                );
-              })}
+              {group.items.map((item) => (
+                <NavItem
+                  key={item.id}
+                  item={item}
+                  collapsed={collapsed}
+                  pathname={pathname}
+                  notificationCount={notificationCount}
+                />
+              ))}
             </ul>
           </div>
         ))}
       </nav>
     </aside>
+  );
+}
+
+function NavItem({
+  item,
+  collapsed,
+  pathname,
+  notificationCount,
+}: {
+  item: NavigationItem;
+  collapsed: boolean;
+  pathname: string;
+  notificationCount?: number;
+}): JSX.Element {
+  const hasChildren = Boolean(item.children && item.children.length > 0);
+  const active = isNavActive(item, pathname);
+  // Manual toggle; a group with an active child is always expanded.
+  const [toggled, setToggled] = useState(false);
+  const open = hasChildren && (toggled || active);
+
+  const badge =
+    item.id === 'notifications' && notificationCount != null && notificationCount > 0
+      ? notificationCount > 99
+        ? '99+'
+        : String(notificationCount)
+      : undefined;
+
+  const handleToggle = (): void => {
+    if (collapsed) {
+      // Expand the rail first so the group has room to open.
+      setSidebarCollapsed(!getSidebarCollapsed());
+      setToggled(true);
+      return;
+    }
+    setToggled((prev) => !(prev || active));
+  };
+
+  if (hasChildren) {
+    const childId = `nav-group-${item.id}`;
+
+    if (collapsed) {
+      return (
+        <li>
+          <button
+            type="button"
+            onClick={handleToggle}
+            className={`flex w-full items-center justify-center rounded-[var(--radius-md)] p-2.5 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus-ring)] ${
+              active
+                ? 'bg-[var(--color-primary-light)] text-[var(--color-primary)]'
+                : 'text-[var(--color-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-foreground)]'
+            }`}
+            title={`${item.label} (expand sidebar)`}
+            aria-label={`${item.label}, expand sidebar`}
+            aria-expanded={open}
+            aria-controls={childId}
+          >
+            <NavIcon icon={item.icon} />
+          </button>
+        </li>
+      );
+    }
+
+    return (
+      <li>
+        <button
+          type="button"
+          onClick={handleToggle}
+          className={`flex w-full items-center gap-3 rounded-[var(--radius-md)] px-3 py-2 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus-ring)] ${
+            active
+              ? 'bg-[var(--color-primary-light)] text-[var(--color-primary)]'
+              : 'text-[var(--color-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-foreground)]'
+          }`}
+          aria-expanded={open}
+          aria-controls={childId}
+        >
+          <NavIcon icon={item.icon} />
+          <span className="flex-1 truncate text-left">{item.label}</span>
+          <CaretDown
+            className={`h-3.5 w-3.5 shrink-0 transition-transform duration-150 ${open ? '' : '-rotate-90'}`}
+            weight="bold"
+            aria-hidden="true"
+          />
+        </button>
+
+        {open && (
+          <ul
+            id={childId}
+            className="ml-4 mt-0.5 flex flex-col gap-0.5 border-l border-[var(--color-border)] pl-3 animate-slide-down"
+          >
+            {item.children!.map((child) => {
+              const childActive = isNavActive(child, pathname);
+              return (
+                <li key={child.id}>
+                  <Link
+                    href={child.href ?? '#'}
+                    className={`flex items-center rounded-[var(--radius-md)] px-2.5 py-1.5 text-[13px] transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus-ring)] ${
+                      childActive
+                        ? 'bg-[var(--color-primary-light)] font-semibold text-[var(--color-primary)]'
+                        : 'font-medium text-[var(--color-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-foreground)]'
+                    }`}
+                    aria-current={childActive ? 'page' : undefined}
+                  >
+                    <span className="truncate">{child.label}</span>
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </li>
+    );
+  }
+
+  return (
+    <li>
+      <Link
+        href={item.href ?? '#'}
+        title={collapsed ? item.label : undefined}
+        aria-label={collapsed ? item.label : undefined}
+        className={`relative flex items-center gap-3 rounded-[var(--radius-md)] text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus-ring)] ${
+          collapsed ? 'justify-center p-2.5' : 'px-3 py-2'
+        } ${
+          active
+            ? 'bg-[var(--color-primary)] text-white shadow-sm shadow-[var(--color-primary)]/30'
+            : 'text-[var(--color-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-foreground)]'
+        }`}
+        aria-current={active ? 'page' : undefined}
+      >
+        <NavIcon icon={item.icon} />
+        {!collapsed && (
+          <>
+            <span className="flex-1 truncate">{item.label}</span>
+            {badge && (
+              <span
+                className="flex min-w-[18px] items-center justify-center rounded-full bg-[var(--color-danger)] px-1 text-[10px] font-bold leading-[18px] text-white"
+                aria-label={`${notificationCount} unread notifications`}
+              >
+                {badge}
+              </span>
+            )}
+          </>
+        )}
+        {collapsed && badge && (
+          <span
+            className="absolute right-1 top-1 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-[var(--color-danger)] px-1 text-[9px] font-bold leading-none text-white"
+            aria-label={`${notificationCount} unread notifications`}
+          >
+            {badge}
+          </span>
+        )}
+      </Link>
+    </li>
   );
 }

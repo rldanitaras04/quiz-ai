@@ -2,7 +2,11 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { buildQuestionIdOrder } from '@/lib/exam-order';
 import { COUNTABLE_ATTEMPT_STATUSES } from '@/lib/attempt-limit';
-import type { ExamAttempt, ExamManifest, QuestionWithChoices, AssessmentException } from '@/lib/types';
+import {
+  applyAssessmentExceptions,
+  loadAssessmentExceptions,
+} from '@/lib/assessment-exceptions';
+import type { ExamAttempt, ExamManifest, QuestionWithChoices } from '@/lib/types';
 
 /**
  * Shared server-side exam-start logic.
@@ -79,12 +83,6 @@ export async function startExamAttempt(
 
   // Server time is authoritative: the device clock never decides eligibility.
   const now = new Date();
-  const opensAt = new Date(deployment.opens_at);
-  const closesAt = new Date(deployment.closes_at);
-
-  if (now < opensAt || now > closesAt) {
-    return { error: 'Assessment is not currently available', status: 403 };
-  }
 
   if (!deployment.assessment_version_id) {
     return { error: 'This deployment has no assessment version attached', status: 409 };
@@ -102,46 +100,14 @@ export async function startExamAttempt(
     }
   }
 
-  // Check for student exceptions (extended time, additional attempts, schedule override)
+  // Student-specific exceptions (extended time, additional attempts, schedule
+  // override) — resolved by the shared helper the student detail page also
+  // uses, so the UI and the API agree on what is startable.
   const admin = createAdminClient();
-  const { data: exceptions } = await admin
-    .from('assessment_exceptions')
-    .select('*')
-    .eq('deployment_id', deploymentId)
-    .eq('student_id', userId);
+  const exceptions = await loadAssessmentExceptions(admin, deploymentId, userId);
+  const effective = applyAssessmentExceptions(deployment, exceptions, now);
 
-  let effectiveDurationMinutes = deployment.duration_minutes;
-  let effectiveClosesAt = closesAt;
-  let effectiveAttemptLimit = deployment.attempt_limit;
-
-  for (const ex of (exceptions ?? []) as AssessmentException[]) {
-    // Skip expired exceptions
-    if (ex.expires_at && new Date(ex.expires_at) < now) continue;
-
-    switch (ex.exception_type) {
-      case 'extended_time':
-        if (ex.additional_minutes) {
-          effectiveDurationMinutes += ex.additional_minutes;
-        }
-        break;
-      case 'additional_attempt':
-        if (ex.additional_attempts) {
-          effectiveAttemptLimit += ex.additional_attempts;
-        }
-        break;
-      case 'schedule_override':
-        if (ex.override_closes_at) {
-          const overrideCloses = new Date(ex.override_closes_at);
-          if (overrideCloses > effectiveClosesAt) {
-            effectiveClosesAt = overrideCloses;
-          }
-        }
-        break;
-    }
-  }
-
-  // Re-validate window with exception overrides applied
-  if (now < opensAt || now > effectiveClosesAt) {
+  if (now < effective.opensAt || now > effective.closesAt) {
     return { error: 'Assessment is not currently available', status: 403 };
   }
 
@@ -170,7 +136,7 @@ export async function startExamAttempt(
     return { error: 'Could not verify attempt limit', status: 403 };
   }
 
-  if (attemptCount >= effectiveAttemptLimit) {
+  if (attemptCount >= effective.attemptLimit) {
     return { error: 'Attempt limit reached', status: 403 };
   }
 
@@ -193,10 +159,10 @@ export async function startExamAttempt(
   }
 
   let orderedQuestions: QuestionWithChoices[] = [...(questions as QuestionWithChoices[])];
-  // Cluster by type (MCQ → ID → True/False) and, when shuffled, randomize
-  // only inside each type group so sections stay intact per student.
-  const shuffleWithin = deployment.question_order_mode === 'shuffled';
-  const idOrder = buildQuestionIdOrder(orderedQuestions, { shuffleWithinGroups: shuffleWithin });
+  // Strict document order by position (source sequence); only 'shuffled'
+  // deployments randomize. Questions are never regrouped by type.
+  const shuffle = deployment.question_order_mode === 'shuffled';
+  const idOrder = buildQuestionIdOrder(orderedQuestions, { shuffle });
   const byId = new Map(orderedQuestions.map((q) => [q.id, q]));
   orderedQuestions = idOrder.map((id) => byId.get(id)!).filter(Boolean);
 
@@ -215,7 +181,7 @@ export async function startExamAttempt(
   }
 
   const attemptNumber = attemptCount + 1;
-  const expiresAt = new Date(now.getTime() + effectiveDurationMinutes * 60 * 1000);
+  const expiresAt = new Date(now.getTime() + effective.durationMinutes * 60 * 1000);
 
   // Attempt + manifest writes go through the service-role client:
   // exam_manifests has no student INSERT policy under RLS.

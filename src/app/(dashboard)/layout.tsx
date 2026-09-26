@@ -32,6 +32,7 @@ export default async function DashboardLayout({ children }: DashboardLayoutProps
 
   const role = getPrimaryRole(roles?.map((r) => r.role) ?? []);
   const userName = profile?.full_name ?? user.email ?? 'User';
+  const avatarUrl = getAvatarUrl(profile?.avatar_path);
 
   const { count: notificationCount } = await supabase
     .from('notifications')
@@ -45,7 +46,7 @@ export default async function DashboardLayout({ children }: DashboardLayoutProps
         title=""
         role={role}
         userName={userName}
-        avatarUrl={getAvatarUrl(profile?.avatar_path)}
+        avatarUrl={avatarUrl}
         notificationCount={notificationCount ?? 0}
       >
         {children}

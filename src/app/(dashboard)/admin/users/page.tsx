@@ -4,6 +4,7 @@ import { Card, CardContent } from '@/components/ui/Card';
 import { requireRole } from '@/lib/auth';
 import { getAdminReferenceData } from '../actions';
 import { getAdminUsers } from './actions';
+import { buildSectionChoices } from './sectionChoices';
 import UsersManager from './UsersManager';
 
 export default async function UsersPage(): Promise<JSX.Element> {
@@ -13,14 +14,7 @@ export default async function UsersPage(): Promise<JSX.Element> {
   const currentUserId = gate.status === 'ok' ? gate.user.id : '';
 
   const [users, reference] = await Promise.all([getAdminUsers(), getAdminReferenceData()]);
-
-  // Flat, labeled section choices for the per-student Section column.
-  const programNameById = new Map(reference.programs.map((p) => [p.id, p.code] as const));
-  const yearNameById = new Map(reference.yearLevels.map((y) => [y.id, y.name] as const));
-  const sections = reference.sections.map((s) => ({
-    id: s.id,
-    label: `${programNameById.get(s.programId) ?? ''} · ${yearNameById.get(s.yearLevelId) ?? ''} · ${s.name}`,
-  }));
+  const sections = buildSectionChoices(reference);
 
   const stats = [
     { label: 'Total Users', value: users.length },

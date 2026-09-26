@@ -9,6 +9,8 @@ import Select from '@/components/ui/Select';
 import Badge from '@/components/ui/Badge';
 import EmptyState from '@/components/ui/EmptyState';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
+import { Table, THead, TBody, TR, TH, TD } from '@/components/ui/Table';
+import Pagination from '@/components/ui/Pagination';
 import { confirmAction, notifyError, notifySuccess } from '@/components/ui/alerts';
 import type { AdminReferenceData } from '../actions';
 import type { SubjectOverview, OfferingWithFaculty } from './actions';
@@ -28,6 +30,8 @@ import {
 interface SubjectsManagerProps {
   subjects: SubjectOverview[];
   reference: AdminReferenceData;
+  /** Defaults to the combined subjects+offerings view; /admin/subjects/offerings passes 'offerings'. */
+  view?: 'all' | 'offerings';
 }
 
 const offeringStatusVariant: Record<string, 'success' | 'warning' | 'default'> = {
@@ -35,6 +39,8 @@ const offeringStatusVariant: Record<string, 'success' | 'warning' | 'default'> =
   inactive: 'warning',
   archived: 'default',
 };
+
+const PAGE_SIZE = 25;
 
 interface SubjectFormState {
   mode: 'create' | 'edit';
@@ -55,10 +61,12 @@ interface OfferingFormState {
 export default function SubjectsManager({
   subjects,
   reference,
+  view = 'all',
 }: SubjectsManagerProps): JSX.Element {
   const router = useRouter();
 
   const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
   const [subjectForm, setSubjectForm] = useState<SubjectFormState | null>(null);
   const [offeringForm, setOfferingForm] = useState<OfferingFormState | null>(null);
   const [rosterOfferingId, setRosterOfferingId] = useState<string | null>(null);
@@ -77,8 +85,21 @@ export default function SubjectsManager({
               o.section.toLowerCase().includes(query) ||
               o.faculty.some((f) => f.fullName.toLowerCase().includes(query))
           )
-      )
-    : subjects;
+        )
+      : subjects;
+
+  // Flat offering rows for the dedicated Subject Offerings route.
+  const flatOfferings = filtered.flatMap((subject) =>
+    subject.offerings.map((offering) => ({ subject, offering }))
+  );
+
+  // Clamp so actions on the last row of the final page never show a blank page.
+  const pageCount = Math.max(1, Math.ceil(flatOfferings.length / PAGE_SIZE));
+  const safePage = Math.min(page, pageCount);
+  const pagedOfferings = flatOfferings.slice(
+    (safePage - 1) * PAGE_SIZE,
+    safePage * PAGE_SIZE
+  );
 
   function closeForms(): void {
     setSubjectForm(null);
@@ -159,19 +180,35 @@ export default function SubjectsManager({
       />
 
       <div className="flex flex-wrap items-center gap-2 mb-4">
-        <Button
-          size="sm"
-          onClick={() => {
-            setError(null);
-            setSubjectForm({ mode: 'create', id: '', code: '', title: '', description: '' });
-          }}
-        >
-          New Subject
-        </Button>
+        {view !== 'offerings' && (
+          <Button
+            size="sm"
+            onClick={() => {
+              setError(null);
+              setSubjectForm({ mode: 'create', id: '', code: '', title: '', description: '' });
+            }}
+          >
+            New Subject
+          </Button>
+        )}
+        {view === 'offerings' && (
+          <Button
+            size="sm"
+            onClick={() => {
+              setError(null);
+              setOfferingForm({ subjectId: '', semesterId: '', programId: '', yearLevelId: '', sectionId: '' });
+            }}
+          >
+            New Offering
+          </Button>
+        )}
         <Input
           placeholder="Search by code, title, program, section, or faculty…"
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e) => {
+            setSearch(e.target.value);
+            setPage(1);
+          }}
           className="max-w-md"
         />
       </div>
@@ -228,6 +265,19 @@ export default function SubjectsManager({
         }
       >
         <form onSubmit={submitOffering} className="space-y-4">
+          {view === 'offerings' && (
+            <Select
+              label="Subject"
+              value={offeringForm?.subjectId ?? ''}
+              onChange={(e) => setOfferingForm((f) => (f ? { ...f, subjectId: e.target.value } : f))}
+              required
+            >
+              <option value="">Select a subject…</option>
+              {subjects.map((s) => (
+                <option key={s.id} value={s.id}>{s.code} — {s.title}</option>
+              ))}
+            </Select>
+          )}
           <Select
             label="Semester"
             value={offeringForm?.semesterId ?? ''}
@@ -285,7 +335,64 @@ export default function SubjectsManager({
         </form>
       </Modal>
 
-      {/* Subject list -------------------------------------------------- */}
+      {/* Subject list, or the flat offerings table ---------------------- */}
+      {view === 'offerings' ? (
+        <Card>
+          <CardHeader>
+            <h2 className="text-lg font-semibold text-[var(--color-foreground)]">
+              Subject Offerings ({flatOfferings.length})
+            </h2>
+          </CardHeader>
+          <CardContent>
+            {flatOfferings.length === 0 ? (
+              <EmptyState
+                title="No offerings found"
+                description={
+                  query
+                    ? 'Try adjusting your search query.'
+                    : 'Create your first offering to schedule a subject into a section.'
+                }
+              />
+            ) : (
+              <>
+                <Table cards caption="Subject offerings">
+                  <THead>
+                    <TR>
+                      <TH>Subject</TH>
+                      <TH>Semester</TH>
+                      <TH>Program</TH>
+                      <TH>Year</TH>
+                      <TH>Section</TH>
+                      <TH>Enrolled</TH>
+                      <TH>Status</TH>
+                      <TH>Faculty</TH>
+                      <TH>Actions</TH>
+                    </TR>
+                  </THead>
+                  <TBody>
+                    {pagedOfferings.map(({ subject, offering }) => (
+                      <OfferingRow
+                        key={offering.id}
+                        subjectLabel={`${subject.code} – ${subject.title}`}
+                        offering={offering}
+                        facultyOptions={reference.faculty}
+                        onChanged={() => router.refresh()}
+                        onManageStudents={() => setRosterOfferingId(offering.id)}
+                      />
+                    ))}
+                  </TBody>
+                </Table>
+                <Pagination
+                  page={safePage}
+                  pageSize={PAGE_SIZE}
+                  total={flatOfferings.length}
+                  onPageChange={setPage}
+                />
+              </>
+            )}
+          </CardContent>
+        </Card>
+      ) : (
       <div className="space-y-4">
         {filtered.length === 0 ? (
           <Card>
@@ -382,39 +489,38 @@ export default function SubjectsManager({
                 {subject.offerings.length === 0 ? (
                   <p className="text-sm text-[var(--color-muted)]">No offerings yet.</p>
                 ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="border-b border-[var(--color-border)]">
-                          <th className="text-left py-2 px-3 font-medium text-[var(--color-muted)]">Semester</th>
-                          <th className="text-left py-2 px-3 font-medium text-[var(--color-muted)]">Program</th>
-                          <th className="text-left py-2 px-3 font-medium text-[var(--color-muted)]">Year</th>
-                          <th className="text-left py-2 px-3 font-medium text-[var(--color-muted)]">Section</th>
-                          <th className="text-left py-2 px-3 font-medium text-[var(--color-muted)]">Enrolled</th>
-                          <th className="text-left py-2 px-3 font-medium text-[var(--color-muted)]">Status</th>
-                          <th className="text-left py-2 px-3 font-medium text-[var(--color-muted)]">Faculty</th>
-                          <th className="text-left py-2 px-3 font-medium text-[var(--color-muted)]">Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {subject.offerings.map((offering) => (
-                          <OfferingRow
-                            key={offering.id}
-                            offering={offering}
-                            facultyOptions={reference.faculty}
-                            onChanged={() => router.refresh()}
-                            onManageStudents={() => setRosterOfferingId(offering.id)}
-                          />
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                  <Table cards caption={`Offerings for ${subject.code}`}>
+                    <THead>
+                      <TR>
+                        <TH>Semester</TH>
+                        <TH>Program</TH>
+                        <TH>Year</TH>
+                        <TH>Section</TH>
+                        <TH>Enrolled</TH>
+                        <TH>Status</TH>
+                        <TH>Faculty</TH>
+                        <TH>Actions</TH>
+                      </TR>
+                    </THead>
+                    <TBody>
+                      {subject.offerings.map((offering) => (
+                        <OfferingRow
+                          key={offering.id}
+                          offering={offering}
+                          facultyOptions={reference.faculty}
+                          onChanged={() => router.refresh()}
+                          onManageStudents={() => setRosterOfferingId(offering.id)}
+                        />
+                      ))}
+                    </TBody>
+                  </Table>
                 )}
               </CardContent>
             </Card>
           ))
         )}
       </div>
+      )}
     </>
   );
 }
@@ -428,31 +534,45 @@ function OfferingRow({
   facultyOptions,
   onChanged,
   onManageStudents,
+  subjectLabel,
 }: {
   offering: OfferingWithFaculty;
   facultyOptions: AdminReferenceData['faculty'];
   onChanged: () => void;
   onManageStudents: () => void;
+  /** Extra leading column used by the flat Subject Offerings table. */
+  subjectLabel?: string;
 }): JSX.Element {
   const assignedIds = new Set(offering.faculty.map((f) => f.facultyId));
   const unassigned = facultyOptions.filter((f) => !assignedIds.has(f.id));
 
   return (
-    <tr className="border-b border-[var(--color-border)] last:border-0 align-top">
-      <td className="py-2 px-3 text-[var(--color-foreground)]">
+    <TR className="align-top">
+      {subjectLabel !== undefined && (
+        <TD primary label="Subject" className="font-medium text-[var(--color-foreground)]">
+          {subjectLabel}
+        </TD>
+      )}
+      <TD
+        primary={subjectLabel === undefined}
+        label="Semester"
+        className="text-[var(--color-foreground)]"
+      >
         {offering.semester}
         <span className="text-[var(--color-muted)] ml-1">({offering.academicYear})</span>
-      </td>
-      <td className="py-2 px-3 text-[var(--color-muted)]">{offering.program}</td>
-      <td className="py-2 px-3 text-[var(--color-muted)]">{offering.yearLevel}</td>
-      <td className="py-2 px-3 text-[var(--color-muted)]">{offering.section}</td>
-      <td className="py-2 px-3 text-[var(--color-foreground)] font-medium">{offering.enrolledCount}</td>
-      <td className="py-2 px-3">
+      </TD>
+      <TD label="Program" hideOnMobile className="text-[var(--color-muted)]">{offering.program}</TD>
+      <TD label="Year" hideOnMobile className="text-[var(--color-muted)]">{offering.yearLevel}</TD>
+      <TD label="Section" className="text-[var(--color-muted)]">{offering.section}</TD>
+      <TD label="Enrolled" className="font-medium text-[var(--color-foreground)]">
+        {offering.enrolledCount}
+      </TD>
+      <TD label="Status">
         <Badge variant={offeringStatusVariant[offering.status] ?? 'default'}>
           {offering.status}
         </Badge>
-      </td>
-      <td className="py-2 px-3">
+      </TD>
+      <TD label="Faculty">
         <div className="flex flex-col gap-1">
           {offering.faculty.length === 0 && (
             <span className="text-xs text-[var(--color-muted)]">Unassigned</span>
@@ -494,8 +614,8 @@ function OfferingRow({
             </Select>
           )}
         </div>
-      </td>
-      <td className="py-2 px-3">
+      </TD>
+      <TD label="Actions">
         <div className="flex flex-col gap-1">
           <Button
             size="sm"
@@ -536,8 +656,8 @@ function OfferingRow({
             successMessage="Offering deleted."
           />
         </div>
-      </td>
-    </tr>
+      </TD>
+    </TR>
   );
 }
 

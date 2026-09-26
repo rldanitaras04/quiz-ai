@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import PageHeader from '@/components/ui/PageHeader';
 import { Card, CardHeader, CardContent } from '@/components/ui/Card';
+import { Table, THead, TBody, TR, TH, TD } from '@/components/ui/Table';
 
 export default async function AIConfigPage() {
   const supabase = await createClient();
@@ -113,40 +114,44 @@ export default async function AIConfigPage() {
         <CardHeader>Recent AI Usage</CardHeader>
         <CardContent>
           {recentUsage && recentUsage.length > 0 ? (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-[var(--color-border)]">
-                    <th className="text-left py-2 text-[var(--color-muted)] font-medium">Provider</th>
-                    <th className="text-left py-2 text-[var(--color-muted)] font-medium">Model</th>
-                    <th className="text-left py-2 text-[var(--color-muted)] font-medium">Operation</th>
-                    <th className="text-left py-2 text-[var(--color-muted)] font-medium">Status</th>
-                    <th className="text-left py-2 text-[var(--color-muted)] font-medium">Date</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {recentUsage.map((log) => (
-                    <tr key={log.created_at} className="border-b border-[var(--color-border)] last:border-0">
-                      <td className="py-2 text-[var(--color-foreground)]">{log.provider}</td>
-                      <td className="py-2 text-[var(--color-foreground)]">{log.model}</td>
-                      <td className="py-2 text-[var(--color-foreground)]">{log.operation}</td>
-                      <td className="py-2">
-                        <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${
-                          log.status === 'success'
-                            ? 'bg-[var(--color-success-light)] text-[var(--color-success)]'
-                            : 'bg-[var(--color-danger-light)] text-[var(--color-danger)]'
-                        }`}>
-                          {log.status}
-                        </span>
-                      </td>
-                      <td className="py-2 text-[var(--color-muted)]">
-                        {new Date(log.created_at).toLocaleDateString()}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <Table cards caption="Recent AI usage">
+              <THead>
+                <TR>
+                  <TH>Provider</TH>
+                  <TH>Model</TH>
+                  <TH>Operation</TH>
+                  <TH>Status</TH>
+                  <TH>Date</TH>
+                </TR>
+              </THead>
+              <TBody>
+                {recentUsage.map((log) => (
+                  <TR key={log.created_at}>
+                    <TD primary label="Provider" className="text-[var(--color-foreground)]">
+                      {log.provider}
+                    </TD>
+                    <TD label="Model" className="text-[var(--color-foreground)]">
+                      {log.model}
+                    </TD>
+                    <TD label="Operation" className="text-[var(--color-foreground)]">
+                      {log.operation}
+                    </TD>
+                    <TD label="Status">
+                      <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${
+                        log.status === 'success'
+                          ? 'bg-[var(--color-success-light)] text-[var(--color-success)]'
+                          : 'bg-[var(--color-danger-light)] text-[var(--color-danger)]'
+                      }`}>
+                        {log.status}
+                      </span>
+                    </TD>
+                    <TD label="Date" className="text-[var(--color-muted)]">
+                      {new Date(log.created_at).toLocaleDateString()}
+                    </TD>
+                  </TR>
+                ))}
+              </TBody>
+            </Table>
           ) : (
             <p className="text-sm text-[var(--color-muted)]">No AI usage recorded yet.</p>
           )}

@@ -162,101 +162,6 @@ export const ATTEMPT_STATUS_COLORS: Record<AttemptStatus, string> = {
 };
 
 // ============================================================================
-// Navigation
-// ============================================================================
-
-export interface NavItem {
-  label: string;
-  href: string;
-  icon?: string;
-}
-
-/**
- * Navigation is grouped so a long list (the administrator's ten entries) reads
- * as a handful of named sections instead of one undifferentiated column. The
- * sidebar renders one labelled section per group; collapsed, the label is
- * replaced by a divider.
- */
-export interface NavGroup {
-  label: string;
-  items: readonly NavItem[];
-}
-
-export const NAVIGATION: Record<UserRole, readonly NavGroup[]> = {
-  super_admin: [
-    {
-      label: 'Overview',
-      items: [
-        { label: 'Dashboard', href: '/admin', icon: 'home' },
-        { label: 'System Monitoring', href: '/admin/monitoring', icon: 'activity' },
-      ],
-    },
-    {
-      label: 'Academic',
-      items: [
-        { label: 'Academic Structure', href: '/admin/academic', icon: 'building' },
-        { label: 'Subjects / Offerings', href: '/admin/subjects', icon: 'book' },
-      ],
-    },
-    {
-      label: 'Access',
-      items: [
-        { label: 'Users', href: '/admin/users', icon: 'users' },
-        { label: 'Audit Logs', href: '/admin/audit-logs', icon: 'scroll' },
-      ],
-    },
-    {
-      label: 'System',
-      items: [
-        { label: 'System Settings', href: '/admin/settings', icon: 'settings' },
-        { label: 'AI Configuration', href: '/admin/ai-config', icon: 'cpu' },
-      ],
-    },
-    {
-      label: 'Account',
-      items: [
-        { label: 'Notifications', href: '/notifications', icon: 'bell' },
-        { label: 'Profile', href: '/profile', icon: 'user' },
-      ],
-    },
-  ],
-  faculty: [
-    {
-      label: 'Teaching',
-      items: [
-        { label: 'Dashboard', href: '/faculty', icon: 'home' },
-        { label: 'My Subjects', href: '/faculty/subjects', icon: 'book' },
-      ],
-    },
-    {
-      label: 'Account',
-      items: [
-        { label: 'Notifications', href: '/notifications', icon: 'bell' },
-        { label: 'Profile', href: '/profile', icon: 'user' },
-      ],
-    },
-  ],
-  student: [
-    {
-      label: 'Learning',
-      items: [
-        { label: 'Dashboard', href: '/student', icon: 'home' },
-        { label: 'My Subjects', href: '/student/subjects', icon: 'book' },
-        { label: 'Assessments', href: '/student/assessments', icon: 'file-text' },
-        { label: 'My Results', href: '/student/results', icon: 'bar-chart' },
-      ],
-    },
-    {
-      label: 'Account',
-      items: [
-        { label: 'Notifications', href: '/notifications', icon: 'bell' },
-        { label: 'Profile', href: '/profile', icon: 'user' },
-      ],
-    },
-  ],
-} as const;
-
-// ============================================================================
 // Application Constants
 // ============================================================================
 
@@ -295,7 +200,7 @@ export const MIN_QUESTION_POINTS = 1;
 
 export const APP_NAME = 'SEAMS AI';
 
-export const APP_DESCRIPTION = 'AI-Assisted Secure Assessment System';
+export const APP_DESCRIPTION = 'AI-Assisted Secure Examination and Assessment System';
 
 // ============================================================================
 // Configurable Settings

@@ -4,13 +4,19 @@ import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import Badge from '@/components/ui/Badge';
 import EmptyState from '@/components/ui/EmptyState';
+import { Table, THead, TBody, TR, TH, TD } from '@/components/ui/Table';
+import Pagination from '@/components/ui/Pagination';
 import type { AuditLogEntry } from '../actions';
 import { AUDIT_ACTION_LABELS, AUDIT_ACTIONS, ENTITY_TYPES, actionVariant } from './constants';
 
 interface AuditLogsFilterProps {
   logs: AuditLogEntry[];
-  /** Full match count, so the heading can show how many rows are not loaded. */
+  /** Full match count, so pagination can size the page window. */
   totalCount: number;
+  /** 1-based server-side page currently displayed. */
+  page: number;
+  /** Rows per page from admin settings. */
+  pageSize: number;
   currentAction?: string;
   currentEntityType?: string;
 }
@@ -18,12 +24,15 @@ interface AuditLogsFilterProps {
 export default function AuditLogsFilter({
   logs,
   totalCount,
+  page,
+  pageSize,
   currentAction,
   currentEntityType,
 }: AuditLogsFilterProps) {
   const router = useRouter();
 
   function updateFilter(key: string, value: string) {
+    // Page is intentionally dropped: changing a filter returns to page 1.
     const params = new URLSearchParams();
     if (key === 'action') {
       if (value && value !== currentAction) params.set('action', value);
@@ -32,6 +41,15 @@ export default function AuditLogsFilter({
       if (value && value !== currentEntityType) params.set('entityType', value);
       if (currentAction) params.set('action', currentAction);
     }
+    const qs = params.toString();
+    router.push(`/admin/audit-logs${qs ? `?${qs}` : ''}`);
+  }
+
+  function goToPage(next: number) {
+    const params = new URLSearchParams();
+    if (currentAction) params.set('action', currentAction);
+    if (currentEntityType) params.set('entityType', currentEntityType);
+    if (next > 1) params.set('page', String(next));
     const qs = params.toString();
     router.push(`/admin/audit-logs${qs ? `?${qs}` : ''}`);
   }
@@ -86,8 +104,7 @@ export default function AuditLogsFilter({
       <Card>
         <CardHeader>
           <h2 className="text-lg font-semibold text-[var(--color-foreground)]">
-            Activity Log ({logs.length}
-            {totalCount > logs.length ? ` of ${totalCount}` : ''})
+            Activity Log ({totalCount.toLocaleString()})
           </h2>
         </CardHeader>
         <CardContent>
@@ -101,50 +118,48 @@ export default function AuditLogsFilter({
               }
             />
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-[var(--color-border)]">
-                    <th className="text-left py-3 px-4 font-medium text-[var(--color-muted)]">Actor</th>
-                    <th className="text-left py-3 px-4 font-medium text-[var(--color-muted)]">Action</th>
-                    <th className="text-left py-3 px-4 font-medium text-[var(--color-muted)]">Entity</th>
-                    <th className="text-left py-3 px-4 font-medium text-[var(--color-muted)]">Entity ID</th>
-                    <th className="text-left py-3 px-4 font-medium text-[var(--color-muted)]">Timestamp</th>
-                  </tr>
-                </thead>
-                <tbody>
+            <>
+              <Table cards caption="Activity log">
+                <THead>
+                  <TR>
+                    <TH>Actor</TH>
+                    <TH>Action</TH>
+                    <TH>Entity</TH>
+                    <TH>Entity ID</TH>
+                    <TH>Timestamp</TH>
+                  </TR>
+                </THead>
+                <TBody>
                   {logs.map((log) => (
-                    <tr
-                      key={log.id}
-                      className="border-b border-[var(--color-border)] last:border-0 hover:bg-[var(--color-surface-hover)]"
-                    >
-                      <td className="py-3 px-4">
-                        <div>
-                          <p className="font-medium text-[var(--color-foreground)]">
-                            {log.actor_name ?? 'System'}
-                          </p>
-                          {log.actor_email && (
-                            <p className="text-xs text-[var(--color-muted)]">{log.actor_email}</p>
-                          )}
-                        </div>
-                      </td>
-                      <td className="py-3 px-4">
+                    <TR key={log.id}>
+                      <TD primary label="Actor">
+                        <p className="font-medium text-[var(--color-foreground)]">
+                          {log.actor_name ?? 'System'}
+                        </p>
+                        {log.actor_email && (
+                          <p className="text-xs text-[var(--color-muted)]">{log.actor_email}</p>
+                        )}
+                      </TD>
+                      <TD label="Action">
                         <Badge variant={actionVariant[log.action] ?? 'default'}>
                           {AUDIT_ACTION_LABELS[log.action] ?? log.action}
                         </Badge>
-                      </td>
-                      <td className="py-3 px-4 text-[var(--color-muted)]">{log.entity_type}</td>
-                      <td className="py-3 px-4 text-[var(--color-muted)] font-mono text-xs">
+                      </TD>
+                      <TD label="Entity" className="text-[var(--color-muted)]">
+                        {log.entity_type}
+                      </TD>
+                      <TD label="Entity ID" className="text-[var(--color-muted)] font-mono text-xs">
                         {log.entity_id ? log.entity_id.slice(0, 8) + '…' : '—'}
-                      </td>
-                      <td className="py-3 px-4 text-[var(--color-muted)]">
+                      </TD>
+                      <TD label="Timestamp" className="text-[var(--color-muted)]">
                         {new Date(log.created_at).toLocaleString()}
-                      </td>
-                    </tr>
+                      </TD>
+                    </TR>
                   ))}
-                </tbody>
-              </table>
-            </div>
+                </TBody>
+              </Table>
+              <Pagination page={page} pageSize={pageSize} total={totalCount} onPageChange={goToPage} />
+            </>
           )}
         </CardContent>
       </Card>

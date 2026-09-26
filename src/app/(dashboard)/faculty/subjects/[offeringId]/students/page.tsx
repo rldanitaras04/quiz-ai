@@ -6,7 +6,7 @@ import EmptyState from '@/components/ui/EmptyState';
 import WorkspaceNavSetter from '@/components/layout/WorkspaceNavSetter';
 import AddStudentButton from './AddStudentButton';
 import EnrollBulkButton from './EnrollBulkButton';
-import RemoveStudentButton from './RemoveStudentButton';
+import EnrollmentTable, { type RosterRow } from './EnrollmentTable';
 
 interface Props {
   params: Promise<{ offeringId: string }>;
@@ -69,12 +69,25 @@ export default async function StudentsPage({ params }: Props) {
       student:student_profiles(student_number, profiles(id, full_name, email))
     `)
     .eq('subject_offering_id', offeringId)
-    .eq('status', 'enrolled')
     .order('enrolled_at', { ascending: true });
 
-  // Only currently enrolled students are listed for this offering.
+  // Withdrawn / dropped / completed rows stay visible so faculty can see why a
+  // student disappeared and restore them with Re-enroll.
   const rows = ((enrollments ?? []) as unknown as EnrollmentRow[]);
-  const activeCount = rows.length;
+  const activeCount = rows.filter((e) => e.status === 'enrolled').length;
+
+  const roster: RosterRow[] = rows.map((e) => {
+    const display = studentDisplay(e.student);
+    return {
+      id: e.id,
+      studentId: e.student_id,
+      studentNumber: display.number,
+      name: display.name,
+      email: display.email,
+      status: e.status,
+      enrolledAt: e.enrolled_at,
+    };
+  });
 
   return (
     <div>
@@ -90,7 +103,9 @@ export default async function StudentsPage({ params }: Props) {
           { label: 'Students' },
         ]}
         title="Student Enrollment"
-        description={`${o.subject?.code} - ${o.section?.name} · ${activeCount} enrolled`}
+        description={`${o.subject?.code} - ${o.section?.name} · ${activeCount} enrolled${
+          rows.length > activeCount ? ` · ${rows.length - activeCount} inactive` : ''
+        }`}
         actions={
           <>
             <EnrollBulkButton
@@ -102,49 +117,9 @@ export default async function StudentsPage({ params }: Props) {
         }
       />
 
-      {rows.length > 0 ? (
+      {roster.length > 0 ? (
         <Card>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-[var(--color-border)]">
-                  <th className="text-left px-6 py-3 font-medium text-[var(--color-muted)]">Student Number</th>
-                  <th className="text-left px-6 py-3 font-medium text-[var(--color-muted)]">Name</th>
-                  <th className="text-left px-6 py-3 font-medium text-[var(--color-muted)]">Email</th>
-                  <th className="text-left px-6 py-3 font-medium text-[var(--color-muted)]">Enrolled</th>
-                  <th className="text-right px-6 py-3 font-medium text-[var(--color-muted)]">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((e) => {
-                  const display = studentDisplay(e.student);
-
-                  return (
-                    <tr
-                      key={e.id}
-                      className="border-b border-[var(--color-border)] last:border-0 hover:bg-[var(--color-surface-hover)]"
-                    >
-                      <td className="px-6 py-3 font-mono text-[var(--color-foreground)]">{display.number}</td>
-                      <td className="px-6 py-3 text-[var(--color-foreground)]">{display.name}</td>
-                      <td className="px-6 py-3 text-[var(--color-muted)]">{display.email}</td>
-                      <td className="px-6 py-3 text-[var(--color-muted)]">
-                        {new Date(e.enrolled_at).toLocaleDateString()}
-                      </td>
-                      <td className="px-6 py-3">
-                        <div className="flex justify-end">
-                          <RemoveStudentButton
-                            offeringId={offeringId}
-                            studentId={e.student_id}
-                            studentName={display.name}
-                          />
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+          <EnrollmentTable offeringId={offeringId} rows={roster} />
         </Card>
       ) : (
         <EmptyState

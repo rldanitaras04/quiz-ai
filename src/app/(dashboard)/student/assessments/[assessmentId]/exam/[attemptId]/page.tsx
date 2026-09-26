@@ -48,8 +48,11 @@ export default function ExamPage({
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
   const [showSubmitDialog, setShowSubmitDialog] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [isOnline, setIsOnline] = useState(true);
+  const [isOnline, setIsOnline] = useState(() =>
+    typeof navigator === 'undefined' ? true : navigator.onLine
+  );
   const [pendingSync, setPendingSync] = useState(0);
+  const [syncError, setSyncError] = useState(false);
 
   const answersRef = useRef(answers);
   const flaggedRef = useRef(flagged);
@@ -57,11 +60,54 @@ export default function ExamPage({
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autoSaveTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isSubmittingRef = useRef(false);
-  const isOnlineRef = useRef(true);
+  const isOnlineRef = useRef(isOnline);
 
   useEffect(() => { answersRef.current = answers; }, [answers]);
   useEffect(() => { flaggedRef.current = flagged; }, [flagged]);
   useEffect(() => { attemptRef.current = attempt; }, [attempt]);
+
+  // Flush answers that were queued while offline. Kept above the effects that
+  // depend on it so first paint already knows how to recover.
+  const syncPendingAnswers = useCallback(async (attemptId: string) => {
+    try {
+      const localAnswers = await getLocalAnswers(attemptId);
+      if (localAnswers.length === 0) {
+        setPendingSync(0);
+        setSyncError(false);
+        return;
+      }
+
+      const payload = localAnswers.map((a) => ({
+        questionId: a.questionId,
+        selectedChoiceId: a.selectedChoiceId,
+        textAnswer: a.textAnswer,
+        clientRevision: a.clientRevision,
+      }));
+
+      const res = await syncAnswersToServer(attemptId, payload);
+      if (res.serverRevisions) {
+        setAnswers((prev) => {
+          const next = new Map(prev);
+          for (const [qId, serverRev] of Object.entries(res.serverRevisions)) {
+            const existing = next.get(qId);
+            if (existing) {
+              next.set(qId, {
+                ...existing,
+                clientRevision: Math.max(existing.clientRevision, serverRev),
+              });
+            }
+          }
+          return next;
+        });
+      }
+      setPendingSync(0);
+      setSyncError(false);
+      setLastSavedAt(new Date());
+    } catch {
+      setSyncError(true);
+      // Will retry on the next interval or online event.
+    }
+  }, []);
 
   // Online/offline detection
   useEffect(() => {
@@ -77,7 +123,6 @@ export default function ExamPage({
       isOnlineRef.current = false;
     };
 
-    setIsOnline(navigator.onLine);
     isOnlineRef.current = navigator.onLine;
 
     window.addEventListener('online', handleOnline);
@@ -86,13 +131,13 @@ export default function ExamPage({
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
     };
-  }, []);
+  }, [syncPendingAnswers]);
 
   useEffect(() => {
     async function load() {
       if (userLoading) return;
 
-      const result = await getAttemptDetails(attemptId);
+      const result = await getAttemptDetails(attemptId, assessmentId);
       if (result.error) {
         setError(result.error);
         setLoading(false);
@@ -105,7 +150,7 @@ export default function ExamPage({
         return;
       }
 
-      const { attempt: a, manifest: m, questions: q } = result.data;
+      const { attempt: a, manifest: m, questions: q, responses } = result.data;
 
       if (a.status !== 'in_progress') {
         setError('This exam is no longer in progress.');
@@ -117,21 +162,41 @@ export default function ExamPage({
       setManifest(m);
       setQuestions(q);
 
+      // Rebuild the answer map from the server copy plus anything still queued
+      // in IndexedDB. The local copy only wins when it holds a revision the
+      // server has not acknowledged — so a reload restores the paper instead of
+      // showing every question blank, while never resurrecting stale data.
+      const serverByQuestion = new Map(responses.map((r) => [r.questionId, r]));
+      const localAnswers = await getLocalAnswers(a.id).catch(() => []);
+      const localByQuestion = new Map(localAnswers.map((l) => [l.questionId, l]));
+
       const initialAnswers = new Map<string, AnswerState>();
       q.forEach((question) => {
+        const server = serverByQuestion.get(question.id);
+        const local = localByQuestion.get(question.id);
+        const useLocal = Boolean(local) && local!.clientRevision > (server?.serverRevision ?? 0);
+        const source = useLocal ? local! : server;
         initialAnswers.set(question.id, {
-          selectedChoiceId: null,
-          textAnswer: '',
-          clientRevision: 0,
+          selectedChoiceId: source?.selectedChoiceId ?? null,
+          textAnswer: source?.textAnswer ?? '',
+          clientRevision: Math.max(local?.clientRevision ?? 0, server?.serverRevision ?? 0),
         });
       });
       setAnswers(initialAnswers);
 
+      const unsynced = localAnswers.filter(
+        (l) => l.clientRevision > (serverByQuestion.get(l.questionId)?.serverRevision ?? 0)
+      ).length;
+      if (unsynced > 0) setPendingSync(unsynced);
+
       setLoading(false);
+
+      // Flush anything that was queued while offline as soon as we are back.
+      if (navigator.onLine && unsynced > 0) void syncPendingAnswers(a.id);
     }
 
     load();
-  }, [attemptId, userLoading]);
+  }, [attemptId, assessmentId, userLoading, syncPendingAnswers]);
 
   const saveAnswers = useCallback(async () => {
     if (!attemptRef.current || isSubmittingRef.current) return;
@@ -177,50 +242,18 @@ export default function ExamPage({
           });
         }
         setPendingSync(0);
+        setSyncError(false);
       } else {
         setPendingSync(payload.length);
+        setSyncError(false);
       }
 
       setLastSavedAt(new Date());
     } catch {
-      // Silently fail — will retry on next interval
+      // Stay queued — retried on the next interval or online event.
+      setSyncError(true);
     } finally {
       setSaving(false);
-    }
-  }, []);
-
-  const syncPendingAnswers = useCallback(async (attemptId: string) => {
-    try {
-      const localAnswers = await getLocalAnswers(attemptId);
-      if (localAnswers.length === 0) return;
-
-      const payload = localAnswers.map(a => ({
-        questionId: a.questionId,
-        selectedChoiceId: a.selectedChoiceId,
-        textAnswer: a.textAnswer,
-        clientRevision: a.clientRevision,
-      }));
-
-      const res = await syncAnswersToServer(attemptId, payload);
-      if (res.serverRevisions) {
-        setAnswers((prev) => {
-          const next = new Map(prev);
-          for (const [qId, serverRev] of Object.entries(res.serverRevisions)) {
-            const existing = next.get(qId);
-            if (existing) {
-              next.set(qId, {
-                ...existing,
-                clientRevision: Math.max(existing.clientRevision, serverRev),
-              });
-            }
-          }
-          return next;
-        });
-      }
-      setPendingSync(0);
-      setLastSavedAt(new Date());
-    } catch {
-      // Will retry on next online event
     }
   }, []);
 
@@ -331,25 +364,21 @@ export default function ExamPage({
 
   if (!attempt || !manifest || questions.length === 0) return null;
 
-  // Manifest order is already type-grouped (and shuffled inside groups when
-  // the deployment says so). Walk it and restart item numbers at 1 per type.
-  const typeCounters = new Map<string, number>();
-  const seenTypes = new Set<string>();
+  // Manifest order is the strict document order (shuffled only when the
+  // deployment requests it). Number items 1..n continuously; a type change
+  // marks the start of a section for the navigator/header.
   const displayById = new Map<
     string,
     { displayNumber: number; isFirstInGroup: boolean; groupLabel: string }
   >();
-  for (const q of questions) {
-    const next = (typeCounters.get(q.question_type) ?? 0) + 1;
-    typeCounters.set(q.question_type, next);
-    const firstEver = !seenTypes.has(q.question_type);
-    seenTypes.add(q.question_type);
+  questions.forEach((q, index) => {
+    const prev = index > 0 ? questions[index - 1] : null;
     displayById.set(q.id, {
-      displayNumber: next,
-      isFirstInGroup: firstEver,
+      displayNumber: index + 1,
+      isFirstInGroup: !prev || prev.question_type !== q.question_type,
       groupLabel: QUESTION_TYPE_LABELS[q.question_type] ?? q.question_type,
     });
-  }
+  });
 
   const currentQuestion = questions[currentIndex];
   const currentMeta = displayById.get(currentQuestion.id);
@@ -399,12 +428,21 @@ export default function ExamPage({
                 <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 5.636a9 9 0 010 12.728m0 0l-2.829-2.829m2.829 2.829L21 21M15.536 8.464a5 5 0 010 7.072m0 0l-2.829-2.829m-4.242 2.829a5 5 0 01-1.414-2.83m-1.414 5.658a9 9 0 01-2.167-9.238m7.824 2.167a1 1 0 111.414 1.414m-1.414-1.414L3 3" />
                 </svg>
-                Offline
+                Offline — saved on this device
               </span>
             )}
-            {pendingSync > 0 && isOnline && (
+            {isOnline && syncError && (
+              <button
+                type="button"
+                onClick={() => attemptRef.current && syncPendingAnswers(attemptRef.current.id)}
+                className="text-xs text-danger font-medium flex items-center gap-1 hover:underline"
+              >
+                Sync error — tap to retry
+              </button>
+            )}
+            {isOnline && !syncError && pendingSync > 0 && (
               <span className="text-xs text-warning flex items-center gap-1">
-                <Spinner size="sm" /> Syncing...
+                <Spinner size="sm" /> Sync pending
               </span>
             )}
             {saving && (
@@ -412,9 +450,9 @@ export default function ExamPage({
                 <Spinner size="sm" /> Saving...
               </span>
             )}
-            {lastSavedAt && !saving && (
-              <span className="text-xs text-muted">
-                Saved {lastSavedAt.toLocaleTimeString()}
+            {!saving && !syncError && pendingSync === 0 && lastSavedAt && (
+              <span className="text-xs text-success">
+                Synced {lastSavedAt.toLocaleTimeString()}
               </span>
             )}
             <ExamTimer

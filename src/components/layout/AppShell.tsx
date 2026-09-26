@@ -2,12 +2,15 @@
 
 import { useCallback, useState, useSyncExternalStore, type JSX, type ReactNode } from 'react';
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import Sidebar from './Sidebar';
 import ContextualSidebar from './ContextualSidebar';
 import TopBar from './TopBar';
+import MobileBottomNav from './MobileBottomNav';
 import { useNavigationContext } from './NavigationContext';
 import type { UserRole } from '@/lib/types';
 import type { NavigationItem } from '@/config/navigation';
+import { hasBottomNavigation, isFullScreenRoute } from '@/config/navigation';
 import {
   getIsDesktop,
   getIsDesktopServerSnapshot,
@@ -31,12 +34,11 @@ interface AppShellProps {
 
 /**
  * Application chrome: a persistent sidebar on desktop, an overlay drawer on
- * mobile, and one hamburger in the top bar that drives whichever of the two the
- * current viewport actually shows.
+ * mobile, a contextual workspace rail, and a mobile bottom bar — all fed from
+ * the one centralized navigation configuration.
  *
- * When contextualNav is provided via NavigationContext, a second sidebar column
- * is rendered on desktop showing workspace-specific navigation (subject/assessment tabs).
- * On mobile, a bottom navigation bar is shown for contextual items.
+ * On full-screen routes (the secure exam shell) none of this chrome renders:
+ * no sidebar, no top bar, no bottom navigation.
  */
 export default function AppShell({
   children,
@@ -49,6 +51,8 @@ export default function AppShell({
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [mobileContextualNavOpen, setMobileContextualNavOpen] = useState(false);
   const { contextualNav, contextualNavPath } = useNavigationContext();
+  const pathname = usePathname();
+  const fullScreen = isFullScreenRoute(pathname);
 
   // Browser state (stored preference, viewport) is read through external stores
   // so the server snapshot stays stable and the preference persists across
@@ -76,8 +80,13 @@ export default function AppShell({
     setMobileContextualNavOpen((prev) => !prev);
   }, []);
 
+  // Secure examination: render nothing but the page itself. ExamShell owns the
+  // full-height layout, so no wrapper chrome is added here either.
+  if (fullScreen) return <>{children}</>;
+
   const navigationExpanded = isDesktop ? !collapsed : drawerOpen;
   const hasContextualNav = Boolean(contextualNav && contextualNav.length > 0);
+  const showBottomNav = hasBottomNavigation(role);
 
   return (
     <div className="flex h-screen overflow-hidden bg-[var(--color-background)]">
@@ -97,12 +106,20 @@ export default function AppShell({
         }`}
         aria-hidden={!drawerOpen}
       >
-        <Sidebar role={role} onClose={closeDrawer} />
+        <Sidebar
+          role={role}
+          onClose={closeDrawer}
+          notificationCount={notificationCount}
+        />
       </div>
 
       {/* Desktop global rail */}
       <div className="hidden lg:flex lg:flex-shrink-0">
-        <Sidebar role={role} collapsed={collapsed} />
+        <Sidebar
+          role={role}
+          collapsed={collapsed}
+          notificationCount={notificationCount}
+        />
       </div>
 
       {/* Desktop contextual rail - only when in a workspace */}
@@ -123,25 +140,27 @@ export default function AppShell({
           notificationCount={notificationCount}
         />
 
-        <main className="flex-1 overflow-y-auto pb-16 lg:pb-0">
+        <main className="flex-1 overflow-y-auto">
           <div className="h-full px-4 py-6 lg:px-8 lg:py-8">{children}</div>
         </main>
 
-        {/* Mobile contextual bottom navigation */}
+        {/* Mobile contextual tabs, stacked directly above the global bottom bar */}
         {hasContextualNav && !isDesktop && (
-          <div className="fixed bottom-0 left-0 right-0 z-50 bg-[var(--color-surface)] border-t border-[var(--color-border)] lg:hidden">
-            <div className="flex items-center justify-between px-3 py-2">
+          <div className="shrink-0 border-t border-[var(--color-border)] bg-[var(--color-surface)] lg:hidden">
+            <div className="flex items-center justify-between px-3 py-1.5">
               <button
                 onClick={toggleMobileContextualNav}
-                className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-[var(--color-muted)] hover:text-[var(--color-foreground)] transition-colors rounded-[var(--radius-md)]"
+                className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-[var(--color-muted)] hover:text-[var(--color-foreground)] transition-colors rounded-[var(--radius-md)] focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-focus-ring)]"
                 aria-label="Workspace navigation"
                 aria-expanded={mobileContextualNavOpen}
+                aria-controls="mobile-contextual-nav"
               >
                 <span>Workspace</span>
                 <svg
                   className={`h-4 w-4 transition-transform ${mobileContextualNavOpen ? 'rotate-180' : ''}`}
                   viewBox="0 0 20 20"
                   fill="currentColor"
+                  aria-hidden="true"
                 >
                   <path
                     fillRule="evenodd"
@@ -157,7 +176,7 @@ export default function AppShell({
             </div>
 
             {mobileContextualNavOpen && (
-              <div className="px-3 pb-3 border-t border-[var(--color-border)] animate-slide-down">
+              <div id="mobile-contextual-nav" className="px-3 pb-3 border-t border-[var(--color-border)] animate-slide-down">
                 <nav className="flex gap-1 overflow-x-auto pb-2" aria-label="Workspace tabs">
                   {contextualNav.map((item: NavigationItem) => (
                     <Link
@@ -185,6 +204,11 @@ export default function AppShell({
               </div>
             )}
           </div>
+        )}
+
+        {/* Global mobile bottom navigation (Student / Faculty) */}
+        {showBottomNav && !isDesktop && (
+          <MobileBottomNav key={pathname} role={role} notificationCount={notificationCount} />
         )}
       </div>
     </div>

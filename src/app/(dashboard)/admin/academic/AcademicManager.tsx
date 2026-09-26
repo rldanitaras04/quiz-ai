@@ -21,9 +21,14 @@ import {
 
 type FormKind = 'academic_year' | 'semester' | 'program' | 'year_level' | 'section' | null;
 
+/** Which section of the manager a child route renders. */
+export type AcademicView = 'all' | 'years' | 'semesters' | 'programs' | 'year-levels' | 'sections';
+
 interface AcademicManagerProps {
   structure: AcademicStructure;
   reference: AdminReferenceData;
+  /** Defaults to 'all'; child routes show just their own block. */
+  view?: AcademicView;
 }
 
 const FORM_TITLES: Record<Exclude<FormKind, null>, string> = {
@@ -51,8 +56,13 @@ const ENTITY_LABELS: Record<Exclude<FormKind, null>, string> = {
 export default function AcademicManager({
   structure,
   reference,
+  view = 'all',
 }: AcademicManagerProps): JSX.Element {
   const router = useRouter();
+
+  const showYearsBlock = view === 'all' || view === 'years' || view === 'semesters';
+  const showProgramsBlock = view === 'all' || view === 'programs' || view === 'sections';
+  const showYearLevelsStrip = view === 'all' || view === 'year-levels';
 
   const [kind, setKind] = useState<FormKind>(null);
   const [fields, setFields] = useState<Record<string, string>>({});
@@ -133,11 +143,21 @@ export default function AcademicManager({
   return (
     <>
       <div className="flex flex-wrap gap-2 mb-6">
-        <Button size="sm" onClick={() => openForm('academic_year')}>New Academic Year</Button>
-        <Button size="sm" variant="secondary" onClick={() => openForm('semester')}>New Semester</Button>
-        <Button size="sm" variant="secondary" onClick={() => openForm('program')}>New Program</Button>
-        <Button size="sm" variant="secondary" onClick={() => openForm('year_level')}>New Year Level</Button>
-        <Button size="sm" variant="secondary" onClick={() => openForm('section')}>New Section</Button>
+        {(view === 'all' || view === 'years') && (
+          <Button size="sm" onClick={() => openForm('academic_year')}>New Academic Year</Button>
+        )}
+        {(view === 'all' || view === 'semesters') && (
+          <Button size="sm" variant="secondary" onClick={() => openForm('semester')}>New Semester</Button>
+        )}
+        {(view === 'all' || view === 'programs') && (
+          <Button size="sm" variant="secondary" onClick={() => openForm('program')}>New Program</Button>
+        )}
+        {(view === 'all' || view === 'year-levels') && (
+          <Button size="sm" variant="secondary" onClick={() => openForm('year_level')}>New Year Level</Button>
+        )}
+        {(view === 'all' || view === 'sections') && (
+          <Button size="sm" variant="secondary" onClick={() => openForm('section')}>New Section</Button>
+        )}
       </div>
 
       <Modal
@@ -211,6 +231,8 @@ export default function AcademicManager({
       </Modal>
 
       {/* Academic years + semesters -------------------------------------- */}
+      {showYearsBlock && (
+      <>
       <h2 className="text-lg font-semibold text-[var(--color-foreground)] mb-4">
         Academic Years &amp; Semesters
       </h2>
@@ -267,8 +289,12 @@ export default function AcademicManager({
           ))}
         </div>
       )}
+      </>
+      )}
 
       {/* Programs / year levels / sections ------------------------------- */}
+      {showProgramsBlock && (
+      <>
       <h2 className="text-lg font-semibold text-[var(--color-foreground)] mb-4">
         Programs, Year Levels &amp; Sections
       </h2>
@@ -325,9 +351,16 @@ export default function AcademicManager({
           ))}
         </div>
       )}
+      </>
+      )}
 
       {/* Global year levels (reference rows, deletable) ------------------ */}
-      <h2 className="text-lg font-semibold text-[var(--color-foreground)] mt-8 mb-4">Year Levels</h2>
+      {showYearLevelsStrip && (
+      <>
+      <h2 className={`text-lg font-semibold text-[var(--color-foreground)] mb-4 ${view === 'all' ? 'mt-8' : ''}`}>Year Levels</h2>
+      {reference.yearLevels.length === 0 ? (
+        <p className="text-sm text-[var(--color-muted)]">No year levels yet.</p>
+      ) : (
       <div className="flex flex-wrap gap-2">
         {reference.yearLevels.map((yl) => (
           <span key={yl.id} className="inline-flex items-center gap-1">
@@ -344,6 +377,9 @@ export default function AcademicManager({
           </span>
         ))}
       </div>
+      )}
+      </>
+      )}
     </>
   );
 }
