@@ -47,6 +47,24 @@ function shuffleArray<T>(array: T[]): T[] {
   return shuffled;
 }
 
+/**
+ * Pool size from `question_pool_config` (`{ count: n }`). Invalid or absent
+ * config means "use every available question".
+ */
+function readPoolSize(config: Record<string, unknown> | null | undefined): number | null {
+  if (!config || typeof config !== 'object') return null;
+  const raw = (config as Record<string, unknown>).count;
+  const count = Number(raw);
+  if (!Number.isFinite(count) || count < 1) return null;
+  return Math.floor(count);
+}
+
+/** Uniform random sample without replacement, preserving no order bias. */
+function sampleArray<T>(items: T[], count: number): T[] {
+  const pool = shuffleArray(items);
+  return pool.slice(0, count);
+}
+
 function isStartExamSuccess(
   outcome: StartExamOutcome
 ): outcome is StartExamSuccess {
@@ -140,6 +158,21 @@ export async function startExamAttempt(
     return { error: 'Attempt limit reached', status: 403 };
   }
 
+  // One active attempt per student per deployment — enforced server-side, not
+  // just in the UI, so a direct action call cannot open a second concurrent
+  // paper (attempt_limit > 1 only governs how many attempts exist in total).
+  const { data: activeAttempt } = await supabase
+    .from('exam_attempts')
+    .select('id')
+    .eq('deployment_id', deploymentId)
+    .eq('student_id', userId)
+    .eq('status', 'in_progress')
+    .maybeSingle();
+
+  if (activeAttempt) {
+    return { error: 'An exam is already in progress for this assessment', status: 409 };
+  }
+
   // RLS grants students no SELECT on questions (answer-key protection), so
   // question content is read via the service-role client after the
   // authorization checks above have passed.
@@ -159,9 +192,20 @@ export async function startExamAttempt(
   }
 
   let orderedQuestions: QuestionWithChoices[] = [...(questions as QuestionWithChoices[])];
-  // Strict document order by position (source sequence); only 'shuffled'
-  // deployments randomize. Questions are never regrouped by type.
-  const shuffle = deployment.question_order_mode === 'shuffled';
+
+  // Question pool: when the deployment configures a pool smaller than the
+  // available set, only that many questions are selected for this attempt —
+  // the manifest therefore pins exactly what the student may see, and the
+  // master pool never reaches the browser.
+  const poolSize = readPoolSize(deployment.question_pool_config);
+  if (poolSize !== null && poolSize < orderedQuestions.length) {
+    orderedQuestions = sampleArray(orderedQuestions, poolSize);
+  }
+
+  // Strict document order by position (source sequence); 'shuffled' AND
+  // 'random' deployments randomize. Questions are never regrouped by type.
+  const shuffle =
+    deployment.question_order_mode === 'shuffled' || deployment.question_order_mode === 'random';
   const idOrder = buildQuestionIdOrder(orderedQuestions, { shuffle });
   const byId = new Map(orderedQuestions.map((q) => [q.id, q]));
   orderedQuestions = idOrder.map((id) => byId.get(id)!).filter(Boolean);
@@ -171,7 +215,10 @@ export async function startExamAttempt(
 
   for (const question of orderedQuestions) {
     const choices = question.question_choices ?? [];
-    if (deployment.choice_order_mode === 'shuffled') {
+    if (
+      deployment.choice_order_mode === 'shuffled' ||
+      deployment.choice_order_mode === 'random'
+    ) {
       choiceOrder[question.id] = shuffleArray(choices).map((c) => c.id);
     } else {
       choiceOrder[question.id] = [...choices]

@@ -8,8 +8,19 @@ import ExamQuestion from '@/components/exam/ExamQuestion';
 import Button from '@/components/ui/Button';
 import Modal from '@/components/ui/Modal';
 import Spinner from '@/components/ui/Spinner';
+import Input from '@/components/ui/Input';
 import { getAttemptDetails, submitExam } from '../actions';
-import { saveAnswerLocally, syncAnswersToServer, getLocalAnswers, clearLocalAnswers } from '@/lib/sync';
+import {
+  clearLocalAnswers,
+  getPendingOperations,
+  markAnswersSyncFailed,
+  markAnswersSynced,
+  saveAnswerLocally,
+  syncOperationsToServer,
+  type StoredAnswer,
+} from '@/lib/sync';
+import { useExamSession, type HeartbeatStateInput } from '@/components/exam/useExamSession';
+import { useSecurityListeners } from '@/components/exam/useSecurityListeners';
 import ExamShell from '@/components/layout/ExamShell';
 import { QUESTION_TYPE_LABELS, QUESTION_TYPE_SHORT_LABELS } from '@/lib/constants';
 import type {
@@ -26,6 +37,16 @@ interface AnswerState {
 
 const AUTO_SAVE_INTERVAL = 30_000;
 const DEBOUNCE_DELAY = 2_000;
+const PENDING_RETRY_INTERVAL = 10_000;
+
+type SyncBadge =
+  | { kind: 'saving'; label: 'Saving' }
+  | { kind: 'local'; label: 'Saved Locally'; at: string }
+  | { kind: 'syncing'; label: 'Syncing' }
+  | { kind: 'synced'; label: 'Synced'; at: string }
+  | { kind: 'offline'; label: 'Offline — Saved on this Device'; pending: number }
+  | { kind: 'pending'; label: 'Sync Pending'; pending: number }
+  | { kind: 'error'; label: 'Sync Error' };
 
 export default function ExamPage({
   params,
@@ -44,83 +65,289 @@ export default function ExamPage({
   const [currentIndex, setCurrentIndex] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [attemptClosedMessage, setAttemptClosedMessage] = useState<string | null>(null);
+
+  // --- synchronization state machine ---------------------------------------
   const [saving, setSaving] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [pendingSync, setPendingSync] = useState(0);
+  const [syncError, setSyncError] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
-  const [showSubmitDialog, setShowSubmitDialog] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
+  const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
+
   const [isOnline, setIsOnline] = useState(() =>
     typeof navigator === 'undefined' ? true : navigator.onLine
   );
-  const [pendingSync, setPendingSync] = useState(0);
-  const [syncError, setSyncError] = useState(false);
+
+  const [showSubmitDialog, setShowSubmitDialog] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [deadlineSkipNotice, setDeadlineSkipNotice] = useState<number | null>(null);
+
+  // --- examination security UI state ---------------------------------------
+  const [showFullscreenWarning, setShowFullscreenWarning] = useState(false);
+  const [reverificationPassword, setReverificationPassword] = useState('');
+  const [reverificationError, setReverificationError] = useState<string | null>(null);
+  const [reverificationBusy, setReverificationBusy] = useState(false);
 
   const answersRef = useRef(answers);
   const flaggedRef = useRef(flagged);
   const attemptRef = useRef(attempt);
+  const currentIndexRef = useRef(currentIndex);
+  const pendingSyncRef = useRef(pendingSync);
+  const syncErrorRef = useRef(syncError);
+  const syncingRef = useRef(syncing);
+  const questionsRef = useRef(questions);
+  const lastSavedAtRef = useRef(lastSavedAt);
+  const lastSyncedAtRef = useRef(lastSyncedAt);
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autoSaveTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const retryTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isSubmittingRef = useRef(false);
   const isOnlineRef = useRef(isOnline);
+  const sessionOpenedRef = useRef(false);
 
   useEffect(() => { answersRef.current = answers; }, [answers]);
   useEffect(() => { flaggedRef.current = flagged; }, [flagged]);
   useEffect(() => { attemptRef.current = attempt; }, [attempt]);
+  useEffect(() => { currentIndexRef.current = currentIndex; }, [currentIndex]);
+  useEffect(() => { pendingSyncRef.current = pendingSync; }, [pendingSync]);
+  useEffect(() => { syncErrorRef.current = syncError; }, [syncError]);
+  useEffect(() => { syncingRef.current = syncing; }, [syncing]);
+  useEffect(() => { questionsRef.current = questions; }, [questions]);
+  useEffect(() => { lastSavedAtRef.current = lastSavedAt; }, [lastSavedAt]);
+  useEffect(() => { lastSyncedAtRef.current = lastSyncedAt; }, [lastSyncedAt]);
 
-  // Flush answers that were queued while offline. Kept above the effects that
-  // depend on it so first paint already knows how to recover.
-  const syncPendingAnswers = useCallback(async (attemptId: string) => {
-    try {
-      const localAnswers = await getLocalAnswers(attemptId);
-      if (localAnswers.length === 0) {
-        setPendingSync(0);
-        setSyncError(false);
-        return;
-      }
+  // -------------------------------------------------------------------------
+  // Heartbeat state provider (no answer contents leave the browser)
+  // -------------------------------------------------------------------------
+  const getHeartbeatState = useCallback((): HeartbeatStateInput | null => {
+    const a = attemptRef.current;
+    if (!a) return null;
+    const answeredCount = Array.from(answersRef.current.values()).filter(
+      (ans) => !!(ans.selectedChoiceId || ans.textAnswer?.trim())
+    ).length;
+    const pending = pendingSyncRef.current;
+    const syncState: HeartbeatStateInput['syncState'] = !isOnlineRef.current
+      ? pending > 0
+        ? 'pending'
+        : 'synced'
+      : syncErrorRef.current
+        ? 'error'
+        : syncingRef.current
+          ? 'syncing'
+          : pending > 0
+            ? 'pending'
+            : 'synced';
 
-      const payload = localAnswers.map((a) => ({
-        questionId: a.questionId,
-        selectedChoiceId: a.selectedChoiceId,
-        textAnswer: a.textAnswer,
-        clientRevision: a.clientRevision,
-      }));
-
-      const res = await syncAnswersToServer(attemptId, payload);
-      if (res.serverRevisions) {
-        setAnswers((prev) => {
-          const next = new Map(prev);
-          for (const [qId, serverRev] of Object.entries(res.serverRevisions)) {
-            const existing = next.get(qId);
-            if (existing) {
-              next.set(qId, {
-                ...existing,
-                clientRevision: Math.max(existing.clientRevision, serverRev),
-              });
-            }
-          }
-          return next;
-        });
-      }
-      setPendingSync(0);
-      setSyncError(false);
-      setLastSavedAt(new Date());
-    } catch {
-      setSyncError(true);
-      // Will retry on the next interval or online event.
-    }
+    return {
+      currentItem: currentIndexRef.current + 1,
+      totalItems: questionsRef.current.length,
+      answeredCount,
+      flaggedCount: flaggedRef.current.size,
+      connectionState: isOnlineRef.current ? 'online' : 'offline',
+      syncState,
+      pendingSyncCount: pending,
+      lastLocalSaveAt: lastSavedAtRef.current?.toISOString() ?? null,
+      lastSyncAt: lastSyncedAtRef.current?.toISOString() ?? null,
+    };
   }, []);
 
-  // Online/offline detection
+  const handleAttemptEnded = useCallback((status: string) => {
+    if (isSubmittingRef.current) return;
+    setAttemptClosedMessage(
+      status === 'invalidated'
+        ? 'This attempt has been closed by your instructor.'
+        : 'This attempt is no longer in progress.'
+    );
+  }, []);
+
+  // -------------------------------------------------------------------------
+  // Session (single active examination session, heartbeat, events, recovery)
+  // -------------------------------------------------------------------------
+  const examSession = useExamSession({
+    attemptId,
+    enabled: !loading && !error && Boolean(attempt) && attempt?.status === 'in_progress',
+    getState: getHeartbeatState,
+    onAttemptEnded: handleAttemptEnded,
+  });
+
+  const {
+    policy,
+    ready: sessionReady,
+    error: sessionError,
+    transferred: sessionTransferred,
+    requiresReverification,
+    serverNowOffset,
+    attemptExpiresAt,
+    reportEvent,
+    sendHeartbeat,
+    verifyIdentity,
+    forgetSession,
+  } = examSession;
+
+  // -------------------------------------------------------------------------
+  // Synchronization queue
+  // -------------------------------------------------------------------------
+  const flushPendingOperations = useCallback(async (): Promise<boolean> => {
+    const a = attemptRef.current;
+    const handle = examSession.session;
+    if (!a || !handle) return false;
+    if (syncingRef.current) return false;
+
+    try {
+      const pending = await getPendingOperations(a.id);
+      if (pending.length === 0) {
+        setPendingSync(0);
+        setSyncError(false);
+        return true;
+      }
+
+      if (!isOnlineRef.current) {
+        setPendingSync(pending.length);
+        return false;
+      }
+
+      setSyncing(true);
+      setSyncError(false);
+      reportEvent('pending_sync_started', { operations: pending.length });
+
+      const payload = pending.map((r) => ({
+        operationId: r.operationId,
+        questionId: r.questionId,
+        selectedChoiceId: r.selectedChoiceId,
+        textAnswer: r.textAnswer,
+        clientRevision: r.clientRevision,
+      }));
+
+      const response = await syncOperationsToServer(
+        a.id,
+        handle.sessionId,
+        handle.sessionToken,
+        payload
+      );
+
+      // Revisions are paired back with the operation ids we sent so a save
+      // made DURING the request keeps its record pending (it has a new id).
+      const ack = payload
+        .filter((op) => typeof response.serverRevisions?.[op.questionId] === 'number')
+        .map((op) => ({
+          questionId: op.questionId,
+          operationId: op.operationId,
+          serverRevision: response.serverRevisions[op.questionId],
+        }));
+
+      const unanswered = payload.filter(
+        (op) => typeof response.serverRevisions?.[op.questionId] !== 'number'
+      );
+      if (unanswered.length > 0) {
+        await markAnswersSyncFailed(
+          a.id,
+          unanswered.map((op) => op.questionId),
+          'Rejected by server'
+        );
+      }
+
+      await markAnswersSynced(a.id, ack);
+
+      // Reconcile React state with authoritative server revisions.
+      const serverRevisions = response.serverRevisions ?? {};
+      setAnswers((prev) => {
+        const next = new Map(prev);
+        for (const [qId, serverRev] of Object.entries(serverRevisions)) {
+          const existing = next.get(qId);
+          if (existing) {
+            next.set(qId, {
+              ...existing,
+              clientRevision: Math.max(existing.clientRevision, serverRev),
+            });
+          }
+        }
+        return next;
+      });
+
+      const remaining = await getPendingOperations(a.id);
+      setPendingSync(remaining.length);
+      setSyncError(false);
+      setLastSyncedAt(new Date());
+      if (remaining.length === 0) {
+        reportEvent('pending_sync_completed', { operations: payload.length });
+        void sendHeartbeat();
+      }
+      return remaining.length === 0;
+    } catch (err) {
+      setSyncError(true);
+      const message = err instanceof Error ? err.message : 'Sync failed';
+      try {
+        const pending = await getPendingOperations(a.id);
+        await markAnswersSyncFailed(
+          a.id,
+          pending.map((p) => p.questionId),
+          message
+        );
+      } catch {
+        // Queue stays intact regardless — IndexedDB record is the source.
+      }
+      return false;
+    } finally {
+      setSyncing(false);
+    }
+  }, [examSession.session, reportEvent, sendHeartbeat]);
+
+  /**
+   * Durably persist the in-memory answers first, then synchronize if online.
+   * "Saved" (this device) and "Synced" (server acknowledged) are different
+   * states and are reported as such.
+   */
+  const saveAnswers = useCallback(async () => {
+    if (!attemptRef.current || isSubmittingRef.current) return;
+
+    const currentAnswers = answersRef.current;
+    if (currentAnswers.size === 0) return;
+
+    setSaving(true);
+    try {
+      for (const [questionId, state] of currentAnswers.entries()) {
+        await saveAnswerLocally(
+          attemptRef.current.id,
+          questionId,
+          state.selectedChoiceId,
+          state.textAnswer
+        );
+      }
+      setLastSavedAt(new Date());
+
+      const pending = await getPendingOperations(attemptRef.current.id);
+      setPendingSync(pending.length);
+
+      if (isOnlineRef.current && pending.length > 0) {
+        await flushPendingOperations();
+      }
+    } catch {
+      // Local write failed (storage unavailable) — surface as sync error.
+      setSyncError(true);
+    } finally {
+      setSaving(false);
+    }
+  }, [flushPendingOperations]);
+
+  // -------------------------------------------------------------------------
+  // Connectivity
+  // -------------------------------------------------------------------------
   useEffect(() => {
     const handleOnline = () => {
       setIsOnline(true);
       isOnlineRef.current = true;
-      if (attemptRef.current) {
-        syncPendingAnswers(attemptRef.current.id);
+      if (policy.recordConnectionEvents) reportEvent('connection_restored');
+      if (policy.syncOnReconnect && attemptRef.current && sessionOpenedRef.current) {
+        void flushPendingOperations();
       }
+      void sendHeartbeat();
     };
     const handleOffline = () => {
       setIsOnline(false);
       isOnlineRef.current = false;
+      if (policy.recordConnectionEvents) reportEvent('connection_lost');
+      void sendHeartbeat();
     };
 
     isOnlineRef.current = navigator.onLine;
@@ -131,7 +358,19 @@ export default function ExamPage({
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
     };
-  }, [syncPendingAnswers]);
+  }, [policy, reportEvent, flushPendingOperations, sendHeartbeat]);
+
+  // -------------------------------------------------------------------------
+  // Initial load
+  // -------------------------------------------------------------------------
+  async function getLocalAnswersWithFallback(id: string): Promise<StoredAnswer[]> {
+    try {
+      const { getLocalAnswers } = await import('@/lib/sync');
+      return await getLocalAnswers(id);
+    } catch {
+      return [];
+    }
+  }
 
   useEffect(() => {
     async function load() {
@@ -161,13 +400,14 @@ export default function ExamPage({
       setAttempt(a);
       setManifest(m);
       setQuestions(q);
+      questionsRef.current = q;
 
       // Rebuild the answer map from the server copy plus anything still queued
       // in IndexedDB. The local copy only wins when it holds a revision the
       // server has not acknowledged — so a reload restores the paper instead of
       // showing every question blank, while never resurrecting stale data.
       const serverByQuestion = new Map(responses.map((r) => [r.questionId, r]));
-      const localAnswers = await getLocalAnswers(a.id).catch(() => []);
+      const localAnswers = await getLocalAnswersWithFallback(a.id);
       const localByQuestion = new Map(localAnswers.map((l) => [l.questionId, l]));
 
       const initialAnswers = new Map<string, AnswerState>();
@@ -185,86 +425,64 @@ export default function ExamPage({
       setAnswers(initialAnswers);
 
       const unsynced = localAnswers.filter(
-        (l) => l.clientRevision > (serverByQuestion.get(l.questionId)?.serverRevision ?? 0)
+        (l) =>
+          l.syncStatus !== 'synced' &&
+          l.clientRevision > (serverByQuestion.get(l.questionId)?.serverRevision ?? 0)
       ).length;
-      if (unsynced > 0) setPendingSync(unsynced);
+      const anyPending = localAnswers.filter((l) => l.syncStatus !== 'synced').length;
+      if (anyPending > 0) setPendingSync(anyPending);
+      else if (unsynced > 0) setPendingSync(unsynced);
+
+      if (localAnswers.length > 0) {
+        const latestSaved = localAnswers
+          .map((l) => l.savedAt)
+          .sort()
+          .pop();
+        if (latestSaved) setLastSavedAt(new Date(latestSaved));
+      }
 
       setLoading(false);
-
-      // Flush anything that was queued while offline as soon as we are back.
-      if (navigator.onLine && unsynced > 0) void syncPendingAnswers(a.id);
+      sessionOpenedRef.current = true;
     }
 
     load();
-  }, [attemptId, assessmentId, userLoading, syncPendingAnswers]);
+  }, [attemptId, assessmentId, userLoading]);
 
-  const saveAnswers = useCallback(async () => {
-    if (!attemptRef.current || isSubmittingRef.current) return;
+  // Flush anything queued while the tab was closed as soon as the session is
+  // open and we are online (session proof is required by the save endpoint).
+  useEffect(() => {
+    if (!sessionReady || !attempt || !isOnline) return;
+    const t = setTimeout(() => {
+      void (async () => {
+        const pending = await getPendingOperations(attempt.id).catch(() => []);
+        if (pending.length > 0) setPendingSync(pending.length);
+        if (pending.length > 0) void flushPendingOperations();
+      })();
+    }, 300);
+    return () => clearTimeout(t);
+  }, [sessionReady, attempt, isOnline, flushPendingOperations]);
 
-    const currentAnswers = answersRef.current;
-    const payload = Array.from(currentAnswers.entries()).map(
-      ([questionId, state]) => ({
-        questionId,
-        selectedChoiceId: state.selectedChoiceId,
-        textAnswer: state.textAnswer,
-        clientRevision: state.clientRevision,
-      })
-    );
-
-    if (payload.length === 0) return;
-
-    setSaving(true);
-    try {
-      for (const answer of payload) {
-        await saveAnswerLocally(
-          attemptRef.current!.id,
-          answer.questionId,
-          answer.selectedChoiceId,
-          answer.textAnswer
-        );
-      }
-
-      if (isOnlineRef.current) {
-        const res = await syncAnswersToServer(attemptRef.current!.id, payload);
-        if (res.serverRevisions) {
-          setAnswers((prev) => {
-            const next = new Map(prev);
-            for (const [qId, serverRev] of Object.entries(res.serverRevisions)) {
-              const existing = next.get(qId);
-              if (existing) {
-                next.set(qId, {
-                  ...existing,
-                  clientRevision: Math.max(existing.clientRevision, serverRev),
-                });
-              }
-            }
-            return next;
-          });
-        }
-        setPendingSync(0);
-        setSyncError(false);
-      } else {
-        setPendingSync(payload.length);
-        setSyncError(false);
-      }
-
-      setLastSavedAt(new Date());
-    } catch {
-      // Stay queued — retried on the next interval or online event.
-      setSyncError(true);
-    } finally {
-      setSaving(false);
-    }
-  }, []);
-
+  // Autosave + pending retry cadence.
   useEffect(() => {
     if (!attempt || loading) return;
 
     autoSaveTimerRef.current = setInterval(saveAnswers, AUTO_SAVE_INTERVAL);
+    retryTimerRef.current = setInterval(() => {
+      if (
+        isOnlineRef.current &&
+        pendingSyncRef.current > 0 &&
+        !syncingRef.current &&
+        !isSubmittingRef.current
+      ) {
+        void flushPendingOperations();
+      }
+    }, PENDING_RETRY_INTERVAL);
+
     return () => {
       if (autoSaveTimerRef.current) clearInterval(autoSaveTimerRef.current);
+      if (retryTimerRef.current) clearInterval(retryTimerRef.current);
     };
-  }, [attempt, loading, saveAnswers]);
+  }, [attempt, loading, saveAnswers, flushPendingOperations]);
 
   const debouncedSave = useCallback(() => {
     if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
@@ -301,41 +519,139 @@ export default function ExamPage({
     });
   }, []);
 
+  // -------------------------------------------------------------------------
+  // Security listeners + fullscreen gate
+  // -------------------------------------------------------------------------
+  const securityListeners = useSecurityListeners({
+    enabled: sessionReady,
+    policy,
+    report: reportEvent,
+    onFullscreenRequiredExit: () => setShowFullscreenWarning(true),
+  });
+  const { isFullscreen } = securityListeners;
+  const showFullscreenGate =
+    sessionReady && policy.requireFullscreen && !isFullscreen;
+
+  const requestFullscreen = useCallback(() => {
+    const el = document.documentElement;
+    const request = el.requestFullscreen?.bind(el);
+    if (request) {
+      request().catch(() => {
+        // Browser refused (no user gesture / unsupported) — gate stays visible.
+      });
+    }
+  }, []);
+
+  // Question change is an important state-change heartbeat.
+  useEffect(() => {
+    if (sessionReady && attempt && !loading) void sendHeartbeat();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentIndex, sessionReady]);
+
+  // -------------------------------------------------------------------------
+  // Submission
+  // -------------------------------------------------------------------------
   const handleSubmit = useCallback(
-    async (autoSubmit = false) => {
+    async () => {
       if (isSubmittingRef.current) return;
       isSubmittingRef.current = true;
       setSubmitting(true);
 
-      await saveAnswers();
+      reportEvent('submission_started');
 
-      const result = await submitExam(attemptId);
-      if (result.error && !autoSubmit) {
-        setError(result.error);
+      // Durably persist everything first, then attempt a final flush.
+      if (!isSubmittingRef.current) return;
+      setSaving(true);
+      try {
+        for (const [questionId, state] of answersRef.current.entries()) {
+          await saveAnswerLocally(
+            attemptRef.current?.id ?? attemptId,
+            questionId,
+            state.selectedChoiceId,
+            state.textAnswer
+          );
+        }
+      } catch {
+        // ignore — queue still holds the last known state
+      } finally {
+        setSaving(false);
+      }
+
+      const pending = await getPendingOperations(attemptId).catch(() => []);
+      if (pending.length > 0 && isOnlineRef.current) {
+        await flushPendingOperations();
+      }
+      const stillPending = await getPendingOperations(attemptId).catch(() => []);
+
+      const result = await submitExam(
+        attemptId,
+        stillPending.map((r) => ({
+          operationId: r.operationId,
+          questionId: r.questionId,
+          selectedChoiceId: r.selectedChoiceId,
+          textAnswer: r.textAnswer,
+          clientRevision: r.clientRevision,
+        }))
+      );
+
+      if (!result.success) {
+        setError(result.error ?? 'Submission failed');
         setSubmitting(false);
         isSubmittingRef.current = false;
         return;
       }
 
+      // Clean up only after the server acknowledged the submission — local
+      // data is never wiped when the server rejected the request.
       await clearLocalAnswers(attemptId);
+      await forgetSession();
+
+      if ((result.pendingSkipped ?? 0) > 0) {
+        setDeadlineSkipNotice(result.pendingSkipped ?? 0);
+        setSubmitting(false);
+        return;
+      }
 
       router.push(
         `/student/assessments/${assessmentId}/exam/${attemptId}/results`
       );
     },
-    [attemptId, assessmentId, router, saveAnswers]
+    [attemptId, assessmentId, router, flushPendingOperations, reportEvent, forgetSession]
   );
 
   const handleTimeUp = useCallback(() => {
-    handleSubmit(true);
+    void handleSubmit();
   }, [handleSubmit]);
 
   useEffect(() => {
     return () => {
       if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
       if (autoSaveTimerRef.current) clearInterval(autoSaveTimerRef.current);
+      if (retryTimerRef.current) clearInterval(retryTimerRef.current);
     };
   }, []);
+
+  // -------------------------------------------------------------------------
+  // Derived state
+  // -------------------------------------------------------------------------
+  const answeredCount = questions.filter((q) => {
+    const a = answers.get(q.id);
+    return !!(a?.selectedChoiceId || a?.textAnswer?.trim());
+  }).length;
+
+  const syncBadge: SyncBadge | null = (() => {
+    if (saving) return { kind: 'saving', label: 'Saving' };
+    if (!isOnline)
+      return { kind: 'offline', label: 'Offline — Saved on this Device', pending: pendingSync };
+    if (syncError) return { kind: 'error', label: 'Sync Error' };
+    if (syncing) return { kind: 'syncing', label: 'Syncing' };
+    if (pendingSync > 0) return { kind: 'pending', label: 'Sync Pending', pending: pendingSync };
+    if (lastSyncedAt)
+      return { kind: 'synced', label: 'Synced', at: lastSyncedAt.toLocaleTimeString() };
+    if (lastSavedAt)
+      return { kind: 'local', label: 'Saved Locally', at: lastSavedAt.toLocaleTimeString() };
+    return null;
+  })();
 
   if (loading || userLoading) {
     return (
@@ -348,14 +664,22 @@ export default function ExamPage({
     );
   }
 
-  if (error) {
+  if (error || attemptClosedMessage || sessionError) {
+    const message = attemptClosedMessage ?? sessionError ?? error;
     return (
       <div className="flex items-center justify-center min-h-screen">
         <div className="text-center">
-          <p className="text-lg font-medium text-foreground mb-2">Error</p>
-          <p className="text-sm text-muted mb-4">{error}</p>
-          <Button variant="secondary" onClick={() => router.back()}>
-            Go Back
+          <p className="text-lg font-medium text-foreground mb-2">
+            {attemptClosedMessage || sessionError ? 'Session ended' : 'Error'}
+          </p>
+          <p className="text-sm text-muted mb-4">{message}</p>
+          <Button
+            variant="secondary"
+            onClick={() =>
+              router.push(attemptClosedMessage || sessionError ? `/student/assessments/${assessmentId}` : '/')
+            }
+          >
+            {attemptClosedMessage || sessionError ? 'Back to Assessment' : 'Go Back'}
           </Button>
         </div>
       </div>
@@ -384,11 +708,6 @@ export default function ExamPage({
   const currentMeta = displayById.get(currentQuestion.id);
   const currentAnswer = answers.get(currentQuestion.id);
 
-  const answeredCount = questions.filter((q) => {
-    const a = answers.get(q.id);
-    return !!(a?.selectedChoiceId || a?.textAnswer?.trim());
-  }).length;
-
   const canGoPrev = currentIndex > 0;
   const canGoNext = currentIndex < questions.length - 1;
 
@@ -408,6 +727,8 @@ export default function ExamPage({
     }
   });
 
+  const remainingQuestions = questions.length - answeredCount;
+
   return (
     <ExamShell
       backHref={`/student/assessments/${assessmentId}`}
@@ -423,44 +744,65 @@ export default function ExamPage({
           </div>
 
           <div className="flex items-center gap-3">
-            {!isOnline && (
-              <span className="text-xs text-warning font-medium flex items-center gap-1">
+            {syncBadge?.kind === 'offline' && (
+              <span
+                className="text-xs text-warning font-medium flex items-center gap-1"
+                role="status"
+                aria-live="polite"
+              >
                 <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 5.636a9 9 0 010 12.728m0 0l-2.829-2.829m2.829 2.829L21 21M15.536 8.464a5 5 0 010 7.072m0 0l-2.829-2.829m-4.242 2.829a5 5 0 01-1.414-2.83m-1.414 5.658a9 9 0 01-2.167-9.238m7.824 2.167a1 1 0 111.414 1.414m-1.414-1.414L3 3" />
                 </svg>
-                Offline — saved on this device
+                Offline — Saved on this Device ({syncBadge.pending})
               </span>
             )}
-            {isOnline && syncError && (
+            {syncBadge?.kind === 'error' && (
               <button
                 type="button"
-                onClick={() => attemptRef.current && syncPendingAnswers(attemptRef.current.id)}
+                onClick={() => void flushPendingOperations()}
                 className="text-xs text-danger font-medium flex items-center gap-1 hover:underline"
               >
-                Sync error — tap to retry
+                Sync Error — tap to retry
               </button>
             )}
-            {isOnline && !syncError && pendingSync > 0 && (
-              <span className="text-xs text-warning flex items-center gap-1">
-                <Spinner size="sm" /> Sync pending
+            {syncBadge?.kind === 'syncing' && (
+              <span className="text-xs text-warning flex items-center gap-1" role="status">
+                <Spinner size="sm" /> Syncing
               </span>
             )}
-            {saving && (
-              <span className="text-xs text-muted flex items-center gap-1">
-                <Spinner size="sm" /> Saving...
+            {syncBadge?.kind === 'pending' && (
+              <span className="text-xs text-warning flex items-center gap-1" role="status">
+                <Spinner size="sm" /> Sync Pending ({syncBadge.pending})
               </span>
             )}
-            {!saving && !syncError && pendingSync === 0 && lastSavedAt && (
-              <span className="text-xs text-success">
-                Synced {lastSavedAt.toLocaleTimeString()}
+            {syncBadge?.kind === 'saving' && (
+              <span className="text-xs text-muted flex items-center gap-1" role="status">
+                <Spinner size="sm" /> Saving
+              </span>
+            )}
+            {syncBadge?.kind === 'synced' && (
+              <span className="text-xs text-success" role="status">
+                Synced {syncBadge.at}
+              </span>
+            )}
+            {syncBadge?.kind === 'local' && (
+              <span className="text-xs text-success" role="status">
+                Saved Locally {syncBadge.at}
               </span>
             )}
             <ExamTimer
-              expiresAt={attempt.expires_at}
+              expiresAt={attemptExpiresAt ?? attempt.expires_at}
+              clockOffsetMs={serverNowOffset}
               onTimeUp={handleTimeUp}
             />
           </div>
         </header>
+
+        {sessionTransferred && (
+          <div className="px-4 py-2 text-xs bg-[var(--color-info-light)] border-b border-[var(--color-border)] text-[var(--color-foreground)]" role="status">
+            Your examination session was recovered on this device. The event has been recorded.
+          </div>
+        )}
 
         {/* Exam content */}
         <div className="flex flex-1 overflow-hidden">
@@ -520,7 +862,11 @@ export default function ExamPage({
                   </span>
                   <span className="flex items-center gap-1.5">
                     <span className="h-3 w-3 rounded-sm bg-[var(--color-danger)]" aria-hidden="true" />
-                    Unanswered ({questions.length - answeredCount})
+                    Unanswered ({remainingQuestions})
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="h-3 w-3 rounded-sm bg-[var(--color-warning)]" aria-hidden="true" />
+                    Flagged ({flagged.size})
                   </span>
                 </div>
               </div>
@@ -613,7 +959,7 @@ export default function ExamPage({
               </Button>
               <Button
                 variant="primary"
-                onClick={() => handleSubmit(false)}
+                onClick={() => void handleSubmit()}
                 loading={submitting}
               >
                 Submit
@@ -634,10 +980,131 @@ export default function ExamPage({
                 Flagged: {flagged.size}
               </span>
             </div>
-            {answeredCount < questions.length && (
+            {!isOnline && (
               <p className="text-sm text-warning font-medium">
-                You have {questions.length - answeredCount} unanswered question
-                {questions.length - answeredCount !== 1 ? 's' : ''}.
+                You are offline. Your answers are saved on this device and will
+                be synchronized when connectivity returns.
+              </p>
+            )}
+            {pendingSync > 0 && isOnline && (
+              <p className="text-sm text-warning font-medium">
+                {pendingSync} answer{pendingSync !== 1 ? 's are' : ' is'} still
+                synchronizing — submission will send them first.
+              </p>
+            )}
+            {remainingQuestions > 0 && (
+              <p className="text-sm text-warning font-medium">
+                You have {remainingQuestions} unanswered question
+                {remainingQuestions !== 1 ? 's' : ''}.
+              </p>
+            )}
+          </div>
+        </Modal>
+
+        {/* Deadline passed with pending answers that could not be synchronized */}
+        <Modal
+          open={deadlineSkipNotice !== null}
+          onClose={() => router.push(`/student/assessments/${assessmentId}/exam/${attemptId}/results`)}
+          title="Exam submitted"
+          actions={
+            <Button
+              variant="primary"
+              onClick={() =>
+                router.push(`/student/assessments/${assessmentId}/exam/${attemptId}/results`)
+              }
+            >
+              Continue to Results
+            </Button>
+          }
+        >
+          <p className="text-sm text-foreground">
+            Your exam was submitted. {deadlineSkipNotice} answer
+            {deadlineSkipNotice !== 1 ? 's were' : ' was'} queued on this device
+            after the deadline and could not be synchronized. The situation was
+            recorded for your instructor.
+          </p>
+        </Modal>
+
+        {/* Full-screen requirement gate */}
+        <Modal
+          open={showFullscreenGate}
+          onClose={() => {}}
+          title="Full-screen mode required"
+          actions={
+            <Button variant="primary" onClick={requestFullscreen}>
+              Enter Full-screen
+            </Button>
+          }
+        >
+          <p className="text-sm text-foreground">
+            Full-screen mode is required for this assessment. Your session is
+            active and the timer is running.
+          </p>
+        </Modal>
+
+        {/* Full-screen exit warning (recorded; return required by policy) */}
+        <Modal
+          open={showFullscreenWarning}
+          onClose={() => setShowFullscreenWarning(false)}
+          title="Full-screen mode required"
+          actions={
+            <Button
+              variant="primary"
+              onClick={() => {
+                setShowFullscreenWarning(false);
+                requestFullscreen();
+              }}
+            >
+              Return to Examination
+            </Button>
+          }
+        >
+          <p className="text-sm text-foreground">
+            Full-screen mode is required for this assessment. This session event
+            has been recorded.
+          </p>
+        </Modal>
+
+        {/* Identity reverification gate (faculty-requested or recovery policy) */}
+        <Modal
+          open={requiresReverification}
+          onClose={() => {}}
+          title="Identity reverification required"
+          actions={
+            <Button
+              variant="primary"
+              loading={reverificationBusy}
+              onClick={async () => {
+                setReverificationBusy(true);
+                setReverificationError(null);
+                const result = await verifyIdentity(reverificationPassword);
+                setReverificationBusy(false);
+                if (result.ok) {
+                  setReverificationPassword('');
+                } else {
+                  setReverificationError(result.error ?? 'Verification failed');
+                }
+              }}
+            >
+              Verify identity
+            </Button>
+          }
+        >
+          <div className="flex flex-col gap-3">
+            <p className="text-sm text-foreground">
+              Re-enter your account password to continue your examination.
+            </p>
+            <Input
+              type="password"
+              autoComplete="current-password"
+              value={reverificationPassword}
+              onChange={(e) => setReverificationPassword(e.target.value)}
+              placeholder="Account password"
+              aria-label="Account password"
+            />
+            {reverificationError && (
+              <p className="text-sm text-danger" role="alert">
+                {reverificationError}
               </p>
             )}
           </div>

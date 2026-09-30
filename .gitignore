@@ -12,6 +12,9 @@
 
 # testing
 /coverage
+scripts/.e2e-ux/
+scripts/.e2e-ux-server.log
+scripts/.e2e-server.log
 
 # next.js
 /.next/

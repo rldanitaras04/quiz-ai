@@ -7,7 +7,14 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test \"tests/**/*.test.mjs\"",
     "test:e2e": "node --env-file=.env.local scripts/e2e-enrollment.mjs",
+    "test:e2e:avatar": "node --env-file=.env.local scripts/e2e-avatar.mjs",
+    "test:e2e:exam": "node --env-file=.env.local scripts/e2e-exam.mjs",
+    "test:e2e:ux": "node --env-file=.env.local scripts/e2e-ux.mjs",
+    "db:migrate": "node --env-file=.env.local scripts/apply-migrations.mjs",
+    "db:migrate:check": "node --env-file=.env.local scripts/apply-migrations.mjs --check",
     "seed:reference": "node --env-file=.env.local scripts/seed-reference.mjs",
     "seed:question-bank": "node --env-file=.env.local scripts/seed-question-bank.mjs"
   },
@@ -34,6 +41,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.3.5",
+    "playwright-core": "^1.63.0",
     "supabase": "^2.117.0",
     "tailwindcss": "^4",
     "typescript": "^5"

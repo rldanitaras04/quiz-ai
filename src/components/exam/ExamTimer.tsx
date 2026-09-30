@@ -5,6 +5,13 @@ import { useState, useEffect, useRef } from 'react';
 interface ExamTimerProps {
   expiresAt: string;
   onTimeUp: () => void;
+  /**
+   * `serverNow - clientNow` in milliseconds. The deadline is an absolute
+   * server timestamp; this offset only corrects the *display* when the device
+   * clock is wrong. The browser is never the source of truth for exam time —
+   * refreshes, reopens and power loss recompute from the same `expires_at`.
+   */
+  clockOffsetMs?: number;
 }
 
 function formatTime(seconds: number): string {
@@ -14,25 +21,33 @@ function formatTime(seconds: number): string {
   return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
 }
 
-export default function ExamTimer({ expiresAt, onTimeUp }: ExamTimerProps) {
+export default function ExamTimer({ expiresAt, onTimeUp, clockOffsetMs = 0 }: ExamTimerProps) {
   const [remaining, setRemaining] = useState<number>(() => {
-    const diff = Math.floor((new Date(expiresAt).getTime() - Date.now()) / 1000);
+    const diff = Math.floor((new Date(expiresAt).getTime() - (Date.now() + clockOffsetMs)) / 1000);
     return Math.max(0, diff);
   });
   const onTimeUpRef = useRef(onTimeUp);
   const hasCalledTimeUp = useRef(false);
+  const offsetRef = useRef(clockOffsetMs);
 
   useEffect(() => {
     onTimeUpRef.current = onTimeUp;
   }, [onTimeUp]);
 
   useEffect(() => {
+    offsetRef.current = clockOffsetMs;
+  }, [clockOffsetMs]);
+
+  useEffect(() => {
     // Read the clock again rather than closing over `remaining`, so the effect
     // only depends on the authoritative expiry timestamp.
-    const initiallyRemaining = Math.max(
-      0,
-      Math.floor((new Date(expiresAt).getTime() - Date.now()) / 1000)
-    );
+    const compute = () =>
+      Math.max(
+        0,
+        Math.floor((new Date(expiresAt).getTime() - (Date.now() + offsetRef.current)) / 1000)
+      );
+
+    const initiallyRemaining = compute();
 
     if (initiallyRemaining <= 0) {
       if (!hasCalledTimeUp.current) {
@@ -43,7 +58,7 @@ export default function ExamTimer({ expiresAt, onTimeUp }: ExamTimerProps) {
     }
 
     const interval = setInterval(() => {
-      const newRemaining = Math.max(0, Math.floor((new Date(expiresAt).getTime() - Date.now()) / 1000));
+      const newRemaining = compute();
       setRemaining(newRemaining);
 
       if (newRemaining <= 0 && !hasCalledTimeUp.current) {

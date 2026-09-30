@@ -118,7 +118,6 @@ export const ROUTES = {
   studentSubjects: '/student/subjects',
   studentAssessments: '/student/assessments',
   studentResults: '/student/results',
-  studentSettings: '/student/settings',
 
   // Shared
   notifications: '/notifications',
@@ -178,6 +177,8 @@ export const routes = {
       `/faculty/subjects/${offeringId}/assessments/${assessmentId}/deploy` as const,
     assessmentAnalytics: (offeringId: string, assessmentId: string) =>
       `/faculty/subjects/${offeringId}/assessments/${assessmentId}/analytics` as const,
+    assessmentMonitor: (offeringId: string, assessmentId: string) =>
+      `/faculty/subjects/${offeringId}/assessments/${assessmentId}/monitor` as const,
     newAssessment: (offeringId: string) =>
       `/faculty/subjects/${offeringId}/assessments/new` as const,
   },
@@ -194,7 +195,6 @@ export const routes = {
     examResults: (assessmentId: string, attemptId: string) =>
       `/student/assessments/${assessmentId}/exam/${attemptId}/results` as const,
     results: () => ROUTES.studentResults,
-    settings: () => ROUTES.studentSettings,
   },
 
   // Shared
@@ -352,6 +352,7 @@ export function getAssessmentWorkspaceNav(offeringId: string, assessmentId: stri
     { id: 'assess-review', label: 'Questions', href: routes.faculty.assessmentReview(offeringId, assessmentId), icon: ListChecks },
     { id: 'assess-exceptions', label: 'Student Exceptions', href: routes.faculty.assessmentExceptions(offeringId, assessmentId), icon: Warning },
     { id: 'assess-deploy', label: 'Deployment & Schedule', href: routes.faculty.assessmentDeploy(offeringId, assessmentId), icon: CalendarBlank },
+    { id: 'assess-monitor', label: 'Live Monitor', href: routes.faculty.assessmentMonitor(offeringId, assessmentId), icon: Pulse },
     { id: 'assess-analytics', label: 'Analytics', href: routes.faculty.assessmentAnalytics(offeringId, assessmentId), icon: ChartLineUp },
   ];
 }

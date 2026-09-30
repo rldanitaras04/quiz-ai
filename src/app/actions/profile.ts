@@ -1,6 +1,7 @@
 'use server';
 
 import { createClient } from '@/lib/supabase/server';
+import { MAX_AVATAR_BYTES, MAX_AVATAR_SIZE_MB } from '@/lib/constants';
 
 export interface ProfileActionResult {
   error?: string;
@@ -10,7 +11,6 @@ export interface ProfileActionResult {
 
 const AVATAR_BUCKET = 'quiz-ai-bucket';
 const AVATAR_FOLDER = 'avatar';
-const MAX_AVATAR_BYTES = 2 * 1024 * 1024; // 2 MB
 const ALLOWED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
 
 /**
@@ -57,7 +57,9 @@ export async function uploadAvatar(
   if (authError || !user) return { error: 'Not authenticated' };
 
   if (!file || file.size === 0) return { error: 'No file provided' };
-  if (file.size > MAX_AVATAR_BYTES) return { error: 'Image must be 2 MB or smaller' };
+  if (file.size > MAX_AVATAR_BYTES) {
+    return { error: `Image must be ${MAX_AVATAR_SIZE_MB} MB or smaller` };
+  }
   if (!ALLOWED_IMAGE_TYPES.includes(file.type)) {
     return { error: 'Only PNG, JPEG, WebP, or GIF images are allowed' };
   }

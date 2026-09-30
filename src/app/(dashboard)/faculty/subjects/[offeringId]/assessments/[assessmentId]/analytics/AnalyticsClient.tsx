@@ -29,6 +29,7 @@ import {
   getDeploymentAnalytics,
   type DeploymentAnalytics,
 } from './actions';
+import SecuritySummaryCard from './SecuritySummaryCard';
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend, ArcElement);
 
@@ -451,6 +452,9 @@ export default function AnalyticsClient({ deploymentId }: AnalyticsClientProps):
           )}
         </CardContent>
       </Card>
+
+      {/* Post-exam security summary (factual session events) */}
+      <SecuritySummaryCard deploymentId={deploymentId} />
     </div>
   );
 }

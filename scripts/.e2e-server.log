@@ -1,0 +1,13 @@
+▲ Next.js 16.3.5
+- Local:         http://localhost:3211
+- Network:       http://192.168.254.124:3211
+✓ Ready in 332ms
+✓ Running next.config.ts took 282ms
+(node:18272) Warning: Setting the NODE_TLS_REJECT_UNAUTHORIZED environment variable to '0' makes TLS connections and HTTPS requests insecure by disabling certificate verification.
+(Use `node --trace-warnings ...` to show where the warning was created)
+⨯ Error: Body exceeded 3mb limit.
+To configure the body size limit for Server Actions, see: https://nextjs.org/docs/app/api-reference/next-config-js/serverActions#bodysizelimit
+    at ignore-listed frames {
+  statusCode: 413,
+  digest: '785254109@E394'
+}

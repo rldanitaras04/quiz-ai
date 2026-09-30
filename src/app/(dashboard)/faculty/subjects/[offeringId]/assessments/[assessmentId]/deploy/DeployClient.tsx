@@ -11,6 +11,16 @@ import Badge from '@/components/ui/Badge';
 import Modal from '@/components/ui/Modal';
 import { notifyError, notifySuccess } from '@/components/ui/alerts';
 import { createDeployment } from './actions';
+import {
+  SECURITY_MODES,
+  SECURITY_MODE_DESCRIPTIONS,
+  SECURITY_MODE_LABELS,
+  SECURITY_RESPONSE_LABELS,
+  normalizeSecurityPolicy,
+  type DeploymentSecurityPolicy,
+  type SecurityMode,
+  type SecurityResponseMode,
+} from '@/lib/exam-security';
 import type {
   AssessmentVersion,
   DeploymentLaunchMode,
@@ -66,7 +76,14 @@ export default function DeployClient({
   const [showItemCorrectness, setShowItemCorrectness] = useState(false);
   const [showCorrectAnswers, setShowCorrectAnswers] = useState(false);
   const [showExplanations, setShowExplanations] = useState(false);
-  const [requiresIdentityVerification, setRequiresIdentityVerification] = useState(false);
+  const [securityPolicy, setSecurityPolicy] = useState<DeploymentSecurityPolicy>(() =>
+    normalizeSecurityPolicy(null)
+  );
+
+  const setPolicyKey = <K extends keyof DeploymentSecurityPolicy>(
+    key: K,
+    value: DeploymentSecurityPolicy[K]
+  ) => setSecurityPolicy((prev) => ({ ...prev, [key]: value }));
 
   const selectedVersion = versions.find((v) => v.id === selectedVersionId);
   const needsOpenTime = launchMode === 'scheduled';
@@ -118,7 +135,7 @@ export default function DeployClient({
       show_item_correctness: showItemCorrectness,
       show_correct_answers: showCorrectAnswers,
       show_explanations: showExplanations,
-      requires_identity_verification: requiresIdentityVerification,
+      ...securityPolicy,
     });
 
     if (result.success) {
@@ -343,19 +360,132 @@ export default function DeployClient({
             <CardHeader>
               <h2 className="text-lg font-semibold">Security</h2>
             </CardHeader>
-            <CardContent>
-              <label className="flex items-center gap-3">
-                <input
-                  type="checkbox"
-                  checked={requiresIdentityVerification}
-                  onChange={(e) => setRequiresIdentityVerification(e.target.checked)}
-                  className="h-4 w-4 rounded text-primary focus:ring-primary"
+            <CardContent className="space-y-5">
+              <div className="space-y-1">
+                <Select
+                  label="Security mode"
+                  value={securityPolicy.security_mode}
+                  onChange={(e) =>
+                    setPolicyKey('security_mode', e.target.value as SecurityMode)
+                  }
+                >
+                  {SECURITY_MODES.map((mode) => (
+                    <option key={mode} value={mode}>
+                      {SECURITY_MODE_LABELS[mode]}
+                    </option>
+                  ))}
+                </Select>
+                <p className="text-xs text-muted">
+                  {SECURITY_MODE_DESCRIPTIONS[securityPolicy.security_mode]}
+                </p>
+              </div>
+
+              <div className="space-y-3">
+                <p className="text-sm font-medium">Identity</p>
+                <ToggleRow
+                  checked={securityPolicy.requires_identity_verification}
+                  onChange={(v) => setPolicyKey('requires_identity_verification', v)}
+                  label="Require identity verification before starting"
+                  hint="Students must confirm their identity before the exam begins."
                 />
-                <div>
-                  <span className="text-sm font-medium">Require identity verification</span>
-                  <p className="text-xs text-muted">Students must verify identity before starting</p>
-                </div>
-              </label>
+                <ToggleRow
+                  checked={securityPolicy.require_reverification_on_recovery}
+                  onChange={(v) => setPolicyKey('require_reverification_on_recovery', v)}
+                  label="Require reverification when a session is recovered"
+                  hint="After a reload or device recovery, the student re-enters their password."
+                />
+                <ToggleRow
+                  checked={false}
+                  onChange={() => {}}
+                  disabled
+                  label="Require face verification (pending provider)"
+                  hint="Requires an integrated biometric provider — not available yet."
+                />
+                <ToggleRow
+                  checked={false}
+                  onChange={() => {}}
+                  disabled
+                  label="Require liveness verification (pending provider)"
+                  hint="Requires an integrated biometric provider — not available yet."
+                />
+              </div>
+
+              <div className="space-y-3">
+                <p className="text-sm font-medium">Session detection</p>
+                <p className="text-xs text-muted -mt-2">
+                  Active in Enhanced and Lockdown-ready modes only. Standard mode observes nothing
+                  beyond connectivity for save status.
+                </p>
+                {(
+                  [
+                    ['require_fullscreen', 'Require full-screen mode'],
+                    ['detect_fullscreen_exit', 'Detect full-screen exit'],
+                    ['detect_tab_visibility', 'Detect tab visibility change'],
+                    ['detect_focus_loss', 'Detect window focus loss'],
+                    ['record_page_reloads', 'Record page reloads'],
+                    ['detect_concurrent_sessions', 'Detect concurrent sessions'],
+                    ['detect_copy_attempts', 'Detect copy attempts'],
+                    ['detect_paste_attempts', 'Detect paste attempts'],
+                    ['detect_context_menu', 'Detect context-menu attempts'],
+                  ] as const
+                ).map(([key, label]) => (
+                  <ToggleRow
+                    key={key}
+                    checked={securityPolicy[key]}
+                    onChange={(v) => setPolicyKey(key, v)}
+                    label={label}
+                    disabled={securityPolicy.security_mode === 'standard'}
+                  />
+                ))}
+              </div>
+
+              <div className="space-y-3">
+                <p className="text-sm font-medium">Network & recovery</p>
+                <ToggleRow
+                  checked={securityPolicy.offline_autosave}
+                  onChange={(v) => setPolicyKey('offline_autosave', v)}
+                  label="Offline autosave"
+                  hint="Answers are saved on the device first; synchronization is reported separately. Enforced by the exam shell in every mode."
+                />
+                <ToggleRow
+                  checked={securityPolicy.sync_on_reconnect}
+                  onChange={(v) => setPolicyKey('sync_on_reconnect', v)}
+                  label="Synchronize when connectivity returns"
+                  hint="Pending answers are sent immediately after reconnect."
+                />
+                <ToggleRow
+                  checked={securityPolicy.record_connection_events}
+                  onChange={(v) => setPolicyKey('record_connection_events', v)}
+                  label="Record connection lost / restored events"
+                  disabled={securityPolicy.security_mode === 'standard'}
+                />
+                <ToggleRow
+                  checked={securityPolicy.allow_session_recovery}
+                  onChange={(v) => setPolicyKey('allow_session_recovery', v)}
+                  label="Allow session recovery on the same device"
+                  hint="A reload resumes the attempt instead of blocking the student."
+                />
+              </div>
+
+              <div className="space-y-1">
+                <Select
+                  label="Response to security events"
+                  value={securityPolicy.security_response_mode}
+                  onChange={(e) =>
+                    setPolicyKey('security_response_mode', e.target.value as SecurityResponseMode)
+                  }
+                >
+                  {(['record', 'warn', 'reverify'] as const).map((mode) => (
+                    <option key={mode} value={mode}>
+                      {SECURITY_RESPONSE_LABELS[mode]}
+                    </option>
+                  ))}
+                </Select>
+                <p className="text-xs text-muted">
+                  The system records events and may warn or ask the student to
+                  re-verify — it never auto-submits or flags a student.
+                </p>
+              </div>
             </CardContent>
           </Card>
         </div>
@@ -408,6 +538,18 @@ export default function DeployClient({
                 <div className="flex justify-between">
                   <span className="text-muted">Score release</span>
                   <Badge variant="success">{scoreReleaseMode.replace(/_/g, ' ')}</Badge>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted">Security mode</span>
+                  <Badge variant={securityPolicy.security_mode === 'standard' ? 'default' : 'info'}>
+                    {SECURITY_MODE_LABELS[securityPolicy.security_mode]}
+                  </Badge>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted">Event response</span>
+                  <span className="text-right text-xs">
+                    {SECURITY_RESPONSE_LABELS[securityPolicy.security_response_mode]}
+                  </span>
                 </div>
               </div>
 
@@ -481,6 +623,14 @@ export default function DeployClient({
               <span className="text-muted">Attempts</span>
               <span>{attemptLimit}</span>
             </div>
+            <div className="flex justify-between">
+              <span className="text-muted">Security mode</span>
+              <span>{SECURITY_MODE_LABELS[securityPolicy.security_mode]}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-muted">Event response</span>
+              <span>{SECURITY_RESPONSE_LABELS[securityPolicy.security_response_mode]}</span>
+            </div>
           </div>
           <p className="text-muted">
             {launchMode === 'manual'
@@ -490,5 +640,37 @@ export default function DeployClient({
         </div>
       </Modal>
     </div>
+  );
+}
+
+function ToggleRow({
+  checked,
+  onChange,
+  label,
+  hint,
+  disabled = false,
+}: {
+  checked: boolean;
+  onChange: (value: boolean) => void;
+  label: string;
+  hint?: string;
+  disabled?: boolean;
+}) {
+  return (
+    <label
+      className={`flex items-start gap-3 ${disabled ? 'opacity-60' : ''}`}
+    >
+      <input
+        type="checkbox"
+        checked={checked}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.checked)}
+        className="mt-0.5 h-4 w-4 rounded text-primary focus:ring-primary"
+      />
+      <span>
+        <span className="text-sm">{label}</span>
+        {hint && <span className="block text-xs text-muted">{hint}</span>}
+      </span>
+    </label>
   );
 }

@@ -10,6 +10,8 @@ import {
   uploadAvatar,
   deleteAvatar,
 } from '@/app/actions/profile';
+import { notifyError } from '@/components/ui/alerts';
+import { MAX_AVATAR_BYTES, MAX_AVATAR_SIZE_MB } from '@/lib/constants';
 
 interface ProfileFormProps {
   userId: string;
@@ -75,6 +77,17 @@ export default function ProfileForm({ userId, fullName, avatarPath }: ProfileFor
     const file = e.target.files?.[0];
     e.target.value = ''; // allow re-selecting the same file
     if (!file) return;
+
+    // Reject oversized files before the upload is attempted: the framework
+    // body limit sits above the cap, so without this the action (and its
+    // friendly message) would be the only thing standing behind a large file.
+    if (file.size > MAX_AVATAR_BYTES) {
+      const sizeMb = (file.size / (1024 * 1024)).toFixed(1);
+      const message = `That image is ${sizeMb} MB. Avatars must be ${MAX_AVATAR_SIZE_MB} MB or smaller.`;
+      setAvatarError(message);
+      notifyError('Image too large', message);
+      return;
+    }
 
     setAvatarBusy(true);
     setAvatarError(null);
@@ -153,7 +166,7 @@ export default function ProfileForm({ userId, fullName, avatarPath }: ProfileFor
             )}
           </div>
           <p className="text-xs text-[var(--color-muted)]">
-            PNG, JPEG, WebP, or GIF · max 2 MB
+            PNG, JPEG, WebP, or GIF · max {MAX_AVATAR_SIZE_MB} MB
           </p>
           {avatarError && (
             <p className="text-sm text-[var(--color-danger)]">{avatarError}</p>

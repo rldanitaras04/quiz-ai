@@ -1,0 +1,23 @@
+-- ============================================================================
+-- Revoke anon write privileges on exam_attempts
+--
+-- Attempt rows are created only by the service-role client (src/lib/exam.ts),
+-- and a student may only UPDATE their own in-progress attempt while they have
+-- a session. Migration 20261001000000 already revoked INSERT from
+-- `authenticated`; `anon` kept the default Supabase table grants, so an
+-- unauthenticated caller could still reach the write paths and rely purely on
+-- RLS to stop it. Drop those grants so the table-level permissions match the
+-- intended design.
+--
+-- The remaining anon/authenticated grants on public tables are the Supabase
+-- defaults (GRANT ALL to both roles) and stay in place, because RLS is the
+-- enforcement layer for them. This migration only closes the table where
+-- client-side writes were never intended for a logged-out caller at all.
+--
+-- No behaviour change: `anon` has no RLS policy on exam_attempts, so these
+-- statements already returned zero rows. This removes the permission itself.
+--
+-- Idempotent: safe to run multiple times.
+-- ============================================================================
+
+REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON exam_attempts FROM anon;

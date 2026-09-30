@@ -188,6 +188,15 @@ export const SUPPORTED_QUESTION_IMAGE_TYPES = [
 
 export const MAX_QUESTION_IMAGE_SIZE_MB = 10;
 
+/**
+ * Avatar images accepted by `uploadAvatar`. The framework ceiling that backs
+ * this is `experimental.serverActions.bodySizeLimit` in `next.config.ts`,
+ * which must stay above this value plus multipart overhead.
+ */
+export const MAX_AVATAR_SIZE_MB = 2;
+
+export const MAX_AVATAR_BYTES = MAX_AVATAR_SIZE_MB * 1024 * 1024;
+
 export const SUPPORTED_QUESTION_IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.svg'] as const;
 
 export const EXAM_WARNING_THRESHOLDS_MINUTES = [10, 5, 1] as const;

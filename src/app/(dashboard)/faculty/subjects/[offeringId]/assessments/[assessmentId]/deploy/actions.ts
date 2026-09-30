@@ -7,6 +7,11 @@ import { notifyOfferingStudents } from '@/lib/notifications';
 import { recordAuditLog } from '@/lib/audit';
 import { isFacultyOfOffering, isFacultyOfOfferingOrSubject } from '@/lib/auth';
 import { scoreAttempt } from '@/lib/scoring';
+import {
+  SECURITY_POLICY_KEYS,
+  normalizeSecurityPolicy,
+  validateSecurityPolicyInput,
+} from '@/lib/exam-security';
 import type { CreateDeploymentInput, DeploymentLaunchMode } from '@/lib/types';
 
 /** Fields a client may set on an existing deployment (everything else is fixed). */
@@ -25,6 +30,7 @@ const UPDATABLE_CONFIG_KEYS: readonly (keyof CreateDeploymentInput)[] = [
   'show_correct_answers',
   'show_explanations',
   'requires_identity_verification',
+  ...SECURITY_POLICY_KEYS,
 ];
 
 const LAUNCH_MODES = ['now', 'scheduled', 'manual'] as const;
@@ -70,6 +76,10 @@ export async function createDeployment(
     if (!Number.isInteger(config.attempt_limit) || config.attempt_limit < 1) {
       return { success: false, error: 'The attempt limit must be at least 1' };
     }
+
+    const securityError = validateSecurityPolicyInput(config);
+    if (securityError) return { success: false, error: securityError };
+    const securityPolicy = normalizeSecurityPolicy(config);
 
     // Resolve the version first: multi-section deploy may omit it and expect
     // the assessment's current version.
@@ -170,7 +180,7 @@ export async function createDeployment(
         show_item_correctness: config.show_item_correctness,
         show_correct_answers: config.show_correct_answers,
         show_explanations: config.show_explanations,
-        requires_identity_verification: config.requires_identity_verification,
+        ...securityPolicy,
         status,
         created_by: user.id,
       })
@@ -425,6 +435,9 @@ export async function updateDeployment(
     // Only the schedulable fields are writable: spreading the raw payload would
     // let a caller move the deployment to another offering or assessment, or
     // flip its status directly.
+    const securityError = validateSecurityPolicyInput(config);
+    if (securityError) return { success: false, error: securityError };
+
     const updates: Record<string, unknown> = {
       updated_at: new Date().toISOString(),
     };

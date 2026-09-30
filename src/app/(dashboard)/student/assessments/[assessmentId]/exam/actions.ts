@@ -5,6 +5,15 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { recordAuditLog } from '@/lib/audit';
 import { startExamAttempt, isStartExamSuccess } from '@/lib/exam';
 import { scoreAttempt } from '@/lib/scoring';
+import { applyResponseOperations, type SyncOperation } from '@/lib/exam-sync';
+import {
+  closeActiveSession,
+  handleHeartbeat,
+  loadDeploymentPolicy,
+  openExamSession,
+  recordExamEvent,
+} from '@/lib/exam-session';
+import { isSecurityEventType, type SecurityEventType } from '@/lib/exam-security';
 import type {
   ExamAttempt,
   ExamManifest,
@@ -17,6 +26,10 @@ interface AttemptDetails {
   questions: QuestionWithChoices[];
   /** Already-synced answers, so a reload restores what the server holds. */
   responses: StoredResponse[];
+  /** Resolved examination security policy for this deployment. */
+  securityPolicy: Record<string, unknown>;
+  /** Server clock at read time — the browser only corrects its display. */
+  serverNow: string;
 }
 
 interface StoredResponse {
@@ -47,6 +60,276 @@ export async function startExamAttemptAction(
   if (!isStartExamSuccess(outcome)) return { error: outcome.error };
 
   return { attemptId: outcome.attempt.id };
+}
+
+// ---------------------------------------------------------------------------
+// Examination session lifecycle (Secure Exam Shell)
+// ---------------------------------------------------------------------------
+
+export interface OpenSessionResult {
+  error?: string;
+  sessionId?: string;
+  sessionToken?: string;
+  resumed?: boolean;
+  transferred?: boolean;
+  requiresReverification?: boolean;
+  securityPolicy?: Record<string, unknown>;
+  serverNow?: string;
+}
+
+/**
+ * Create or resume the single active examination session for this attempt.
+ * The session token returned here is the capability required for every later
+ * session mutation (heartbeat, events, saves) — it is only ever handed to the
+ * authenticated owner of the attempt.
+ */
+export async function openExamSessionAction(
+  attemptId: string,
+  options?: { presentedToken?: string | null; isReload?: boolean }
+): Promise<OpenSessionResult> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser();
+  if (authError || !user) return { error: 'Not authenticated' };
+
+  const admin = createAdminClient();
+  const result = await openExamSession(supabase, admin, {
+    attemptId,
+    userId: user.id,
+    presentedToken: options?.presentedToken ?? null,
+    isReload: options?.isReload === true,
+  });
+
+  if (result.error) return { error: result.error };
+
+  return {
+    sessionId: result.sessionId,
+    sessionToken: result.sessionToken,
+    resumed: result.resumed,
+    transferred: result.transferred,
+    requiresReverification: result.requiresReverification,
+    securityPolicy: result.policy as unknown as Record<string, unknown>,
+    serverNow: result.serverNow,
+  };
+}
+
+export interface HeartbeatPayload {
+  attemptId: string;
+  sessionId: string;
+  sessionToken: string;
+  currentItem: number;
+  totalItems: number;
+  answeredCount: number;
+  flaggedCount: number;
+  connectionState: 'online' | 'offline' | 'unknown';
+  syncState: 'synced' | 'syncing' | 'pending' | 'error';
+  pendingSyncCount: number;
+  lastLocalSaveAt?: string | null;
+  lastSyncAt?: string | null;
+}
+
+export interface HeartbeatResponse {
+  error?: string;
+  serverNow?: string;
+  attemptStatus?: string;
+  attemptExpiresAt?: string;
+  reverificationRequired?: boolean;
+}
+
+/**
+ * Lightweight session heartbeat. Updates the single presence row in place and
+ * returns the authoritative attempt state so the client picks up faculty
+ * interventions (extra time, reverification, termination) without reloading.
+ * Carries no answer contents.
+ */
+export async function heartbeatAction(payload: HeartbeatPayload): Promise<HeartbeatResponse> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser();
+  if (authError || !user) return { error: 'Not authenticated' };
+
+  const admin = createAdminClient();
+  const result = await handleHeartbeat(supabase, admin, user.id, payload);
+
+  if (result.error) return { error: result.error };
+  return {
+    serverNow: result.serverNow,
+    attemptStatus: result.attemptStatus,
+    attemptExpiresAt: result.attemptExpiresAt,
+    reverificationRequired: result.reverificationRequired,
+  };
+}
+
+export interface SecurityEventInput {
+  attemptId: string;
+  sessionId?: string | null;
+  sessionToken?: string | null;
+  eventType: SecurityEventType;
+  metadata?: Record<string, unknown>;
+}
+
+/**
+ * Record one factual security/session event for the caller's own attempt.
+ * Severity is derived server-side from the event type; the client cannot
+ * choose it. Events are never classified as misconduct here — they are
+ * evidence for faculty to interpret under institutional policy.
+ */
+export async function recordSecurityEventAction(
+  input: SecurityEventInput
+): Promise<{ recorded?: boolean; error?: string }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser();
+  if (authError || !user) return { error: 'Not authenticated' };
+
+  if (!isSecurityEventType(input.eventType)) return { error: 'Unknown event type' };
+
+  const admin = createAdminClient();
+  const { data: attempt } = await supabase
+    .from('exam_attempts')
+    .select('id, student_id, deployment_id')
+    .eq('id', input.attemptId)
+    .maybeSingle();
+
+  if (!attempt || attempt.student_id !== user.id) return { error: 'Forbidden' };
+
+  // When a session is presented it must be the caller's active session —
+  // otherwise only attempt-owned events without a session are accepted
+  // (e.g. a concurrent-session attempt detected before a session exists).
+  let examSessionId: string | null = null;
+  if (input.sessionId && input.sessionToken) {
+    const { data: session } = await admin
+      .from('exam_sessions')
+      .select('id, student_id, session_token, status')
+      .eq('id', input.sessionId)
+      .maybeSingle();
+
+    if (
+      !session ||
+      session.student_id !== user.id ||
+      session.session_token !== input.sessionToken
+    ) {
+      return { error: 'Invalid session' };
+    }
+    examSessionId = session.id;
+  }
+
+  const outcome = await recordExamEvent(admin, {
+    attemptId: attempt.id,
+    studentId: attempt.student_id,
+    deploymentId: attempt.deployment_id,
+    examSessionId,
+    eventType: input.eventType,
+    metadata: input.metadata,
+  });
+
+  return { recorded: outcome.recorded };
+}
+
+/**
+ * Identity reverification after a qualifying interruption / faculty request.
+ * Re-verifies the student by having them re-enter their account password
+ * (real credential check through Supabase Auth — no biometric provider is
+ * integrated, and none is faked). Success/failure are both recorded.
+ */
+export async function completeReverificationAction(input: {
+  attemptId: string;
+  sessionId: string;
+  sessionToken: string;
+  password: string;
+}): Promise<{ success?: boolean; error?: string }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser();
+  if (authError || !user) return { error: 'Not authenticated' };
+  if (typeof input.password !== 'string' || input.password.length === 0) {
+    return { error: 'Password is required' };
+  }
+
+  const admin = createAdminClient();
+  const { data: session } = await admin
+    .from('exam_sessions')
+    .select('id, student_id, attempt_id, session_token, status')
+    .eq('id', input.sessionId)
+    .maybeSingle();
+
+  if (
+    !session ||
+    session.attempt_id !== input.attemptId ||
+    session.student_id !== user.id ||
+    session.session_token !== input.sessionToken ||
+    session.status !== 'active'
+  ) {
+    return { error: 'Invalid session' };
+  }
+
+  const email = user.email;
+  if (!email) return { error: 'Account has no email address' };
+
+  const { error: signInError } = await supabase.auth.signInWithPassword({
+    email,
+    password: input.password,
+  });
+
+  if (signInError) {
+    await recordExamEvent(admin, {
+      attemptId: input.attemptId,
+      studentId: user.id,
+      deploymentId: (await loadAttemptDeployment(admin, input.attemptId)) ?? '',
+      examSessionId: session.id,
+      eventType: 'identity_reverification_failed',
+      metadata: { reason: 'invalid_credentials' },
+    });
+    return { error: 'Password verification failed' };
+  }
+
+  const now = new Date().toISOString();
+  await admin
+    .from('exam_sessions')
+    .update({ reverification_required: false, updated_at: now })
+    .eq('id', session.id);
+
+  const { data: attemptRow } = await admin
+    .from('exam_attempts')
+    .select('deployment_id')
+    .eq('id', input.attemptId)
+    .maybeSingle();
+
+  await recordExamEvent(admin, {
+    attemptId: input.attemptId,
+    studentId: user.id,
+    deploymentId: attemptRow?.deployment_id ?? '',
+    examSessionId: session.id,
+    eventType: 'identity_verified',
+    metadata: { method: 'password_reverification' },
+  });
+
+  await recordAuditLog({
+    actorUserId: user.id,
+    action: 'update',
+    entityType: 'exam_session',
+    entityId: session.id,
+    metadata: { action: 'identity_reverification_completed', attempt_id: input.attemptId },
+  });
+
+  return { success: true };
+}
+
+async function loadAttemptDeployment(admin: ReturnType<typeof createAdminClient>, attemptId: string) {
+  const { data } = await admin
+    .from('exam_attempts')
+    .select('deployment_id')
+    .eq('id', attemptId)
+    .maybeSingle();
+  return data?.deployment_id ?? null;
 }
 
 export async function getAttemptDetails(
@@ -127,19 +410,46 @@ export async function getAttemptDetails(
     })
   );
 
+  // Security policy is read through the caller's session client (RLS limits
+  // the deployment read to enrolled offerings) so the Secure Exam Shell knows
+  // exactly which session observations this assessment configured.
+  const { policy } = await loadDeploymentPolicy(supabase, attempt.deployment_id);
+
   return {
     data: {
       attempt,
       manifest,
       questions: orderedQuestions,
       responses,
+      securityPolicy: policy as unknown as Record<string, unknown>,
+      serverNow: new Date().toISOString(),
     },
   };
 }
 
+/**
+ * Server-authoritative submission.
+ *
+ * Reconciliation: any still-queued local operations are applied first (same
+ * idempotent path as `/api/exam/save`) — but only while the server-defined
+ * deadline has not passed. Answers queued after the deadline are NOT applied;
+ * they are reported back to the client and recorded on the submission event so
+ * nothing is silently discarded and faculty can see the situation.
+ *
+ * The status transition is conditional on `in_progress`, so repeated or
+ * concurrent submit requests are safe/idempotent: only the first one wins and
+ * proceeds to scoring.
+ */
 export async function submitExam(
-  attemptId: string
-): Promise<{ error?: string; success?: boolean; scored?: boolean }> {
+  attemptId: string,
+  pendingOperations?: SyncOperation[]
+): Promise<{
+  error?: string;
+  success?: boolean;
+  scored?: boolean;
+  pendingApplied?: number;
+  pendingSkipped?: number;
+}> {
   const supabase = await createClient();
 
   const {
@@ -168,6 +478,30 @@ export async function submitExam(
   // turn-in the student was no longer entitled to make.
   const isExpired = Boolean(attempt.expires_at && attempt.expires_at < now);
 
+  // --- Reconcile still-queued local operations (pre-deadline only) ---------
+  let pendingApplied = 0;
+  let pendingSkipped = 0;
+  const operations = Array.isArray(pendingOperations) ? pendingOperations.slice(0, 500) : [];
+
+  if (operations.length > 0) {
+    if (isExpired) {
+      pendingSkipped = operations.length;
+    } else {
+      const outcome = await applyResponseOperations(admin, attemptId, operations);
+      pendingApplied = outcome.applied.length;
+      pendingSkipped = outcome.rejected.filter((qid) => !outcome.duplicates.includes(qid)).length;
+    }
+  }
+
+  // Record submission intent (session timeline evidence).
+  await recordExamEvent(admin, {
+    attemptId,
+    studentId: user.id,
+    deploymentId: attempt.deployment_id,
+    eventType: 'submission_started',
+    metadata: { pending_applied: pendingApplied, pending_skipped: pendingSkipped },
+  });
+
   // 1. Mark the attempt submitted. Status transitions are enforced by app
   //    logic here; the RLS layer blocks direct client tampering.
   const { error: submitError } = await admin
@@ -184,6 +518,16 @@ export async function submitExam(
     return { error: 'Failed to submit exam' };
   }
 
+  // Close the single active examination session.
+  await closeActiveSession(admin, attemptId, isExpired ? 'expired' : 'submitted');
+  await recordExamEvent(admin, {
+    attemptId,
+    studentId: user.id,
+    deploymentId: attempt.deployment_id,
+    eventType: 'submission_completed',
+    metadata: { auto_submitted: isExpired, pending_applied: pendingApplied },
+  });
+
   // Exam submission is the core integrity event of the assessment workflow, so
   // it is recorded even though scoring below may still fail.
   await recordAuditLog({
@@ -191,7 +535,12 @@ export async function submitExam(
     action: 'submit',
     entityType: 'exam_attempt',
     entityId: attemptId,
-    metadata: { deployment_id: attempt.deployment_id, auto_submitted: isExpired },
+    metadata: {
+      deployment_id: attempt.deployment_id,
+      auto_submitted: isExpired,
+      pending_applied: pendingApplied,
+      pending_skipped: pendingSkipped,
+    },
   });
 
   // 2. Score in-process (no HTTP self-call). Failures are reported but do
@@ -290,12 +639,14 @@ export async function submitExam(
       }
     }
 
-    return { success: true, scored: true };
+    return { success: true, scored: true, pendingApplied, pendingSkipped };
   } catch (scoringError) {
     console.error('Scoring failed after submission:', scoringError);
     return {
       success: true,
       scored: false,
+      pendingApplied,
+      pendingSkipped,
       error: 'Exam submitted, but scoring failed. Your instructor can re-score.',
     };
   }

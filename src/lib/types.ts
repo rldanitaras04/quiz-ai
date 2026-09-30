@@ -2,6 +2,13 @@
 // Union Types
 // ============================================================================
 
+import type {
+  EventSeverity,
+  SecurityEventType,
+  SecurityMode,
+  SecurityResponseMode,
+} from '@/lib/exam-security';
+
 export type UserRole = 'super_admin' | 'faculty' | 'student';
 
 export type QuestionType = 'multiple_choice' | 'identification' | 'true_false';
@@ -49,7 +56,7 @@ export type ExceptionType =
   | 'schedule_override'
   | 'accessibility';
 
-export type QuestionOrderMode = 'fixed' | 'shuffled' | 'pooled';
+export type QuestionOrderMode = 'fixed' | 'shuffled' | 'pooled' | 'random';
 
 export type ChoiceOrderMode = 'fixed' | 'shuffled';
 
@@ -374,10 +381,69 @@ export interface AssessmentDeployment {
   show_correct_answers: boolean;
   show_explanations: boolean;
   requires_identity_verification: boolean;
+  // Examination security policy (see src/lib/exam-security.ts).
+  security_mode: SecurityMode;
+  require_fullscreen: boolean;
+  detect_fullscreen_exit: boolean;
+  detect_tab_visibility: boolean;
+  detect_focus_loss: boolean;
+  record_page_reloads: boolean;
+  detect_concurrent_sessions: boolean;
+  detect_copy_attempts: boolean;
+  detect_paste_attempts: boolean;
+  detect_context_menu: boolean;
+  require_face_verification: boolean;
+  require_liveness_verification: boolean;
+  require_reverification_on_recovery: boolean;
+  offline_autosave: boolean;
+  sync_on_reconnect: boolean;
+  record_connection_events: boolean;
+  allow_session_recovery: boolean;
+  security_response_mode: SecurityResponseMode;
   status: DeploymentStatus;
   created_by: string;
   created_at: string;
   updated_at: string;
+}
+
+/** Single active examination session + heartbeat presence (exam_sessions). */
+export interface ExamSession {
+  id: string;
+  attempt_id: string;
+  student_id: string;
+  deployment_id: string;
+  status: 'active' | 'closed' | 'transferred' | 'terminated';
+  current_item: number;
+  total_items: number | null;
+  answered_count: number;
+  flagged_count: number;
+  connection_state: 'online' | 'offline' | 'unknown';
+  sync_state: 'synced' | 'syncing' | 'pending' | 'error';
+  pending_sync_count: number;
+  last_heartbeat_at: string | null;
+  last_local_save_at: string | null;
+  last_sync_at: string | null;
+  allow_recovery: boolean | null;
+  reverification_required: boolean;
+  started_at: string;
+  ended_at: string | null;
+  close_reason: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Factual examination security/session event (exam_events). Never a finding. */
+export interface ExamEventRow {
+  id: string;
+  attempt_id: string;
+  student_id: string;
+  exam_session_id: string | null;
+  deployment_id: string | null;
+  event_type: SecurityEventType;
+  severity: EventSeverity;
+  metadata: Record<string, unknown>;
+  recorded_at: string;
+  created_at: string;
 }
 
 export interface AssessmentException {
@@ -435,6 +501,8 @@ export interface StudentResponse {
   scored_by: string | null;
   client_revision: number;
   server_revision: number;
+  /** Idempotency key of the last synchronization operation applied here. */
+  last_operation_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -664,6 +732,26 @@ export interface CreateDeploymentInput {
   show_correct_answers: boolean;
   show_explanations: boolean;
   requires_identity_verification: boolean;
+  // Examination security policy — optional on create (defaults applied by
+  // `normalizeSecurityPolicy`); validated strictly by the deploy actions.
+  security_mode?: SecurityMode;
+  require_fullscreen?: boolean;
+  detect_fullscreen_exit?: boolean;
+  detect_tab_visibility?: boolean;
+  detect_focus_loss?: boolean;
+  record_page_reloads?: boolean;
+  detect_concurrent_sessions?: boolean;
+  detect_copy_attempts?: boolean;
+  detect_paste_attempts?: boolean;
+  detect_context_menu?: boolean;
+  require_face_verification?: boolean;
+  require_liveness_verification?: boolean;
+  require_reverification_on_recovery?: boolean;
+  offline_autosave?: boolean;
+  sync_on_reconnect?: boolean;
+  record_connection_events?: boolean;
+  allow_session_recovery?: boolean;
+  security_response_mode?: SecurityResponseMode;
 }
 
 export interface ExamStartResult {

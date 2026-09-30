@@ -1,7 +1,9 @@
 'use server';
 
 import { createClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/admin';
 import { isFacultyOfOfferingOrSubject } from '@/lib/auth';
+import { EVENT_TYPE_LABELS } from '@/lib/exam-security';
 
 async function requireUser() {
   const supabase = await createClient();
@@ -295,6 +297,269 @@ export async function getDeploymentAnalytics(
       pass_rate: passRate,
       score_distribution: scoreDistribution,
       item_analysis: itemAnalysis,
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Post-exam security summary
+// ---------------------------------------------------------------------------
+
+export interface SecurityEventTypeCount {
+  type: string;
+  label: string;
+  count: number;
+}
+
+export interface SecuritySummaryAttemptRow {
+  attemptId: string;
+  studentName: string;
+  studentNumber: string | null;
+  status: string;
+  sessionCount: number;
+  sessionTransfers: number;
+  reverificationRequired: boolean;
+  counts: { info: number; warning: number; critical: number };
+  notableEvents: SecurityEventTypeCount[];
+}
+
+export interface SecurityHistoryEntry {
+  type: string;
+  label: string;
+  studentName: string;
+  at: string;
+  minutes?: number;
+}
+
+export interface SecuritySummary {
+  deploymentId: string;
+  totals: {
+    attempts: number;
+    started: number;
+    inProgress: number;
+    submitted: number;
+    terminated: number;
+    sessions: number;
+    sessionTransfers: number;
+    recoveredSessions: number;
+    connectionLosses: number;
+    fullscreenExits: number;
+    focusLosses: number;
+    concurrentSessionAttempts: number;
+    reverificationRequests: number;
+    reverificationFailures: number;
+    facultyInterventions: number;
+    extraTimeGrants: number;
+    facultyTerminations: number;
+    syncQueueEvents: number;
+    events: { info: number; warning: number; critical: number };
+  };
+  commonEvents: SecurityEventTypeCount[];
+  interventionHistory: SecurityHistoryEntry[];
+  syncHistory: SecurityHistoryEntry[];
+  attempts: SecuritySummaryAttemptRow[];
+}
+
+/**
+ * Post-exam security summary for a deployment: session counts, transfers,
+ * reverification requests, terminations and the factual event mix per student.
+ *
+ * These are operational records for faculty review — never an automated
+ * finding of misconduct, and no response is derived from them automatically.
+ */
+export async function getSecuritySummary(
+  deploymentId: string
+): Promise<{ data: SecuritySummary | null; error?: string }> {
+  const { supabase, userId } = await requireUser();
+
+  const { data: deployment } = await supabase
+    .from('assessment_deployments')
+    .select('id, subject_offering_id')
+    .eq('id', deploymentId)
+    .single();
+
+  if (!deployment) return { data: null, error: 'Deployment not found' };
+  if (!(await isFacultyOfOfferingOrSubject(supabase, userId, deployment.subject_offering_id))) {
+    return { data: null, error: 'Not authorized' };
+  }
+
+  const admin = createAdminClient();
+
+  const [attemptsRes, sessionsRes, eventsRes] = await Promise.all([
+    admin
+      .from('exam_attempts')
+      .select('id, student_id, status, started_at')
+      .eq('deployment_id', deploymentId),
+    admin
+      .from('exam_sessions')
+      .select('id, attempt_id, status, close_reason, reverification_required')
+      .eq('deployment_id', deploymentId),
+    admin
+      .from('exam_events')
+      .select('attempt_id, student_id, event_type, severity, metadata, recorded_at')
+      .eq('deployment_id', deploymentId)
+      .limit(5000),
+  ]);
+
+  const attempts = attemptsRes.data ?? [];
+  const sessions = sessionsRes.data ?? [];
+  const events = eventsRes.data ?? [];
+
+  const studentIds = Array.from(new Set(attempts.map((a) => a.student_id)));
+  const [profilesRes, numbersRes] = await Promise.all([
+    studentIds.length > 0
+      ? admin.from('profiles').select('id, full_name').in('id', studentIds)
+      : Promise.resolve({ data: [] as { id: string; full_name: string }[] }),
+    studentIds.length > 0
+      ? admin.from('student_profiles').select('user_id, student_number').in('user_id', studentIds)
+      : Promise.resolve({ data: [] as { user_id: string; student_number: string }[] }),
+  ]);
+  const names = new Map(
+    ((profilesRes.data ?? []) as { id: string; full_name: string }[]).map((p) => [p.id, p.full_name])
+  );
+  const numbers = new Map(
+    ((numbersRes.data ?? []) as { user_id: string; student_number: string }[]).map((p) => [
+      p.user_id,
+      p.student_number,
+    ])
+  );
+
+  const sessionsByAttempt = new Map<string, typeof sessions>();
+  for (const s of sessions) {
+    const list = sessionsByAttempt.get(s.attempt_id) ?? [];
+    list.push(s);
+    sessionsByAttempt.set(s.attempt_id, list);
+  }
+
+  const eventsByAttempt = new Map<string, typeof events>();
+  for (const e of events) {
+    const list = eventsByAttempt.get(e.attempt_id) ?? [];
+    list.push(e);
+    eventsByAttempt.set(e.attempt_id, list);
+  }
+
+  const countByType = (list: typeof events): SecurityEventTypeCount[] => {
+    const counts = new Map<string, number>();
+    for (const e of list) counts.set(e.event_type, (counts.get(e.event_type) ?? 0) + 1);
+    return Array.from(counts.entries())
+      .map(([type, count]) => ({
+        type,
+        label: EVENT_TYPE_LABELS[type as keyof typeof EVENT_TYPE_LABELS] ?? type,
+        count,
+      }))
+      .sort((a, b) => b.count - a.count);
+  };
+
+  const severityCounts = (list: typeof events) => ({
+    info: list.filter((e) => e.severity === 'info').length,
+    warning: list.filter((e) => e.severity === 'warning').length,
+    critical: list.filter((e) => e.severity === 'critical').length,
+  });
+
+  const rows: SecuritySummaryAttemptRow[] = attempts.map((attempt) => {
+    const attemptSessions = sessionsByAttempt.get(attempt.id) ?? [];
+    const attemptEvents = eventsByAttempt.get(attempt.id) ?? [];
+    const counts = severityCounts(attemptEvents);
+    return {
+      attemptId: attempt.id,
+      studentName: names.get(attempt.student_id) ?? 'Unknown student',
+      studentNumber: numbers.get(attempt.student_id) ?? null,
+      status: attempt.status,
+      sessionCount: attemptSessions.length,
+      sessionTransfers: attemptSessions.filter(
+        (s) => s.close_reason === 'transferred_to_new_session'
+      ).length,
+      reverificationRequired: attemptSessions.some((s) => s.reverification_required === true),
+      counts,
+      notableEvents: countByType(attemptEvents).slice(0, 5),
+    };
+  });
+
+  // Students with notable events first, then by name.
+  rows.sort((a, b) => {
+    const score = (r: SecuritySummaryAttemptRow) => r.counts.critical * 100 + r.counts.warning;
+    const d = score(b) - score(a);
+    if (d !== 0) return d;
+    return a.studentName.localeCompare(b.studentName);
+  });
+
+  const countType = (type: string) => events.filter((e) => e.event_type === type).length;
+  const metaAction = (e: (typeof events)[number]) =>
+    (e.metadata as { action?: string } | null)?.action ?? null;
+
+  const historyEntry = (e: (typeof events)[number]): SecurityHistoryEntry => {
+    const meta = (e.metadata as { action?: string; minutes?: number } | null) ?? null;
+    const base = EVENT_TYPE_LABELS[e.event_type as keyof typeof EVENT_TYPE_LABELS] ?? e.event_type;
+    const action = meta?.action ? meta.action.replace(/_/g, ' ') : null;
+    return {
+      type: e.event_type,
+      label: action
+        ? `${base} — ${action}${typeof meta?.minutes === 'number' ? ` +${meta.minutes} min` : ''}`
+        : base,
+      studentName: names.get(e.student_id) ?? 'Unknown student',
+      at: e.recorded_at,
+      minutes: typeof meta?.minutes === 'number' ? meta.minutes : undefined,
+    };
+  };
+  const byTimeDesc = (a: SecurityHistoryEntry, b: SecurityHistoryEntry) =>
+    b.at.localeCompare(a.at);
+
+  const interventionHistory = events
+    .filter(
+      (e) => e.event_type === 'faculty_intervention' || e.event_type === 'attempt_terminated'
+    )
+    .map(historyEntry)
+    .sort(byTimeDesc)
+    .slice(0, 25);
+
+  const SYNC_HISTORY_TYPES = new Set([
+    'connection_lost',
+    'connection_restored',
+    'pending_sync_started',
+    'pending_sync_completed',
+    'session_recovered',
+    'page_reloaded',
+  ]);
+  const syncHistory = events
+    .filter((e) => SYNC_HISTORY_TYPES.has(e.event_type))
+    .map(historyEntry)
+    .sort(byTimeDesc)
+    .slice(0, 25);
+
+  return {
+    data: {
+      deploymentId,
+      totals: {
+        attempts: attempts.length,
+        started: attempts.filter((a) => a.started_at).length,
+        inProgress: attempts.filter((a) => a.status === 'in_progress').length,
+        submitted: attempts.filter(
+          (a) => a.status === 'submitted' || a.status === 'auto_submitted'
+        ).length,
+        terminated: attempts.filter((a) => a.status === 'invalidated').length,
+        sessions: sessions.length,
+        sessionTransfers: sessions.filter(
+          (s) => s.close_reason === 'transferred_to_new_session'
+        ).length,
+        recoveredSessions: countType('session_recovered'),
+        connectionLosses: countType('connection_lost'),
+        fullscreenExits: countType('fullscreen_exited'),
+        focusLosses: countType('window_blurred'),
+        concurrentSessionAttempts: countType('concurrent_session_attempt'),
+        reverificationRequests: countType('identity_reverification_required'),
+        reverificationFailures: countType('identity_reverification_failed'),
+        facultyInterventions: countType('faculty_intervention'),
+        extraTimeGrants: events.filter(
+          (e) => e.event_type === 'faculty_intervention' && metaAction(e) === 'extra_time'
+        ).length,
+        facultyTerminations: countType('attempt_terminated'),
+        syncQueueEvents: countType('pending_sync_started') + countType('pending_sync_completed'),
+        events: severityCounts(events),
+      },
+      commonEvents: countByType(events).slice(0, 8),
+      interventionHistory,
+      syncHistory,
+      attempts: rows,
     },
   };
 }
