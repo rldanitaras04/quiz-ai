@@ -7,8 +7,10 @@
  *    request, heartbeats, autosaves, polls) all hit `/auth/v1/*`, and once the
  *    limit trips every refresh fails until the window clears. Retrying with
  *    backoff usually succeeds; the durable fix is reducing Auth API volume
- *    (the proxy now only authenticates page navigations) or raising the rate
- *    limits in the Supabase dashboard (Authentication → Rate limits).
+ *    (the proxy now only authenticates page navigations), dampening refresh
+ *    attempts while limited (see `lib/supabase/auth-fetch.ts`, which lets
+ *    the bucket drain and probes it again after a cooldown), or raising the
+ *    rate limits in the Supabase dashboard (Authentication → Rate limits).
  *
  *  - `refresh_token_already_used` (HTTP 400): refresh tokens rotate on every
  *    use, so two clients racing on the same token (a browser auto-refresh vs.

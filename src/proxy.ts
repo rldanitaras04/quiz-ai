@@ -1,6 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { isTransientAuthError } from "@/lib/auth-errors";
+import { dampedAuthFetch } from "@/lib/supabase/auth-fetch";
 
 export async function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
@@ -35,6 +36,11 @@ export async function proxy(request: NextRequest) {
           );
         },
       },
+      // Auth API requests go through the refresh damper (lib/supabase/
+      // auth-fetch): while the project is rate-limiting refreshes, this
+      // bundle answers them locally instead of spending the rate-limit
+      // budget on requests that are guaranteed to 429.
+      global: { fetch: dampedAuthFetch },
     }
   );
 
