@@ -3,6 +3,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { recordAuditLog } from '@/lib/audit';
+import { withAuthRetry } from '@/lib/auth-errors';
 import { startExamAttempt, isStartExamSuccess } from '@/lib/exam';
 import { scoreAttempt } from '@/lib/scoring';
 import { applyResponseOperations, type SyncOperation } from '@/lib/exam-sync';
@@ -88,10 +89,12 @@ export async function openExamSessionAction(
   options?: { presentedToken?: string | null; isReload?: boolean }
 ): Promise<OpenSessionResult> {
   const supabase = await createClient();
+  // Session open/recovery must not fail on a transient Auth blip (rate
+  // limit) — retry with backoff before reporting an error to the exam UI.
   const {
     data: { user },
     error: authError,
-  } = await supabase.auth.getUser();
+  } = await withAuthRetry(() => supabase.auth.getUser(), { retryRefreshRace: false });
   if (authError || !user) return { error: 'Not authenticated' };
 
   const admin = createAdminClient();
@@ -146,10 +149,12 @@ export interface HeartbeatResponse {
  */
 export async function heartbeatAction(payload: HeartbeatPayload): Promise<HeartbeatResponse> {
   const supabase = await createClient();
+  // Retries a transient Auth failure (rate limit) before giving up; the
+  // client skips a failed beat and the next interval retries anyway.
   const {
     data: { user },
     error: authError,
-  } = await supabase.auth.getUser();
+  } = await withAuthRetry(() => supabase.auth.getUser(), { retryRefreshRace: false });
   if (authError || !user) return { error: 'Not authenticated' };
 
   const admin = createAdminClient();

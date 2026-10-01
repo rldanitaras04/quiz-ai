@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { signOut as signOutAction } from '@/app/actions/auth';
+import { isTransientAuthError, withAuthRetry } from '@/lib/auth-errors';
 import type { Profile, UserRoleRow } from '@/lib/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
@@ -64,11 +65,22 @@ export function useUser(): UserProfile {
     // body never triggers a synchronous cascading render.
     async function load(): Promise<void> {
       try {
-        const { data: { user }, error: authError } = await supabase.auth.getUser();
+        // Retry transient Auth failures (rate limit, refresh-token race)
+        // instead of reporting the signed-in user as "Not authenticated".
+        const { data: { user }, error: authError } = await withAuthRetry(
+          () => supabase.auth.getUser()
+        );
         if (cancelled) return;
 
         if (authError || !user) {
-          setState({ profile: null, role: null, loading: false, error: 'Not authenticated' });
+          setState({
+            profile: null,
+            role: null,
+            loading: false,
+            error: isTransientAuthError(authError)
+              ? 'Sign-in check is busy — please try again in a moment.'
+              : 'Not authenticated',
+          });
           return;
         }
 

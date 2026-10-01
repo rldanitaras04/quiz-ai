@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { applyResponseOperations, normalizeOperation } from '@/lib/exam-sync';
 import { recordExamEvent } from '@/lib/exam-session';
+import { isRateLimitAuthError, withAuthRetry } from '@/lib/auth-errors';
 
 /**
  * Synchronize queued examination response operations.
@@ -21,11 +22,20 @@ export async function POST(request: Request) {
   try {
     const supabase = await createClient();
 
+    // Retries a transient Auth failure (rate limit) before failing; a 429
+    // below tells the offline queue this is temporary and to retry later,
+    // unlike a 401 which would read as "session dead".
     const {
       data: { user },
       error: authError,
-    } = await supabase.auth.getUser();
+    } = await withAuthRetry(() => supabase.auth.getUser(), { retryRefreshRace: false });
     if (authError || !user) {
+      if (isRateLimitAuthError(authError)) {
+        return NextResponse.json(
+          { error: 'Authentication service is busy — retry shortly.' },
+          { status: 429 }
+        );
+      }
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 

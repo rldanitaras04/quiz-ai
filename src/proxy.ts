@@ -1,7 +1,20 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { isTransientAuthError } from "@/lib/auth-errors";
 
 export async function proxy(request: NextRequest) {
+  const pathname = request.nextUrl.pathname;
+
+  // API routes and non-GET requests (server actions) authenticate inside the
+  // handler itself — they all call getUser() and can persist rotated cookies
+  // from a route handler or action. Doing it here as well doubled every call
+  // against the Supabase Auth API (the source of `over_request_rate_limit`
+  // 429s) and could redirect a fetch()/server-action POST to the HTML login
+  // page, corrupting the JSON/action response.
+  if (pathname.startsWith("/api/") || request.method !== "GET") {
+    return NextResponse.next({ request });
+  }
+
   let supabaseResponse = NextResponse.next({ request });
 
   const supabase = createServerClient(
@@ -25,22 +38,34 @@ export async function proxy(request: NextRequest) {
     }
   );
 
-  // Refresh the session — this is critical for keeping tokens valid
+  // Page navigations only: getSession() reads the session from the request
+  // cookies and contacts the Auth API solely when the access token actually
+  // needs a refresh — unlike getUser()/getClaims(), which make a network
+  // round trip on every request. The refresh it performs is captured by
+  // setAll above, which is what keeps Server Components (they cannot set
+  // cookies themselves) supplied with valid tokens.
+  //
+  // The identity used here only decides redirects: UI visibility is not a
+  // security control — RLS, requireRole() in the layouts and the
+  // getUser() checks in every server action remain the enforcement layer.
   const {
-    data: { user },
-  } = await supabase.auth.getUser();
+    data: { session },
+    error: sessionError,
+  } = await supabase.auth.getSession();
 
-  const pathname = request.nextUrl.pathname;
-
-  // API routes must return JSON errors (401/403), never an HTML login page —
-  // the browser fetch() in the app would then fail parsing "<!DOCTYPE".
-  if (pathname.startsWith('/api/')) {
+  // A transient Auth failure (rate limit, refresh-token rotation race) is
+  // not proof the user signed out. Let the request through; the page's own
+  // requireRole()/getUser() gate decides, and the next request carries the
+  // rotated cookies instead of bouncing a valid session to /login.
+  if (sessionError && isTransientAuthError(sessionError)) {
     return supabaseResponse;
   }
 
+  const isAuthenticated = Boolean(session);
+
   // Redirect unauthenticated users to /login (except public routes)
   if (
-    !user &&
+    !isAuthenticated &&
     !pathname.startsWith("/login") &&
     !pathname.startsWith("/register") &&
     !pathname.startsWith("/auth") &&
@@ -53,7 +78,7 @@ export async function proxy(request: NextRequest) {
   }
 
   // Redirect authenticated users away from /login
-  if (user && pathname.startsWith("/login")) {
+  if (isAuthenticated && pathname.startsWith("/login")) {
     const url = request.nextUrl.clone();
     url.pathname = "/";
     return NextResponse.redirect(url);

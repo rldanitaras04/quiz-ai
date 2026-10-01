@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation';
 import type { SupabaseClient, User } from '@supabase/supabase-js';
 import { createClient } from '@/lib/supabase/server';
 import { getPrimaryRole } from '@/lib/constants';
+import { withAuthRetry } from '@/lib/auth-errors';
 import type { UserRole } from '@/lib/types';
 
 /** Landing route for each role. Used when a user reaches a section they do not own. */
@@ -31,10 +32,14 @@ export type RoleGate =
 export async function requireRole(allowed: readonly UserRole[]): Promise<RoleGate> {
   const supabase = await createClient();
 
+  // Back off briefly on transient Auth failures (rate limit, refresh-token
+  // race) rather than bouncing a signed-in user straight to /login. Server
+  // context: a same-request refresh-race retry cannot succeed because this
+  // request's cookies are frozen, so don't wait for it.
   const {
     data: { user },
     error: authError,
-  } = await supabase.auth.getUser();
+  } = await withAuthRetry(() => supabase.auth.getUser(), { retryRefreshRace: false });
 
   if (authError || !user) redirect('/login');
 
