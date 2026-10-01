@@ -9,6 +9,7 @@
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "test": "node --test \"tests/**/*.test.mjs\"",
+    "check:routes": "node scripts/check-routes.mjs",
     "test:e2e": "node --env-file=.env.local scripts/e2e-enrollment.mjs",
     "test:e2e:avatar": "node --env-file=.env.local scripts/e2e-avatar.mjs",
     "test:e2e:exam": "node --env-file=.env.local scripts/e2e-exam.mjs",

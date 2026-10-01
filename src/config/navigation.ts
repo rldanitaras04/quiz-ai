@@ -468,11 +468,6 @@ export function isNavActive(item: NavigationItem, pathname: string): boolean {
   return pathname.startsWith(`${target.replace(/\/$/, '')}/`);
 }
 
-/**
- * Get the role-specific home path.
- */
-export function homePathForRole(role: UserRole): string {
-  if (role === 'super_admin') return ROUTES.adminDashboard;
-  if (role === 'faculty') return ROUTES.facultyDashboard;
-  return ROUTES.studentDashboard;
-}
+// Role-specific home path lives in `./role-paths` so that server-only modules
+// (lib/auth.ts) can share the same definition without pulling this file's
+// client-only icon imports into the React Server Components graph.

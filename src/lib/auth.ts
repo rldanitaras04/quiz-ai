@@ -3,14 +3,14 @@ import type { SupabaseClient, User } from '@supabase/supabase-js';
 import { createClient } from '@/lib/supabase/server';
 import { getPrimaryRole } from '@/lib/constants';
 import { withAuthRetry } from '@/lib/auth-errors';
+import { homePathForRole } from '@/config/role-paths';
 import type { UserRole } from '@/lib/types';
 
-/** Landing route for each role. Used when a user reaches a section they do not own. */
-export function homePathForRole(role: UserRole): string {
-  if (role === 'super_admin') return '/admin';
-  if (role === 'faculty') return '/faculty';
-  return '/student';
-}
+// Role landing paths are defined once in `config/role-paths` (dependency-free,
+// safe from both server and client code). Re-exported here so `requireRole()`
+// and any importer of `@/lib/auth` share that single definition instead of
+// drifting from a second copy.
+export { homePathForRole };
 
 export type RoleGate =
   | { status: 'ok'; user: User; role: UserRole; supabase: SupabaseClient }

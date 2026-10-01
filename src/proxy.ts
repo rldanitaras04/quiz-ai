@@ -63,12 +63,13 @@ export async function proxy(request: NextRequest) {
 
   const isAuthenticated = Boolean(session);
 
-  // Redirect unauthenticated users to /login (except public routes)
+  // Redirect unauthenticated users to /login (except public routes). Every
+  // exemption below must prefix-match a real route — enforced by
+  // tests/routing.test.mjs — so this list cannot rot as routes change.
   if (
     !isAuthenticated &&
     !pathname.startsWith("/login") &&
     !pathname.startsWith("/register") &&
-    !pathname.startsWith("/auth") &&
     !pathname.startsWith("/setup") &&
     pathname !== "/"
   ) {
