@@ -6,6 +6,7 @@ import Pagination from '@/components/ui/Pagination';
 import Badge from '@/components/ui/Badge';
 import RemoveStudentButton from './RemoveStudentButton';
 import ReenrollStudentButton from './ReenrollStudentButton';
+import VerifyStudentButton from './VerifyStudentButton';
 
 const PAGE_SIZE = 25;
 
@@ -27,7 +28,19 @@ export interface RosterRow {
   /** Enrollment status — anything other than `enrolled` offers Re-enroll. */
   status: string;
   enrolledAt: string;
+  /** `student_profiles.verification_status` — gates exams that require
+   * identity verification (scope §5). */
+  verificationStatus: string | null;
 }
+
+/** Identity badge keyed off verification_status (scope §5). */
+const verificationBadge: Record<
+  string,
+  { label: string; variant: 'success' | 'danger' | 'default' }
+> = {
+  verified: { label: 'ID verified', variant: 'success' },
+  failed: { label: 'ID failed', variant: 'danger' },
+};
 
 /**
  * Enrolled-student roster: table on desktop, labelled cards below `lg`,
@@ -79,10 +92,22 @@ export default function EnrollmentTable({
                   {new Date(row.enrolledAt).toLocaleDateString()}
                 </TD>
                 <TD label="Status">
-                  <Badge variant={badge.variant}>{badge.label}</Badge>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <Badge variant={badge.variant}>{badge.label}</Badge>
+                    <Badge variant={verificationBadge[row.verificationStatus ?? '']?.variant ?? 'default'}>
+                      {verificationBadge[row.verificationStatus ?? '']?.label ?? 'ID pending'}
+                    </Badge>
+                  </div>
                 </TD>
                 <TD label="Actions">
-                  <div className="flex justify-end">
+                  <div className="flex justify-end items-center gap-1">
+                    {active && row.verificationStatus !== 'verified' ? (
+                      <VerifyStudentButton
+                        offeringId={offeringId}
+                        studentId={row.studentId}
+                        studentName={row.name}
+                      />
+                    ) : null}
                     {active ? (
                       <RemoveStudentButton
                         offeringId={offeringId}

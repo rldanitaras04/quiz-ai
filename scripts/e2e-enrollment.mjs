@@ -67,16 +67,21 @@ const ACT = {
   removeStudent: actionId('removeStudentFromOffering', 'students/actions.ts'),
   restoreStudent: actionId('restoreStudentToOffering', 'students/actions.ts'),
   enrollSection: actionId('enrollSectionStudents', 'students/actions.ts'),
+  verifyStudent: actionId('verifyStudentIdentity', 'students/actions.ts'),
   createOffering: actionId('createOffering', 'admin/subjects/actions.ts'),
   roster: actionId('getOfferingRoster', 'admin/subjects/actions.ts'),
   setSection: actionId('setStudentSection', 'admin/users/actions.ts'),
+  setVerification: actionId('setStudentVerification', 'admin/users/actions.ts'),
+  startVerify: actionId('startIdentityVerification', 'student/verify/actions.ts'),
+  completeVerify: actionId('completeIdentityVerification', 'student/verify/actions.ts'),
+  requestVerify: actionId('requestManualVerification', 'student/verify/actions.ts'),
 };
 
 // ---------------------------------------------------------------------------
 // Sessions → cookies (via @supabase/ssr itself, so the format matches exactly)
 // ---------------------------------------------------------------------------
 
-async function sessionCookie(email, password) {
+async function signIn(email, password) {
   const jar = new Map();
   const client = createServerClient(url, anonKey, {
     cookies: {
@@ -107,7 +112,12 @@ async function sessionCookie(email, password) {
   }
 
   if (jar.size === 0) throw new Error(`No auth cookies produced for ${email}`);
-  return [...jar.entries()].map(([n, v]) => `${n}=${v}`).join('; ');
+  const cookie = [...jar.entries()].map(([n, v]) => `${n}=${v}`).join('; ');
+  return { client, cookie };
+}
+
+async function sessionCookie(email, password) {
+  return (await signIn(email, password)).cookie;
 }
 
 /**
@@ -166,6 +176,20 @@ function actionSucceeded(text) {
 function actionError(text) {
   const matches = [...text.matchAll(/"error"\s*:\s*"((?:\\.|[^"\\])*)"/g)].map((m) => m[1]);
   return matches.length > 0 ? matches[matches.length - 1] : null;
+}
+
+/** Extract a JSON-encoded string value by key from the flight stream. */
+function flightString(text, key) {
+  const m = text.match(new RegExp(`"${key}"\\s*:\\s*"((?:\\\\.|[^"\\\\])*)"`));
+  return m ? JSON.parse(`"${m[1]}"`) : null;
+}
+
+/** Extract a JSON array/object/bool/number value by key from the flight stream. */
+function flightValue(text, key) {
+  const m = text.match(
+    new RegExp(`"${key}"\\s*:\\s*(\\[[^\\]]*\\]|\\{[^}]*\\}|"(?:\\\\.|[^"\\\\])*"|true|false|-?[0-9.]+)`)
+  );
+  return m ? JSON.parse(m[1]) : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -429,6 +453,9 @@ async function run() {
   const o1 = fx.offeringIds[0];
   const facultyPath = `/faculty/subjects/${o1}/students`;
 
+  // The MediaPipe adapter needs no vendor key server-side (all camera work
+  // is in-browser), so the REAL adapter — not a mock — runs in this suite.
+  process.env.IDENTITY_ADAPTER = 'mediapipe';
   await startServer();
   console.log(`Server ready at ${BASE}`);
 
@@ -650,6 +677,301 @@ async function run() {
     check('T18 dashboard has Enroll Students quick action',
       dash.status === 200 && dashHtml.includes('Enroll Students'),
       `status=${dash.status}`);
+  }
+
+  // T19 — identity verification: faculty grants manual verification (scope §5)
+  {
+    // Fixtures default to 'verified' for other suites; start from 'pending'
+    // so the grant itself is what the checks observe.
+    await admin.from('student_profiles').update({ verification_status: 'pending' }).eq('user_id', fx.s1Id);
+
+    const before = await getPage(facultyPath, facultyCookie);
+    const beforeHtml = before.html.replace(/<!--.*?-->/g, '');
+    check('T19 roster offers Verify identity while pending',
+      beforeHtml.includes('Verify identity') && beforeHtml.includes('ID pending'),
+      `verifyBtn=${beforeHtml.includes('Verify identity')} pendingBadge=${beforeHtml.includes('ID pending')}`);
+
+    const r = await callAction({ cookie: facultyCookie, actionId: ACT.verifyStudent, pathname: facultyPath, args: [o1, fx.s1Id] });
+    check('T19 faculty verifyStudentIdentity succeeds', actionSucceeded(r.text), actionError(r.text) ?? `status=${r.status}`);
+    const { data: prof } = await admin.from('student_profiles').select('verification_status').eq('user_id', fx.s1Id).single();
+    check('T19 DB: student1 verification_status = verified', prof?.verification_status === 'verified', String(prof?.verification_status));
+
+    const roster = await getPage(facultyPath, facultyCookie);
+    const html = roster.html.replace(/<!--.*?-->/g, '');
+    check('T19 roster shows the ID verified badge', html.includes('ID verified'));
+    check('T19 roster hides Verify identity once verified', !html.includes('Verify identity'));
+
+    const { data: audit } = await admin
+      .from('audit_logs')
+      .select('id, metadata')
+      .eq('entity_type', 'student_profile')
+      .eq('entity_id', fx.s1Id)
+      .eq('action', 'update');
+    check('T19 audit log records the grant',
+      (audit ?? []).some((row) => row.metadata?.method === 'faculty_manual'),
+      `count=${audit?.length ?? 0}`);
+  }
+
+  // T20 — the SQL function refuses a non-faculty caller: the action's own
+  // gate is not the only line of defense (defense in depth).
+  {
+    await admin.from('student_profiles').update({ verification_status: 'pending' }).eq('user_id', fx.s2Id);
+    const { client: studentSess } = await signIn(fx.s2Email, fx.password);
+    const { error } = await studentSess.rpc('faculty_verify_student', { p_student_id: fx.s2Id });
+    check('T20 student rpc call denied with 42501',
+      error?.code === '42501',
+      `${error?.code ?? 'no error'} ${error?.message ?? ''}`);
+    const { data: prof } = await admin.from('student_profiles').select('verification_status').eq('user_id', fx.s2Id).single();
+    check('T20 DB: status untouched by the denied call', prof?.verification_status === 'pending', String(prof?.verification_status));
+  }
+
+  // T21 — faculty cannot verify a student outside their enrollments
+  {
+    await admin.from('student_profiles').update({ verification_status: 'pending' }).eq('user_id', fx.s2Id);
+    await callAction({ cookie: facultyCookie, actionId: ACT.removeStudent, pathname: facultyPath, args: [o1, fx.s2Id] });
+
+    const { client: facultySess } = await signIn(fx.facultyEmail, fx.password);
+    const { error } = await facultySess.rpc('faculty_verify_student', { p_student_id: fx.s2Id });
+    check('T21 faculty rpc denied for a student enrolled in none of their subjects',
+      error?.code === '42501',
+      `${error?.code ?? 'no error'} ${error?.message ?? ''}`);
+
+    const r = await callAction({ cookie: facultyCookie, actionId: ACT.verifyStudent, pathname: facultyPath, args: [o1, fx.s2Id] });
+    check('T21 verify action errors for that student', Boolean(actionError(r.text)), actionError(r.text) ?? `status=${r.status}`);
+    const { data: prof } = await admin.from('student_profiles').select('verification_status').eq('user_id', fx.s2Id).single();
+    check('T21 DB: status still pending', prof?.verification_status === 'pending', String(prof?.verification_status));
+  }
+
+  // T22 — the verification columns are REVOKE'd from `authenticated`: the
+  // unrestricted "Students can update own profile" policy must no longer let
+  // a student self-grant verified on their own row (20261010 migration).
+  {
+    await admin.from('student_profiles').update({ verification_status: 'pending' }).eq('user_id', fx.s3Id);
+    const { client: s3sess } = await signIn(fx.s3Email, fx.password);
+    const { error } = await s3sess
+      .from('student_profiles')
+      .update({
+        verification_status: 'verified',
+        verification_consent_at: new Date().toISOString(),
+      })
+      .eq('user_id', fx.s3Id);
+    check('T22 student self-update of verification columns denied with 42501',
+      error?.code === '42501',
+      `${error?.code ?? 'no error'} ${error?.message ?? ''}`);
+    const { data: prof } = await admin
+      .from('student_profiles')
+      .select('verification_status, verification_consent_at')
+      .eq('user_id', fx.s3Id)
+      .single();
+    check('T22 DB: status untouched by the denied self-update',
+      prof?.verification_status === 'pending' && !prof?.verification_consent_at,
+      `${prof?.verification_status} consent=${prof?.verification_consent_at}`);
+  }
+
+  // T23 — the admin users page path runs through SECURITY DEFINER
+  // admin_set_student_verification (the direct UPDATE the revoke now forbids);
+  // a student calling the same function is refused inside it.
+  {
+    const r = await callAction({ cookie: adminCookie, actionId: ACT.setVerification, pathname: '/admin/users', args: [fx.s3Id, 'verified'] });
+    check('T23 admin setStudentVerification succeeds via the rpc function',
+      actionSucceeded(r.text), actionError(r.text) ?? `status=${r.status}`);
+    const { data: prof } = await admin.from('student_profiles').select('verification_status').eq('user_id', fx.s3Id).single();
+    check('T23 DB: status verified', prof?.verification_status === 'verified', String(prof?.verification_status));
+
+    const { client: s3sess } = await signIn(fx.s3Email, fx.password);
+    const { error } = await s3sess.rpc('admin_set_student_verification', {
+      p_student_id: fx.s3Id,
+      p_status: 'pending',
+    });
+    check('T23 student rpc call to admin_set_student_verification denied with 42501',
+      error?.code === '42501',
+      `${error?.code ?? 'no error'} ${error?.message ?? ''}`);
+    const { data: after } = await admin.from('student_profiles').select('verification_status').eq('user_id', fx.s3Id).single();
+    check('T23 DB: status untouched by the denied rpc', after?.verification_status === 'verified', String(after?.verification_status));
+  }
+
+  // T24 — provider flow (MediaPipe adapter, scope §5): explicit consent →
+  // server-issued session + random challenges → settle through the same
+  // verify() entry point the exam gate calls. Refusals must not widen.
+  {
+    const { cookie: s3Cookie } = await signIn(fx.s3Email, fx.password);
+    await admin
+      .from('student_profiles')
+      .update({
+        verification_status: 'pending',
+        verification_consent_at: null,
+        verification_provider: null,
+        verification_verified_at: null,
+        verification_meta: null,
+      })
+      .eq('user_id', fx.s3Id);
+
+    const page = await getPage('/student/verify', s3Cookie);
+    const pageHtml = page.html.replace(/<!--.*?-->/g, '');
+    check('T24 verify page renders the privacy/consent notice',
+      page.status === 200 && pageHtml.includes('consent') && pageHtml.includes('MediaPipe'),
+      `status=${page.status} consent=${pageHtml.includes('consent')} mp=${pageHtml.includes('MediaPipe')}`);
+
+    const start = await callAction({ cookie: s3Cookie, actionId: ACT.startVerify, pathname: '/student/verify', args: [] });
+    const token = flightString(start.text, 'token');
+    const challenges = flightValue(start.text, 'challenges');
+    check('T24 startIdentityVerification issues a session token',
+      Boolean(token), actionError(start.text) ?? `status=${start.status}`);
+    check('T24 server picked 3 challenges from the vocabulary',
+      Array.isArray(challenges) && challenges.length === 3 &&
+        challenges.every((c) => ['blink', 'mouth_open', 'turn_left', 'turn_right'].includes(c)),
+      JSON.stringify(challenges));
+
+    const { data: consentRow } = await admin
+      .from('student_profiles')
+      .select('verification_consent_at')
+      .eq('user_id', fx.s3Id)
+      .single();
+    check('T24 consent timestamp recorded before any capture', Boolean(consentRow?.verification_consent_at));
+
+    const goodEvidence = {
+      passed: true,
+      model: 'face_landmarker',
+      totalDurationMs: 5000,
+      facePresenceMs: 4500,
+      challengeResults: (challenges ?? []).map((c) => ({ challenge: c, ok: true, durationMs: 1200 })),
+    };
+
+    // A tampered session token (altered body, original signature) can't settle.
+    const [body, sig] = String(token ?? 'x.y').split('.');
+    const tampered = `${body[0] === 'A' ? 'B' : 'A'}${body.slice(1)}.${sig}`;
+    const bad1 = await callAction({ cookie: s3Cookie, actionId: ACT.completeVerify, pathname: '/student/verify', args: [tampered, goodEvidence] });
+    check('T24 tampered session token refused',
+      Boolean(actionError(bad1.text)) && !/"ok"\s*:\s*true/.test(bad1.text),
+      actionError(bad1.text) ?? `status=${bad1.status}`);
+
+    // Evidence missing an issued challenge can't settle either.
+    const shortEvidence = { ...goodEvidence, challengeResults: (goodEvidence.challengeResults ?? []).slice(0, 2) };
+    const bad2 = await callAction({ cookie: s3Cookie, actionId: ACT.completeVerify, pathname: '/student/verify', args: [token, shortEvidence] });
+    check('T24 incomplete challenge evidence refused',
+      Boolean(actionError(bad2.text)), actionError(bad2.text) ?? `status=${bad2.status}`);
+
+    const { data: stillPending } = await admin.from('student_profiles').select('verification_status').eq('user_id', fx.s3Id).single();
+    check('T24 DB: structural refusals leave the status pending',
+      stillPending?.verification_status === 'pending', String(stillPending?.verification_status));
+
+    // Settle for real — matching evidence for the issued challenge set.
+    const ok = await callAction({ cookie: s3Cookie, actionId: ACT.completeVerify, pathname: '/student/verify', args: [token, goodEvidence] });
+    check('T24 completeIdentityVerification settles the session',
+      /"ok"\s*:\s*true/.test(ok.text), actionError(ok.text) ?? `status=${ok.status}`);
+
+    const { data: prof } = await admin
+      .from('student_profiles')
+      .select('verification_status, verification_provider, verification_verified_at, verification_meta, verification_consent_at')
+      .eq('user_id', fx.s3Id)
+      .single();
+    check('T24 DB: verified through the provider',
+      prof?.verification_status === 'verified' && prof?.verification_provider === 'mediapipe' && Boolean(prof?.verification_verified_at),
+      `${prof?.verification_status}/${prof?.verification_provider}`);
+    const metaKeys = Object.keys(prof?.verification_meta ?? {});
+    check('T24 DB: minimum metadata (challenges + coarse timings, nothing biometric)',
+      Array.isArray(prof?.verification_meta?.challenges) &&
+        prof.verification_meta.challenges.length === 3 &&
+        typeof prof.verification_meta.total_duration_ms === 'number' &&
+        !metaKeys.some((k) => ['landmarks', 'frame', 'image', 'template', 'video'].includes(k)),
+      JSON.stringify(metaKeys));
+
+    const { data: audit } = await admin
+      .from('audit_logs')
+      .select('metadata')
+      .eq('entity_type', 'student_profile')
+      .eq('entity_id', fx.s3Id)
+      .eq('action', 'update');
+    check('T24 audit log records the provider grant',
+      (audit ?? []).some((row) => row.metadata?.method === 'provider'),
+      `count=${audit?.length ?? 0}`);
+
+    const after = await getPage('/student/verify', s3Cookie);
+    check('T24 verify page shows Identity verified once settled',
+      after.html.replace(/<!--.*?-->/g, '').includes('Identity verified'),
+      `status=${after.status}`);
+  }
+
+  // T25 — manual verification REQUEST loop (scope §5 faculty fallback): the
+  // student asks in-app → assigned faculty get a deep-linked notification →
+  // the EXISTING roster Verify button grants the status → exam gate unlocks.
+  {
+    await admin
+      .from('student_profiles')
+      .update({ verification_status: 'pending', verification_requested_at: null })
+      .eq('user_id', fx.s2Id);
+    // T21 withdrew student2 from the offering; re-enroll so faculty are resolvable.
+    await callAction({ cookie: facultyCookie, actionId: ACT.restoreStudent, pathname: facultyPath, args: [o1, fx.s2Id] });
+
+    const { cookie: s2Cookie } = await signIn(fx.s2Email, fx.password);
+
+    const before = await getPage('/student/verify', s2Cookie);
+    check('T25 verify page offers the manual request while pending',
+      before.status === 200 && before.html.includes('Request manual verification'),
+      `status=${before.status}`);
+
+    const r1 = await callAction({ cookie: s2Cookie, actionId: ACT.requestVerify, pathname: '/student/verify', args: [] });
+    check('T25 requestManualVerification succeeds', /"ok"\s*:\s*true/.test(r1.text), actionError(r1.text) ?? `status=${r1.status}`);
+    const notified = flightValue(r1.text, 'notified');
+    check('T25 notified the assigned instructor', notified === 1, String(notified));
+
+    const { data: noteRows } = await admin
+      .from('notifications')
+      .select('user_id, type, title, data')
+      .eq('type', 'identity_verification_requested')
+      .eq('user_id', fx.facultyId)
+      .contains('data', { student_user_id: fx.s2Id });
+    check('T25 one notification for the faculty, deep-linked to the roster',
+      (noteRows ?? []).length === 1 && noteRows?.[0]?.data?.offering_id === o1,
+      `count=${noteRows?.length ?? 0} offering=${noteRows?.[0]?.data?.offering_id}`);
+
+    const { data: reqRow } = await admin
+      .from('student_profiles')
+      .select('verification_requested_at, verification_status')
+      .eq('user_id', fx.s2Id)
+      .single();
+    check('T25 request recorded, status untouched by the request itself',
+      Boolean(reqRow?.verification_requested_at) && reqRow?.verification_status === 'pending',
+      `${reqRow?.verification_requested_at} status=${reqRow?.verification_status}`);
+
+    // Inside the cooldown a repeat request is idempotent.
+    const r2 = await callAction({ cookie: s2Cookie, actionId: ACT.requestVerify, pathname: '/student/verify', args: [] });
+    check('T25 repeat request inside cooldown is idempotent',
+      /"alreadyRequested"\s*:\s*true/.test(r2.text), actionError(r2.text) ?? `status=${r2.status}`);
+    const { data: noteRows2 } = await admin
+      .from('notifications')
+      .select('id')
+      .eq('type', 'identity_verification_requested')
+      .contains('data', { student_user_id: fx.s2Id });
+    check('T25 no duplicate notification inside cooldown', (noteRows2 ?? []).length === 1, `count=${noteRows2?.length ?? 0}`);
+
+    const pending = await getPage('/student/verify', s2Cookie);
+    const pendingHtml = pending.html.replace(/<!--.*?-->/g, '');
+    check('T25 student page shows waiting-for-instructor state',
+      pendingHtml.includes('waiting for your instructor') && !pendingHtml.includes('Request manual verification'),
+      `waiting=${pendingHtml.includes('waiting for your instructor')} btn=${pendingHtml.includes('Request manual verification')}`);
+
+    const notes = await getPage('/notifications', facultyCookie);
+    const notesHtml = notes.html.replace(/<!--.*?-->/g, '');
+    const rosterHref = `href="/faculty/subjects/${o1}/students"`;
+    check('T25 faculty notification list shows the request with a roster link',
+      notes.status === 200 && notesHtml.includes('Identity verification requested') && notesHtml.includes(rosterHref),
+      `status=${notes.status} title=${notesHtml.includes('Identity verification requested')} link=${notesHtml.includes(rosterHref)}`);
+
+    const { data: auditReq } = await admin
+      .from('audit_logs')
+      .select('metadata')
+      .eq('entity_type', 'verification_request')
+      .eq('entity_id', fx.s2Id);
+    check('T25 request recorded in the audit log',
+      (auditReq ?? []).some((row) => row.metadata?.notified === 1),
+      `count=${auditReq?.length ?? 0}`);
+
+    // Close the loop with the existing faculty action (T19's path).
+    const verify = await callAction({ cookie: facultyCookie, actionId: ACT.verifyStudent, pathname: facultyPath, args: [o1, fx.s2Id] });
+    check('T25 faculty verifies after the request', actionSucceeded(verify.text), actionError(verify.text) ?? `status=${verify.status}`);
+    const { data: final } = await admin.from('student_profiles').select('verification_status').eq('user_id', fx.s2Id).single();
+    check('T25 DB: student verified — exam gate unlocked', final?.verification_status === 'verified', String(final?.verification_status));
   }
 }
 

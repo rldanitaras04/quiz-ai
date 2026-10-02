@@ -200,8 +200,14 @@ export async function getDeploymentAnalytics(
     choicesByQuestion.set(choice.question_id, list);
   }
 
+  // earned_points is no longer granted to the session role (migration
+  // 20261005000000 — pre-release score leak). The faculty-of-offering gate
+  // above has passed and attemptIds already come from session-scoped reads,
+  // so this runs with the service-role client: gates-then-admin, the same
+  // pattern loadAttemptBreakdown uses.
+  const admin = createAdminClient();
   const { data: allResponses } = attemptIds.length > 0
-    ? await supabase
+    ? await admin
         .from('student_responses')
         .select('attempt_id, question_id, selected_choice_id, text_answer, earned_points')
         .in('attempt_id', attemptIds)

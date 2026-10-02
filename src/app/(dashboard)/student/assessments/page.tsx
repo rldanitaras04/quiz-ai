@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
+import { runScheduledMaintenance } from '@/lib/scheduler';
 import PageHeader from '@/components/ui/PageHeader';
 import { Card } from '@/components/ui/Card';
 import Badge from '@/components/ui/Badge';
@@ -13,6 +14,12 @@ export default async function StudentAssessmentsPage() {
 
   const { data: { user }, error: authError } = await supabase.auth.getUser();
   if (authError || !user) redirect('/login');
+
+  // The status filter below reads the raw status column, so run the sweep
+  // first: it activates/closes deployments by the database clock and sends
+  // opening-soon reminders (migration 20261006000000). Idempotent and
+  // time-gated — safe on every load.
+  await runScheduledMaintenance();
 
   const { data: enrollments } = await supabase
     .from('enrollments')

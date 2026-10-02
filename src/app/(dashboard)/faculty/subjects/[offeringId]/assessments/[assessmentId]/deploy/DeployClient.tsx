@@ -71,6 +71,7 @@ export default function DeployClient({
   const [questionOrderMode, setQuestionOrderMode] = useState<QuestionOrderMode>('fixed');
   const [choiceOrderMode, setChoiceOrderMode] = useState<ChoiceOrderMode>('fixed');
   const [scoreReleaseMode, setScoreReleaseMode] = useState<ScoreReleaseMode>('immediate');
+  const [scoreReleaseAt, setScoreReleaseAt] = useState('');
   const [showRawScore, setShowRawScore] = useState(true);
   const [showPercentage, setShowPercentage] = useState(true);
   const [showItemCorrectness, setShowItemCorrectness] = useState(false);
@@ -110,6 +111,14 @@ export default function DeployClient({
       setError('Close time must be in the future');
       return;
     }
+    if (scoreReleaseMode === 'scheduled' && !scoreReleaseAt) {
+      setError('Release date and time is required for a scheduled release');
+      return;
+    }
+    if (scoreReleaseMode === 'scheduled' && Number.isNaN(new Date(scoreReleaseAt).getTime())) {
+      setError('Enter a valid release date and time');
+      return;
+    }
 
     if (durationMinutes < 1) {
       setError('Duration must be at least 1 minute');
@@ -130,6 +139,10 @@ export default function DeployClient({
       question_order_mode: questionOrderMode,
       choice_order_mode: choiceOrderMode,
       score_release_mode: scoreReleaseMode,
+      score_release_at:
+        scoreReleaseMode === 'scheduled' && scoreReleaseAt
+          ? new Date(scoreReleaseAt).toISOString()
+          : undefined,
       show_raw_score: showRawScore,
       show_percentage: showPercentage,
       show_item_correctness: showItemCorrectness,
@@ -300,10 +313,21 @@ export default function DeployClient({
                 onChange={(e) => setScoreReleaseMode(e.target.value as ScoreReleaseMode)}
               >
                 <option value="immediate">Immediate (after submission)</option>
+                <option value="after_close">After the exam window closes</option>
                 <option value="after_all_submitted">After all submitted</option>
                 <option value="manual_release">Manual release</option>
                 <option value="scheduled">Scheduled</option>
               </Select>
+
+              {scoreReleaseMode === 'scheduled' && (
+                <Input
+                  label="Release results at"
+                  type="datetime-local"
+                  value={scoreReleaseAt}
+                  onChange={(e) => setScoreReleaseAt(e.target.value)}
+                  required
+                />
+              )}
 
               <div className="space-y-3">
                 <p className="text-sm font-medium">Show students:</p>

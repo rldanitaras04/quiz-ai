@@ -665,30 +665,59 @@ async function testRls() {
     .from('student_responses')
     .select('id')
     .eq('attempt_id', ids.attemptA);
+  // Explicit projection: migration 20261005000000 replaced the table-level
+  // SELECT with a column grant, so `select('*')` now fails outright — the
+  // paper-restore columns below are what a student session may read.
   const resp = await studentAClient
     .from('student_responses')
-    .select('*')
+    .select(
+      'id, attempt_id, question_id, selected_choice_id, text_answer, client_revision, server_revision'
+    )
     .eq('attempt_id', ids.attemptA)
     .limit(5);
   const rows = resp.data ?? [];
   const respKeys = new Set(rows.flatMap((r) => Object.keys(r)));
   const leaky = [...respKeys].filter((k) =>
-    /is_correct|correct_choice|canonical_answer|accepted_answers|points_awarded/i.test(k)
-  );
-  const gradedLeak = rows.some(
-    (r) => r.scoring_status === 'pending' && (r.earned_points ?? null) !== null
+    /is_correct|correct_choice|canonical_answer|accepted_answers|points_awarded|earned_points|scoring_status/i.test(k)
   );
   check(
     'student_responses exposes no answer-key/correctness data',
-    (adminResponses.data ?? []).length > 0 &&
+    !resp.error &&
+      (adminResponses.data ?? []).length > 0 &&
       rows.length > 0 &&
-      leaky.length === 0 &&
-      !gradedLeak,
-    leaky.length > 0
-      ? `leaky columns: ${leaky.join(', ')}`
-      : gradedLeak
-        ? 'earned_points visible while scoring_status=pending'
-        : `fixture=${(adminResponses.data ?? []).length}, student sees ${rows.length}, error ${resp.error?.code ?? 'none'}`
+      leaky.length === 0,
+    resp.error
+      ? `error ${resp.error.code}`
+      : leaky.length > 0
+        ? `leaky columns: ${leaky.join(', ')}`
+        : `fixture=${(adminResponses.data ?? []).length}, student sees ${rows.length}`
+  );
+
+  // The scoring columns themselves must be unreadable: asking for them by
+  // name fails with a privilege error (42501) instead of silently returning
+  // pre-release scores (migration 20261005000000).
+  const sScores = await studentAClient
+    .from('student_responses')
+    .select('earned_points, scoring_status, scored_at, scored_by, normalized_answer')
+    .eq('attempt_id', ids.attemptA)
+    .limit(5);
+  check(
+    'student cannot read pre-release scoring columns',
+    sScores.error?.code === '42501' && (sScores.data ?? []).length === 0,
+    sScores.error ? `error ${sScores.error.code}` : `${(sScores.data ?? []).length} rows returned`
+  );
+
+  // The session write path is gone as well: response rows are written only
+  // by the service-role client, so an UPDATE attempt is a privilege error.
+  const sWrite = await studentAClient
+    .from('student_responses')
+    .update({ text_answer: 'post-deadline tamper' })
+    .eq('attempt_id', ids.attemptA)
+    .select('id');
+  check(
+    'student cannot update responses through PostgREST directly',
+    sWrite.error?.code === '42501' || (sWrite.error === null && (sWrite.data ?? []).length === 0),
+    sWrite.error ? `error ${sWrite.error.code}` : `${(sWrite.data ?? []).length} rows updated`
   );
 }
 

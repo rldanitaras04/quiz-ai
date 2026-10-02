@@ -1,5 +1,6 @@
 import { redirect, notFound } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
+import { runScheduledMaintenance } from '@/lib/scheduler';
 import { getAttemptBreakdown } from '@/app/(dashboard)/student/assessments/[assessmentId]/exam/actions';
 import PageHeader from '@/components/ui/PageHeader';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
@@ -18,6 +19,11 @@ export default async function ExamResultsPage({ params }: Props) {
 
   const { data: { user }, error: authError } = await supabase.auth.getUser();
   if (authError || !user) redirect('/login');
+
+  // Results land through the sweep (after_close / scheduled releases): run it
+  // before reading so a due release shows up on this load (migration
+  // 20261006000000). Idempotent and time-gated — safe on every visit.
+  await runScheduledMaintenance();
 
   const { data: attempt } = await supabase
     .from('exam_attempts')

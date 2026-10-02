@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
+import { runScheduledMaintenance } from '@/lib/scheduler';
 import PageHeader from '@/components/ui/PageHeader';
 import Badge from '@/components/ui/Badge';
 import EmptyState from '@/components/ui/EmptyState';
@@ -45,6 +46,12 @@ export default async function StudentResultsPage() {
 
   const { data: { user }, error: authError } = await supabase.auth.getUser();
   if (authError || !user) redirect('/login');
+
+  // This list only shows released results, so due releases (after_close /
+  // scheduled) must land first: run the idempotent, time-gated sweep before
+  // reading (migration 20261006000000). pg_cron / /api/cron/sweep cover the
+  // case where nobody loads a page.
+  await runScheduledMaintenance();
 
   const { data: results } = await supabase
     .from('assessment_results')

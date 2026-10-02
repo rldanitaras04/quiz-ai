@@ -524,3 +524,60 @@ export async function restoreStudentToOffering(
   revalidateEnrollments(offeringId);
   return { success: true };
 }
+
+/**
+ * Faculty-authorized manual identity verification (scope §5): grants
+ * `student_profiles.verification_status = 'verified'`, which is what
+ * deployments with `requires_identity_verification` check before an exam
+ * starts (src/lib/exam.ts).
+ *
+ * The write goes through the `faculty_verify_student` SECURITY DEFINER
+ * function, which re-checks that the caller teaches a subject the student is
+ * enrolled in — so the offering gate below is not the only line of defense.
+ * No photo or biometric data is captured: faculty attest against the
+ * student's institutional ID, and only the status change is audited.
+ */
+export async function verifyStudentIdentity(
+  offeringId: string,
+  studentId: string
+): Promise<{ error?: string; success?: boolean; alreadyVerified?: boolean }> {
+  const gate = await requireEnrollmentManager(offeringId);
+  if ('error' in gate) return gate;
+  const { supabase, userId } = gate;
+
+  // Session-scoped read: RLS only exposes this profile because the student
+  // sits on a roster the actor manages.
+  const { data: profile } = await supabase
+    .from('student_profiles')
+    .select('verification_status')
+    .eq('user_id', studentId)
+    .maybeSingle();
+
+  if (!profile) return { error: 'That student is not on this roster' };
+  if (profile.verification_status === 'verified') {
+    return { success: true, alreadyVerified: true };
+  }
+
+  const { error } = await supabase.rpc('faculty_verify_student', {
+    p_student_id: studentId,
+  });
+  if (error) {
+    if (error.code === '42501') return { error: 'Not authorized to verify this student' };
+    return { error: 'Failed to verify student identity' };
+  }
+
+  await recordAuditLog({
+    actorUserId: userId,
+    action: 'update',
+    entityType: 'student_profile',
+    entityId: studentId,
+    metadata: {
+      verification_status: 'verified',
+      method: 'faculty_manual',
+      subject_offering_id: offeringId,
+    },
+  });
+
+  revalidateEnrollments(offeringId);
+  return { success: true };
+}

@@ -9,7 +9,10 @@ import { generateQuestions as groqGenerate } from '@/lib/ai/providers/groq';
 import { generateQuestions as openaiGenerate, generateEmbedding as openaiEmbedding } from '@/lib/ai/providers/openai';
 import { generateEmbedding as hfEmbedding } from '@/lib/ai/providers/huggingface';
 import { chunkText, extractText } from '@/lib/ai/text-extraction';
-import { cosineSimilarity, findSimilarQuestions, detectDuplicateWithinAssessment } from '@/lib/ai/similarity';
+import {
+  scoreAgainstExisting,
+  type ExistingQuestionRef,
+} from '@/lib/ai/duplicate-check';
 import { getSettings } from '@/lib/settings';
 
 type ChatProvider = 'groq' | 'openai';
@@ -57,32 +60,46 @@ export async function generateEmbeddings(texts: string[]): Promise<EmbeddingResu
 }
 
 /**
- * Duplicate check for a single question. The threshold defaults to the
- * administrator-configured value (/admin/settings) so the similarity rule can be
- * tuned without a redeploy; callers may still override it per call.
+ * Duplicate check for a single question (scope §13): normalized exact match
+ * against every existing question, then cosine similarity against the ones
+ * that carry embeddings of the same dimension. Returns the candidate's own
+ * embedding as well — callers persist it so the next check skips the
+ * embedding call.
+ *
+ * The threshold defaults to the administrator-configured value
+ * (/admin/settings) so the similarity rule can be tuned without a redeploy;
+ * callers may still override it per call.
  */
 export async function checkSimilarity(
   questionText: string,
-  existingEmbeddings: { id: string; question_text: string; embedding: number[] }[],
+  existingQuestions: ExistingQuestionRef[],
   threshold?: number
 ): Promise<SimilarityCheckResult> {
   const effectiveThreshold = threshold ?? (await getSettings()).similarity_threshold;
-  const { embedding } = await generateEmbedding(questionText);
 
-  const similar = findSimilarQuestions(embedding, existingEmbeddings, effectiveThreshold);
-
-  if (similar.length > 0) {
-    return {
-      isDuplicate: true,
-      similarityScore: similar[0].similarity,
-      similarQuestionId: similar[0].id,
-      similarQuestionText: similar[0].question_text,
-    };
+  let embedding: number[] | null = null;
+  try {
+    embedding = (await generateEmbedding(questionText)).embedding;
+  } catch (error) {
+    // No embedding provider reachable: degrade to exact matching only.
+    console.warn('Embedding unavailable during similarity check:', error);
   }
 
+  const score = scoreAgainstExisting(
+    questionText,
+    embedding,
+    existingQuestions,
+    effectiveThreshold
+  );
+
   return {
-    isDuplicate: false,
-    similarityScore: 0,
+    isDuplicate: Boolean(score.exactDuplicateOf || score.similarQuestionId),
+    similarityScore: score.maxSimilarity ?? 0,
+    exactDuplicate: Boolean(score.exactDuplicateOf),
+    similarQuestionId: score.similarQuestionId,
+    similarQuestionText: score.similarQuestionText,
+    similarQuestionSource: score.similarQuestionSource,
+    embedding,
   };
 }
 
@@ -156,4 +173,9 @@ export async function extractAndStoreSource(
   }
 }
 
-export { cosineSimilarity, findSimilarQuestions, detectDuplicateWithinAssessment };
+export {
+  cosineSimilarity,
+  findSimilarQuestions,
+  normalizeQuestionText,
+  scoreAgainstExisting,
+} from '@/lib/ai/similarity';

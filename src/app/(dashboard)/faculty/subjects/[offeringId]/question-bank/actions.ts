@@ -8,6 +8,40 @@ import { recordAuditLog } from '@/lib/audit';
 import type { QuestionType, Difficulty, BloomLevel, QuestionBankItem } from '@/lib/types';
 import { parseExamText, type ParsedExamItem } from '@/lib/import/exam-parse';
 import { extractFromDOCX, extractFromPDF, extractFromTXT } from '@/lib/ai/text-extraction';
+import { generateEmbedding } from '@/lib/ai';
+
+/** How many rows of a bulk bank save we embed up front; the rest rely on the
+ * generate route's bounded backfill so a big approve can't stall on serial
+ * embedding calls. */
+const BANK_SAVE_EMBED_LIMIT = 10;
+
+/**
+ * Best-effort embedding for a freshly saved bank item, so new rows join the
+ * generate route's semantic duplicate check immediately (scope §13). Failure
+ * is never fatal: the row just stays cold until the route's backfill warms it
+ * — until then it still matches exactly.
+ */
+async function embedBankItem(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  bankItemId: string,
+  questionText: string
+): Promise<boolean> {
+  try {
+    const { embedding } = await generateEmbedding(questionText);
+    const { error } = await supabase
+      .from('question_bank')
+      .update({ embedding })
+      .eq('id', bankItemId);
+    if (error) {
+      console.warn('Could not store bank item embedding; backfill will retry:', error.message);
+      return false;
+    }
+    return true;
+  } catch (error) {
+    console.warn('Could not generate bank item embedding; backfill will retry:', error);
+    return false;
+  }
+}
 
 async function requireUser() {
   const supabase = await createClient();
@@ -162,6 +196,7 @@ export async function createBankItem(
     .select('id')
     .single();
   if (error || !inserted) throw new Error(error?.message ?? 'Failed to create bank item');
+  await embedBankItem(supabase, inserted.id, text);
 
   if (data.choices && data.choices.length > 0) {
     const { data: choices, error: cErr } = await supabase
@@ -487,6 +522,7 @@ export async function saveAssessmentQuestionToBank(
     .select('id')
     .single();
   if (error || !inserted) throw new Error(error?.message ?? 'Failed to save to bank');
+  await embedBankItem(supabase, inserted.id, q.question_text);
 
   if ((q.question_type === 'multiple_choice' || q.question_type === 'true_false') && choices?.length) {
     const { data: bankChoices, error: cErr } = await supabase
@@ -621,6 +657,19 @@ export async function saveAssessmentQuestionsToBank(
     )
     .select('id, source_question_id');
   if (iErr || !inserted) throw new Error(iErr?.message ?? 'Failed to save to bank');
+
+  // Warm a bounded slice of the batch now (see BANK_SAVE_EMBED_LIMIT); a
+  // failure means the embedding provider is likely down, so stop burning
+  // calls — the generate route's backfill finishes the job later.
+  let embedAttempts = 0;
+  for (const bank of inserted) {
+    if (embedAttempts >= BANK_SAVE_EMBED_LIMIT) break;
+    const src = toInsert.find((r) => r.id === bank.source_question_id);
+    if (!src) continue;
+    embedAttempts += 1;
+    const warm = await embedBankItem(supabase, bank.id, src.question_text);
+    if (!warm) break;
+  }
 
   for (const bank of inserted) {
     const src = toInsert.find((r) => r.id === bank.source_question_id);

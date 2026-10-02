@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation';
+import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
 import { getPrimaryRole } from '@/lib/constants';
 import PageHeader from '@/components/ui/PageHeader';
@@ -137,6 +138,14 @@ export default async function ProfilePage() {
                   <Badge variant={studentDetails.verification_status === 'verified' ? 'success' : 'warning'}>
                     {studentDetails.verification_status ?? 'N/A'}
                   </Badge>
+                  {studentDetails.verification_status !== 'verified' && (
+                    <Link
+                      href="/student/verify"
+                      className="block mt-1 text-xs text-[var(--color-primary)] underline"
+                    >
+                      Verify your identity
+                    </Link>
+                  )}
                 </div>
               </CardContent>
             </Card>

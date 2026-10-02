@@ -24,6 +24,7 @@ const UPDATABLE_CONFIG_KEYS: readonly (keyof CreateDeploymentInput)[] = [
   'question_order_mode',
   'choice_order_mode',
   'score_release_mode',
+  'score_release_at',
   'show_raw_score',
   'show_percentage',
   'show_item_correctness',
@@ -162,6 +163,24 @@ export async function createDeployment(
       status = now >= new Date(opensAtIso) ? 'active' : 'scheduled';
     }
 
+    // A scheduled release needs its instant up front — the sweep
+    // (run_scheduled_maintenance) only ever releases 'scheduled' results once
+    // score_release_at has passed, so a null instant would strand them.
+    let scoreReleaseAtIso: string | null = null;
+    if (config.score_release_mode === 'scheduled') {
+      if (typeof config.score_release_at !== 'string' || !config.score_release_at) {
+        return {
+          success: false,
+          error: 'Release date and time is required for a scheduled release',
+        };
+      }
+      const releaseAt = new Date(config.score_release_at);
+      if (Number.isNaN(releaseAt.getTime())) {
+        return { success: false, error: 'Enter a valid release date and time' };
+      }
+      scoreReleaseAtIso = releaseAt.toISOString();
+    }
+
     const { data: deployment, error: insertError } = await supabase
       .from('assessment_deployments')
       .insert({
@@ -175,6 +194,7 @@ export async function createDeployment(
         question_order_mode: config.question_order_mode,
         choice_order_mode: config.choice_order_mode,
         score_release_mode: config.score_release_mode,
+        score_release_at: scoreReleaseAtIso,
         show_raw_score: config.show_raw_score,
         show_percentage: config.show_percentage,
         show_item_correctness: config.show_item_correctness,
@@ -229,6 +249,8 @@ export async function createDeployment(
         status,
         opens_at: opensAtIso,
         closes_at: closesAtIso,
+        score_release_mode: config.score_release_mode,
+        ...(scoreReleaseAtIso ? { score_release_at: scoreReleaseAtIso } : {}),
       },
     });
 

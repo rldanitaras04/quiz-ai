@@ -1111,6 +1111,9 @@ export async function saveGeneratedQuestions(
     accepted_answers?: string[];
     generation_metadata?: Record<string, unknown> | null;
     sourceChunkIds?: string[];
+    /** Candidate embedding from the generate route — stored so later
+     * duplicate checks can compare against this item (scope §13). */
+    embedding?: number[] | null;
   }[]
 ): Promise<{ success: boolean; saved?: number; error?: string }> {
   if (!assessmentId) return { success: false, error: 'Missing assessment' };
@@ -1150,6 +1153,7 @@ export async function saveGeneratedQuestions(
         status: 'active',
         is_ai_generated: q.is_ai_generated ?? false,
         generation_metadata: q.generation_metadata ?? null,
+        embedding: q.embedding ?? null,
         topic_id: q.topic_id ?? null,
         image_url: q.image_url ?? null,
         image_storage_path: q.image_storage_path ?? null,

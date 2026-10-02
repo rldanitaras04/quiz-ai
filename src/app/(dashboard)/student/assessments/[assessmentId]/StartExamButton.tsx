@@ -2,6 +2,7 @@
 
 import { useState, type JSX } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import Button from '@/components/ui/Button';
 import { startExamAttemptAction } from './exam/actions';
 
@@ -50,7 +51,17 @@ export default function StartExamButton({
         Start Exam
       </Button>
       {error && (
-        <span className="text-xs text-[var(--color-danger)] text-right">{error}</span>
+        <span className="text-xs text-[var(--color-danger)] text-right">
+          {error}
+          {error === 'Identity verification required' && (
+            <>
+              {' '}
+              <Link href="/student/verify" className="underline">
+                Verify your identity
+              </Link>
+            </>
+          )}
+        </span>
       )}
     </div>
   );

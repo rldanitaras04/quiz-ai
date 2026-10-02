@@ -1,0 +1,26 @@
+-- scope §13 duplicate gate: generated questions are checked "...and, where
+-- configured, against relevant question-bank items". Until now bank rows
+-- carried no embedding, so they could only join the gate's normalized exact
+-- match. This column gives the bank the same vector(384) space the rest of
+-- the pipeline uses (HuggingFace MiniLM-L6-v2 — see
+-- 20260922000001_huggingface_embeddings.sql), so a generated question is
+-- also checked semantically against the bank, at the administrator-configured
+-- similarity threshold, exactly like in-assessment rows.
+--
+-- Why there is no backfill here: the generate route embeds a bounded number
+-- of cold rows per call and persists them (src/app/api/ai/generate/route.ts),
+-- and new bank rows embed at save time (question-bank actions). Existing rows
+-- therefore warm up incrementally, and a row with no embedding simply
+-- participates in exact matching until it has one — never a hard failure.
+--
+-- Bank question text is immutable after insert today (only source_metadata
+-- and usage_count are ever updated), so no embedding-invalidation path is
+-- needed. If an edit path for question_text is ever added, that update must
+-- refresh or clear this column.
+--
+-- No vector index: like questions.embedding, scoring happens in-process over
+-- a single subject's rows in the generate route — there is no ANN search to
+-- accelerate. No new grants either — the column rides the table's existing
+-- privileges.
+ALTER TABLE question_bank
+  ADD COLUMN IF NOT EXISTS embedding vector(384);

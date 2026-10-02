@@ -287,15 +287,20 @@ export async function setStudentVerification(
   if (!UUID_RE.test(text(userId))) return { error: 'Invalid user id.' };
   if (!isVerificationStatus(status)) return { error: 'Invalid verification status.' };
 
-  const { data, error } = await supabase
-    .from('student_profiles')
-    .update({ verification_status: status, updated_at: new Date().toISOString() })
-    .eq('user_id', userId)
-    .select('user_id')
-    .maybeSingle();
+  // verification_* columns are revoked from `authenticated` (students could
+  // otherwise self-grant on their own row), so the direct UPDATE above would
+  // be denied — the SECURITY DEFINER function re-checks super admin inside.
+  const { data, error } = await supabase.rpc('admin_set_student_verification', {
+    p_student_id: userId,
+    p_status: status,
+  });
 
-  if (error) return { error: friendlyError(error.message, 'Failed to update verification.') };
-  if (!data) return { error: 'That user has no student profile.' };
+  if (error) {
+    if (error.code === '42501') return { error: 'Not authorized to change verification status.' };
+    if (error.code === '22023') return { error: 'Invalid verification status.' };
+    return { error: friendlyError(error.message, 'Failed to update verification.') };
+  }
+  if (data !== true) return { error: 'That user has no student profile.' };
 
   await recordAuditLog({
     actorUserId: actorId,

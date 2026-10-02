@@ -109,6 +109,7 @@ export default function StepApprove({
           })),
           canonical_answer: q.canonical_answer,
           sourceChunkIds: q.sourceChunkIds ?? [],
+          embedding: q.embedding ?? null,
         }))
       );
       if (!saveResult.success) {

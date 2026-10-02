@@ -37,6 +37,10 @@ interface GeneratedQuestionPayload {
   canonicalAnswer?: string;
   canonical_answer?: string;
   sourceChunkIds?: string[];
+  /** Duplicate-gate outcome + provenance assembled by the generate route. */
+  generation_metadata?: Record<string, unknown> | null;
+  /** Candidate embedding, persisted on save for future duplicate checks. */
+  embedding?: number[];
 }
 
 /** Convert the AI API's GeneratedQuestion shape to the wizard's DraftQuestion shape. */
@@ -59,7 +63,7 @@ function mapGeneratedQuestion(raw: GeneratedQuestionPayload, position: number, r
     status: 'active',
     created_by: '',
     is_ai_generated: true,
-    generation_metadata: null,
+    generation_metadata: raw.generation_metadata ?? null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
     question_choices: (raw.choices ?? []).map((c, i) => ({
@@ -74,6 +78,7 @@ function mapGeneratedQuestion(raw: GeneratedQuestionPayload, position: number, r
     })),
     canonical_answer: raw.canonicalAnswer ?? raw.canonical_answer,
     sourceChunkIds: raw.sourceChunkIds ?? [],
+    embedding: raw.embedding,
   };
 }
 import type { WizardState } from '@/app/(dashboard)/faculty/subjects/[offeringId]/assessments/new/page';
@@ -181,13 +186,10 @@ export default function StepGenerate({
         0
       );
 
-      // Fetch source chunk IDs for the selected source materials
-      const { data: sourceChunks } = await supabase
-        .from('source_chunks')
-        .select('id')
-        .in('source_material_id', state.selectedSourceIds);
-
-      const sourceChunkIds = sourceChunks?.map((c) => c.id) || [];
+      // The server vector-searches within the selected materials (scope §11)
+      // and runs the duplicate gate — sending the material ids is enough, and
+      // avoids listing every chunk of every material from the browser.
+      const sourceMaterialIds = state.selectedSourceIds;
 
       // Generate questions for each type via the AI API
       const allGeneratedQuestions: DraftQuestion[] = [];
@@ -217,7 +219,7 @@ export default function StepGenerate({
                 'Authorization': `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}`,
               },
               body: JSON.stringify({
-                sourceChunkIds,
+                sourceMaterialIds,
                 topic: state.title,
                 questionType,
                 count: 1,

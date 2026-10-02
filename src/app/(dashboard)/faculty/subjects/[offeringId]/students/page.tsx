@@ -25,6 +25,7 @@ interface EnrollmentRow {
   enrolled_at: string;
   student: {
     student_number: string | null;
+    verification_status: string | null;
     profiles:
       | { id: string; full_name: string | null; email: string | null }
       | { id: string; full_name: string | null; email: string | null }[]
@@ -66,7 +67,7 @@ export default async function StudentsPage({ params }: Props) {
       student_id,
       status,
       enrolled_at,
-      student:student_profiles(student_number, profiles(id, full_name, email))
+      student:student_profiles(student_number, verification_status, profiles(id, full_name, email))
     `)
     .eq('subject_offering_id', offeringId)
     .order('enrolled_at', { ascending: true });
@@ -86,6 +87,7 @@ export default async function StudentsPage({ params }: Props) {
       email: display.email,
       status: e.status,
       enrolledAt: e.enrolled_at,
+      verificationStatus: e.student?.verification_status ?? null,
     };
   });
 

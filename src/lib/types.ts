@@ -62,6 +62,7 @@ export type ChoiceOrderMode = 'fixed' | 'shuffled';
 
 export type ScoreReleaseMode =
   | 'immediate'
+  | 'after_close'
   | 'after_all_submitted'
   | 'manual_release'
   | 'scheduled';
@@ -87,6 +88,7 @@ export type NotificationType =
   | 'result_released'
   | 'exception_granted'
   | 'submission_confirmed'
+  | 'identity_verification_requested'
   | 'reminder'
   | 'system';
 
@@ -629,6 +631,9 @@ export interface DraftQuestion extends QuestionWithChoices {
   question_choices: DraftQuestionChoice[];
   canonical_answer?: string;
   sourceChunkIds?: string[];
+  /** Candidate embedding produced by the generate route — persisted on save
+   * so later duplicate checks (scope §13) can compare against it. */
+  embedding?: number[];
   topic_id?: string | null;
   topic_title?: string;
   image_url?: string | null;
@@ -726,6 +731,8 @@ export interface CreateDeploymentInput {
   question_order_mode: QuestionOrderMode;
   choice_order_mode: ChoiceOrderMode;
   score_release_mode: ScoreReleaseMode;
+  /** Required when `score_release_mode` is `scheduled`; ignored otherwise. */
+  score_release_at?: string;
   show_raw_score: boolean;
   show_percentage: boolean;
   show_item_correctness: boolean;

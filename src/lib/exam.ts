@@ -2,6 +2,10 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { buildQuestionIdOrder } from '@/lib/exam-order';
 import { COUNTABLE_ATTEMPT_STATUSES } from '@/lib/attempt-limit';
+import { getIdentityVerificationAdapter } from '@/lib/identity-verification';
+// Side-effect: registers the providers (verisoul, mock) so IDENTITY_ADAPTER
+// can select one — the gate itself never names a vendor.
+import '@/lib/identity/register';
 import {
   applyAssessmentExceptions,
   loadAssessmentExceptions,
@@ -113,7 +117,24 @@ export async function startExamAttempt(
       .eq('user_id', userId)
       .single();
 
-    if (!studentProfile || studentProfile.verification_status !== 'verified') {
+    // Manual path first: faculty/admin already granted verification on the
+    // roster (scope §5's faculty-authorized fallback). Only when that is
+    // missing does a configured provider adapter get a say — the shipped
+    // provider (MediaPipe challenge-response liveness) settles through the
+    // /student/verify capture flow, which writes this same status, so from
+    // the gate's perspective an adapter can only refuse here (no completed
+    // capture session). See src/lib/identity-verification.ts for the
+    // provider contract.
+    let verified = studentProfile?.verification_status === 'verified';
+    if (!verified) {
+      const adapter = getIdentityVerificationAdapter();
+      if (adapter) {
+        const outcome = await adapter.verify({ studentUserId: userId, deploymentId });
+        verified = outcome.ok;
+      }
+    }
+
+    if (!verified) {
       return { error: 'Identity verification required', status: 403 };
     }
   }

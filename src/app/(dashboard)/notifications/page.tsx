@@ -11,21 +11,28 @@ import ClearAllNotificationsButton from './ClearAllNotificationsButton';
 export const dynamic = 'force-dynamic';
 
 /**
- * Deep link for a notification. Only exam-related notifications carry these
- * ids; authorization is still enforced when the target page loads (RLS scopes
- * everything to the signed-in user), so a stale or foreign id simply resolves
- * to nothing.
+ * Deep link for a notification. Exam notifications carry assessment/attempt
+ * ids (student side); a manual identity-verification request carries the
+ * roster's `offering_id` (faculty side). Authorization is still enforced when
+ * the target page loads (RLS scopes everything to the signed-in user), so a
+ * stale or foreign id simply resolves to nothing.
  */
 function notificationHref(data: Record<string, unknown> | null): string | null {
   if (!data) return null;
   const assessmentId = data.assessment_id;
-  if (typeof assessmentId !== 'string' || !assessmentId) return null;
-
-  const attemptId = data.attempt_id;
-  if (typeof attemptId === 'string' && attemptId) {
-    return `/student/assessments/${assessmentId}/exam/${attemptId}/results`;
+  if (typeof assessmentId === 'string' && assessmentId) {
+    const attemptId = data.attempt_id;
+    if (typeof attemptId === 'string' && attemptId) {
+      return `/student/assessments/${assessmentId}/exam/${attemptId}/results`;
+    }
+    return `/student/assessments/${assessmentId}`;
   }
-  return `/student/assessments/${assessmentId}`;
+
+  const offeringId = data.offering_id;
+  if (typeof offeringId === 'string' && offeringId) {
+    return `/faculty/subjects/${offeringId}/students`;
+  }
+  return null;
 }
 
 function subjectLabelFromData(data: Record<string, unknown> | null): string | null {

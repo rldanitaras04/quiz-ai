@@ -72,7 +72,14 @@ export async function getIdentificationResponsesNeedingReview(
 
   const answerKeyMap = new Map((answerKeys ?? []).map(ak => [ak.question_id, ak]));
 
-  const { data: responses } = await supabase
+  // Scoring columns are no longer granted to the session role — students
+  // could otherwise read their own scores before release (migration
+  // 20261005000000). The explicit faculty gate above has already passed, so
+  // this read uses the service-role client: the same gates-then-admin pattern
+  // loadAttemptBreakdown uses. Rows outside this faculty member's offerings
+  // are still dropped below via the session-scoped attempts read.
+  const admin = createAdminClient();
+  const { data: responses } = await admin
     .from('student_responses')
     .select('id, attempt_id, question_id, text_answer, normalized_answer, earned_points, scoring_status')
     .in('question_id', questionIds)

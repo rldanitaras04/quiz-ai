@@ -1,0 +1,122 @@
+# CI for quiz-ai.
+#
+# `verify` runs on every push/PR: the same four gates enforced locally —
+# typecheck, eslint (errors only), the node:test unit suite, and a production
+# build. It needs no secrets: Supabase clients are created lazily (see
+# src/lib/supabase/admin.ts) and the browser client has fallbacks, so
+# prerendering succeeds against placeholder values that are never used.
+#
+# `e2e` runs the real-stack suites (enrollment + identity verification, exam
+# integrity, scheduled-maintenance sweep) against a local Supabase stack
+# started on the runner. It is gated to manual dispatch: the suites themselves
+# are verified, but the docker/CLI plumbing on hosted runners has not been
+# exercised from here. Lift the `if:` on the e2e job once it has passed a
+# manual run to make it a required gate too.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Typecheck, lint, test, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      # eslint exits non-zero only on errors; the current warnings are
+      # tracked separately and must not block the pipeline.
+      - name: Lint
+        run: npm run lint
+
+      # Runs env-free (npm test does not load .env.local) — pure logic only.
+      - name: Unit tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://ci-placeholder.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-placeholder-anon-key
+          SUPABASE_SERVICE_ROLE_KEY: ci-placeholder-service-role
+          SUPABASE_DB_URL: postgres://placeholder@localhost:54322/postgres
+
+  e2e:
+    name: E2E (local Supabase, manual)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        # Also installs the pinned supabase CLI (devDependency), so the CLI
+        # version matches what applied these migrations locally.
+        run: npm ci
+
+      - name: Start local Supabase
+        run: npx supabase start
+
+      - name: Apply migrations to the local stack
+        # Fails the job if any migration is not idempotent or breaks.
+        run: npx supabase db reset
+
+      - name: Read stack settings into .env.local
+        id: sb
+        run: |
+          npx supabase status -o json > /tmp/supabase-status.json
+          api_url=$(jq -r '.api_url // .API.URL // .Api.URL // empty' /tmp/supabase-status.json)
+          anon_key=$(jq -r '.anon_key // .ANON_KEY // empty' /tmp/supabase-status.json)
+          service_role_key=$(jq -r '.service_role_key // .SERVICE_ROLE_KEY // empty' /tmp/supabase-status.json)
+          if [ -z "$api_url" ] || [ -z "$anon_key" ] || [ -z "$service_role_key" ]; then
+            echo "::error::Unrecognized 'supabase status' shape — update the jq keys:"
+            cat /tmp/supabase-status.json
+            exit 1
+          fi
+          {
+            echo "NEXT_PUBLIC_SUPABASE_URL=$api_url"
+            echo "NEXT_PUBLIC_SUPABASE_ANON_KEY=$anon_key"
+            echo "SUPABASE_SERVICE_ROLE_KEY=$service_role_key"
+          } > .env.local
+          echo "api_url=$api_url" >> "$GITHUB_OUTPUT"
+
+      # The e2e scripts spawn `next start` themselves and read .env.local,
+      # exactly as they do when run locally (npm run test:e2e*).
+      - name: Build
+        run: npm run build
+
+      - name: E2E — enrollment & identity verification
+        run: npm run test:e2e
+
+      - name: E2E — exam integrity
+        run: npm run test:e2e:exam
+
+      - name: E2E — scheduled maintenance sweep
+        run: npm run test:e2e:sweep

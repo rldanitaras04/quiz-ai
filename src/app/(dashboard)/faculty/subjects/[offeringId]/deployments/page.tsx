@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
+import { runScheduledMaintenance } from '@/lib/scheduler';
 import PageHeader from '@/components/ui/PageHeader';
 import { Card } from '@/components/ui/Card';
 import Badge from '@/components/ui/Badge';
@@ -64,6 +65,12 @@ export default async function DeploymentsPage({ params }: Props) {
 
   if (!offering) redirect('/faculty/subjects');
   const o = offering as unknown as OfferingHeading;
+
+  // Deployment statuses here are read straight from the table, so run the
+  // sweep first: it performs the time-based scheduled → active → closed
+  // transitions the status column never got on its own (migration
+  // 20261006000000). Idempotent and time-gated — safe on every load.
+  await runScheduledMaintenance();
 
   const { data: deployments } = await supabase
     .from('assessment_deployments')
