@@ -2720,6 +2720,25 @@ async function run() {
       (closedNotes ?? 0) >= 1,
       `count=${closedNotes ?? 0}`);
   }
+
+  // T36 — student dashboard + profile render (regression guard: the FK-less
+  // student_profiles columns made PostgREST fail the program/year-level/section
+  // embeds with PGRST200, so every dashboard load threw "Failed to load your
+  // academic context." and /profile silently skipped the student block).
+  {
+    const { cookie: s1PageCookie } = await signIn(fx.s1Email, fx.password);
+
+    const dash = await getPage('/student', s1PageCookie);
+    check('T36 student dashboard renders', dash.status === 200, `status=${dash.status}`);
+    check('T36 dashboard has no academic-context error',
+      !dash.html.includes('Failed to load your academic context'),
+      dash.html.includes('Failed to load your academic context') ? 'error marker present' : 'clean');
+
+    const prof = await getPage('/profile', s1PageCookie);
+    check('T36 profile renders the student block (embeds resolve)',
+      prof.status === 200 && prof.html.includes(fx.s1Number),
+      `status=${prof.status} hasStudentNumber=${prof.html.includes(fx.s1Number)}`);
+  }
 }
 
 // ---------------------------------------------------------------------------

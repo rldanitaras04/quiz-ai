@@ -106,8 +106,19 @@ export async function getStudentDashboardData(): Promise<StudentDashboardData | 
       .eq('status', 'enrolled')
       .order('enrolled_at', { ascending: true }),
   ]);
-  if (profileRes.error || studentProfileRes.error || enrollmentsRes.error) {
-    throw new Error('Failed to load your academic context.');
+  const failures: { label: string; code: string | null; message: string }[] = [];
+  const collect = (label: string, error: { code?: string; message: string } | null): void => {
+    if (error) failures.push({ label, code: error.code ?? null, message: error.message });
+  };
+  collect('profiles', profileRes.error);
+  collect('student_profiles', studentProfileRes.error);
+  collect('enrollments', enrollmentsRes.error);
+  if (failures.length > 0) {
+    // Full detail in the server log; only labels+codes in the client-visible
+    // message so the error boundary stays actionable without leaking query text.
+    console.error('[student-dashboard] academic context load failed:', JSON.stringify(failures));
+    const suffix = failures.map((f) => `${f.label}:${f.code ?? 'unknown'}`).join(', ');
+    throw new Error(`Failed to load your academic context. [${suffix}]`);
   }
 
   const fullName = (profileRes.data?.full_name as string | null) ?? '';
