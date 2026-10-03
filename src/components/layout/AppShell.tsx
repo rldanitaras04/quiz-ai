@@ -89,7 +89,7 @@ export default function AppShell({
   const showBottomNav = hasBottomNavigation(role);
 
   return (
-    <div className="flex h-screen overflow-hidden bg-[var(--color-background)]">
+    <div className="flex h-dvh overflow-hidden bg-[var(--color-background)]">
       {/* Mobile drawer backdrop */}
       {drawerOpen && (
         <div
@@ -140,7 +140,11 @@ export default function AppShell({
           notificationCount={notificationCount}
         />
 
-        <main className="flex-1 overflow-y-auto">
+        {/* Only this pane scrolls: the top bar above and the workspace/bottom
+            navigation below sit outside the scrollport, so they stay put.
+            `overscroll-contain` keeps edge gestures (rubber-banding, pull to
+            refresh) from chaining to the document and dragging the shell. */}
+        <main className="flex-1 overflow-y-auto overscroll-contain">
           <div className="h-full px-4 py-6 lg:px-8 lg:py-8">{children}</div>
         </main>
 

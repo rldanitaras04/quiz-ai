@@ -102,6 +102,13 @@ Authenticated pages use one shared application shell.
 
 Do not render a desktop sidebar squeezed into mobile width.
 
+The top app bar and the contextual/bottom navigation are pinned to the
+*visible* viewport: the shell sizes to `100dvh` (never `100vh`, which on
+mobile browsers is taller than the visible area and lets the whole shell
+scroll), only the main pane scrolls, and its overscroll is contained so
+edge gestures cannot drag the chrome. In-page workspace tab rows are
+`sticky` beneath the top bar, on an opaque background.
+
 ------------------------------------------------------------------------
 
 # 5. Role-Based Navigation

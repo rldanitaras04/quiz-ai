@@ -85,8 +85,9 @@ export default function FacultySubjectWorkspaceClient({
         }
       />
 
-      {/* Contextual tabs - shown on mobile and as fallback */}
-      <nav className="lg:hidden flex gap-1 mb-6 border-b border-[var(--color-border)] overflow-x-auto">
+      {/* Contextual tabs - shown on mobile and as fallback. Sticky under the
+          top bar so they stay reachable while the page scrolls. */}
+      <nav className="sticky top-0 z-10 lg:hidden flex gap-1 mb-6 border-b border-[var(--color-border)] bg-[var(--color-background)] overflow-x-auto">
         {tabs.map((tab: NavigationItem) => (
           <Link
             key={tab.id}

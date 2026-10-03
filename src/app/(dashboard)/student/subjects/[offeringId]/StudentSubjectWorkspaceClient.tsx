@@ -330,8 +330,9 @@ export default function StudentSubjectWorkspaceClient({
         ].filter(Boolean).join(' · ')}
       />
 
-      {/* In-page tabs - mobile fallback and deep-link targets */}
-      <nav className="lg:hidden flex gap-1 mb-6 border-b border-[var(--color-border)] overflow-x-auto">
+      {/* In-page tabs - mobile fallback and deep-link targets. Sticky under
+          the top bar so they stay reachable while the page scrolls. */}
+      <nav className="sticky top-0 z-10 lg:hidden flex gap-1 mb-6 border-b border-[var(--color-border)] bg-[var(--color-background)] overflow-x-auto">
         {tabs.map((tab: NavigationItem) => (
           <Link
             key={tab.id}
