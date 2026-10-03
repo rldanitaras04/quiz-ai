@@ -722,6 +722,139 @@ async function testRls() {
 }
 
 // ---------------------------------------------------------------------------
+// 6b. Scope §39 security probes: result isolation, source-file access,
+//     attempt forgery. (The eligibility/server-clock probes live in
+//     e2e-enrollment, which runs the built server.)
+// ---------------------------------------------------------------------------
+
+async function testScopeSecurity() {
+  const { ids } = created;
+  const studentAClient = await clientFor(created.studentA);
+  const facultyFClient = await clientFor(created.facultyF);
+
+  // --- Another student's result must be unreachable (scope §39) -----------
+  // A real released fixture keeps the probes non-vacuous.
+  const resultB = await insertReturning('assessment_results', {
+    attempt_id: ids.attemptB,
+    student_id: created.studentB.id,
+    deployment_id: ids.deployment,
+    raw_score: 5,
+    possible_score: 10,
+    status: 'released',
+    released_at: new Date().toISOString(),
+  });
+  const adminResult = await admin.from('assessment_results').select('id').eq('id', resultB);
+  check(
+    'released result fixture exists (service role sees it)',
+    !adminResult.error && (adminResult.data ?? []).length === 1,
+    adminResult.error?.message ?? `${(adminResult.data ?? []).length} rows`
+  );
+
+  const byStudent = await studentAClient
+    .from('assessment_results')
+    .select('id, student_id, raw_score')
+    .eq('student_id', created.studentB.id);
+  const byAttempt = await studentAClient
+    .from('assessment_results')
+    .select('id')
+    .eq('attempt_id', ids.attemptB);
+  check(
+    'student cannot retrieve another student\u2019s result',
+    !byStudent.error && (byStudent.data ?? []).length === 0 &&
+      !byAttempt.error && (byAttempt.data ?? []).length === 0,
+    byStudent.error
+      ? `error ${byStudent.error.code}`
+      : `by student=${(byStudent.data ?? []).length}, by attempt=${(byAttempt.data ?? []).length}`
+  );
+
+  const resultTamper = await studentAClient
+    .from('assessment_results')
+    .update({ raw_score: 100 })
+    .eq('id', resultB)
+    .select('id');
+  const tamperCode = resultTamper.error?.code ?? null;
+  const tampered = (resultTamper.data ?? []).length;
+  check(
+    'student cannot alter a result row (write blocked)',
+    tamperCode === '42501' || (tamperCode === null && tampered === 0),
+    tamperCode ? `error ${tamperCode}` : `${tampered} rows updated`
+  );
+
+  const fResult = await facultyFClient.from('assessment_results').select('id').eq('id', resultB);
+  check(
+    'assigned faculty CAN read the result (boundary works both ways)',
+    !fResult.error && (fResult.data ?? []).length === 1,
+    fResult.error ? `error ${fResult.error.code}` : `${(fResult.data ?? []).length} rows`
+  );
+
+  // --- Protected source files: private bucket, faculty-of-offering only ---
+  const objectPath = `${ids.offering}/e2e-scope-probe.txt`;
+  const upload = await admin.storage
+    .from('source-materials')
+    .upload(objectPath, Buffer.from('e2e scope probe'), {
+      contentType: 'text/plain',
+      upsert: true,
+    });
+  check(
+    'source fixture uploaded to the private bucket',
+    !upload.error,
+    upload.error?.message ?? ''
+  );
+
+  const objectUrl = `${url}/storage/v1/object/source-materials/${objectPath}`;
+  const anonObject = await fetch(objectUrl, { signal: AbortSignal.timeout(15_000) });
+  check(
+    'anonymous users cannot access protected source files',
+    anonObject.status !== 200,
+    `status=${anonObject.status}`
+  );
+
+  const { data: sSession } = await studentAClient.auth.getSession();
+  const studentObject = await fetch(objectUrl, {
+    headers: { Authorization: `Bearer ${sSession?.session?.access_token ?? ''}` },
+    signal: AbortSignal.timeout(15_000),
+  });
+  check(
+    'a student cannot read faculty source files',
+    studentObject.status !== 200,
+    `status=${studentObject.status}`
+  );
+
+  const { data: fSession } = await facultyFClient.auth.getSession();
+  const facultyObject = await fetch(objectUrl, {
+    headers: { Authorization: `Bearer ${fSession?.session?.access_token ?? ''}` },
+    signal: AbortSignal.timeout(15_000),
+  });
+  check(
+    'assigned faculty CAN read their source file (boundary works both ways)',
+    facultyObject.status === 200,
+    `status=${facultyObject.status}`
+  );
+  await admin.storage.from('source-materials').remove([objectPath]);
+
+  // --- Attempts cannot be forged with direct PostgREST writes -------------
+  // INSERT on exam_attempts is REVOKE'd from `authenticated` (the start
+  // endpoint writes attempts with the service role after its eligibility
+  // gate), so bypassing the app cannot open a paper either.
+  const forgeAttempt = await studentAClient.from('exam_attempts').insert({
+    deployment_id: ids.deployment,
+    student_id: created.studentA.id,
+    attempt_number: 9,
+    status: 'in_progress',
+    started_at: new Date().toISOString(),
+    expires_at: new Date(Date.now() + 1_800_000).toISOString(),
+    assessment_version_id: ids.version,
+  }).select('id');
+  const forgeCode = forgeAttempt.error?.code ?? null;
+  const forgedRows = (forgeAttempt.data ?? []).length;
+  check(
+    'student cannot forge an exam attempt (INSERT REVOKE\u2019d)',
+    forgeCode === '42501' || (forgeCode === null && forgedRows === 0),
+    forgeCode ? `error ${forgeCode}` : `${forgedRows} rows inserted`
+  );
+}
+
+// ---------------------------------------------------------------------------
 // 7. Realtime publication
 // ---------------------------------------------------------------------------
 
@@ -836,6 +969,7 @@ try {
   await testSessionInvariants();
   await testCheckConstraints();
   await testRls();
+  await testScopeSecurity();
   await testRealtime();
 } catch (err) {
   exitCode = 1;

@@ -34,6 +34,8 @@ import {
 import { getTopicsForOffering } from '@/app/(dashboard)/faculty/subjects/[offeringId]/topics/actions';
 import { saveAssessmentQuestionToBank } from '@/app/(dashboard)/faculty/subjects/[offeringId]/question-bank/actions';
 import ImportExamModal from '@/components/assessment/ImportExamModal';
+import AiModifyModal from './AiModifyModal';
+import QualityReportCard from './QualityReportCard';
 import DeleteAssessmentButton from '@/app/(dashboard)/faculty/subjects/[offeringId]/assessments/[assessmentId]/DeleteAssessmentButton';
 import DownloadTosButton from '@/app/(dashboard)/faculty/subjects/[offeringId]/assessments/[assessmentId]/DownloadTosButton';
 import type { DraftQuestion, DraftQuestionChoice, Topic } from '@/lib/types';
@@ -163,6 +165,7 @@ export default function AssessmentDetailClient({
   const [loadingSource, setLoadingSource] = useState(false);
   const [topics, setTopics] = useState<Topic[]>([]);
   const [savingToBankId, setSavingToBankId] = useState<string | null>(null);
+  const [aiModalOpen, setAiModalOpen] = useState(false);
 
   // Load topics for picker and bank save
   useEffect(() => {
@@ -656,34 +659,47 @@ export default function AssessmentDetailClient({
         </Card>
       )}
 
+      {/* Pre-exam quality dashboard (scope §31) */}
+      <QualityReportCard assessmentId={detail.id} />
+
       <Card>
         <CardHeader className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-base font-semibold text-[var(--color-foreground)]">
             Questions ({detail.questions.length})
           </h2>
-          {detail.questionsLocked ? (
-            <span className="text-xs text-[var(--color-muted)]">
-              Read-only — this version is published or already deployed
-            </span>
-          ) : (
-            <div className="flex flex-wrap items-center gap-2">
-              <ImportExamModal
-                offeringId={detail.subjectOfferingId}
-                topics={topics}
-                assessmentId={detail.id}
-                buttonLabel="Upload questions"
-                onImported={() => router.refresh()}
-              />
-              <Button
-                variant="primary"
-                size="sm"
-                onClick={openNewQuestion}
-                disabled={!detail.version}
-              >
-                Add question
-              </Button>
-            </div>
-          )}
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setAiModalOpen(true)}
+              disabled={detail.questions.length === 0}
+            >
+              AI assistant
+            </Button>
+            {detail.questionsLocked ? (
+              <span className="text-xs text-[var(--color-muted)]">
+                Read-only — this version is published or already deployed
+              </span>
+            ) : (
+              <>
+                <ImportExamModal
+                  offeringId={detail.subjectOfferingId}
+                  topics={topics}
+                  assessmentId={detail.id}
+                  buttonLabel="Upload questions"
+                  onImported={() => router.refresh()}
+                />
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={openNewQuestion}
+                  disabled={!detail.version}
+                >
+                  Add question
+                </Button>
+              </>
+            )}
+          </div>
         </CardHeader>
 
         {detail.questions.length > 0 ? (
@@ -960,6 +976,16 @@ export default function AssessmentDetailClient({
           )}
         </div>
       </Modal>
+
+      {/* AI Modification Assistant (scope §16) — keyed so every open starts fresh */}
+      <AiModifyModal
+        key={aiModalOpen ? 'ai-modify-open' : 'ai-modify-closed'}
+        open={aiModalOpen}
+        onClose={() => setAiModalOpen(false)}
+        assessmentId={detail.id}
+        detail={detail}
+        onApplied={() => router.refresh()}
+      />
     </div>
   );
 }

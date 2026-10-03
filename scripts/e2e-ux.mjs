@@ -15,6 +15,7 @@
  */
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
+import net from 'node:net';
 import path from 'node:path';
 import { createClient } from '@supabase/supabase-js';
 import { createServerClient } from '@supabase/ssr';
@@ -324,7 +325,29 @@ async function cleanup() {
 let server = null;
 let serverLogFd = -1;
 
+/**
+ * Fail fast when the test port is already taken: a leaked `next start` from
+ * an earlier run answers the readiness probe before the freshly spawned child
+ * gets a chance to write EADDRINUSE to its log, so the run would silently
+ * test a stale server whose chunk files no longer match the current .next.
+ */
+async function assertPortFree() {
+  const busy = await new Promise((resolve) => {
+    const probe = net.createServer();
+    probe.once('error', (err) => resolve(err.code === 'EADDRINUSE'));
+    probe.once('listening', () => probe.close(() => resolve(false)));
+    probe.listen(PORT);
+  });
+  if (busy) {
+    throw new Error(
+      `Port ${PORT} is already in use — a leaked server from an earlier run would ` +
+        'answer the readiness probe while serving a stale build. Kill it first.'
+    );
+  }
+}
+
 async function startServer() {
+  await assertPortFree();
   const serverLogPath = path.join('scripts', '.e2e-ux-server.log');
   serverLogFd = fs.openSync(serverLogPath, 'w');
   const nextBin = path.join('node_modules', 'next', 'dist', 'bin', 'next');
@@ -350,18 +373,26 @@ async function startServer() {
   }
 }
 
-function stopServer() {
+async function stopServer() {
   if (!server) return;
+  const pid = server.pid;
+  server = null;
   try {
     if (process.platform === 'win32') {
-      spawn('taskkill', ['/pid', String(server.pid), '/f', '/t'], { stdio: 'ignore' });
+      // Await the kill: fire-and-forget let `process.exit` below run before
+      // taskkill completed, leaking a stale server that later answered
+      // readiness probes while serving a wiped .next build.
+      await new Promise((resolve) => {
+        const killer = spawn('taskkill', ['/pid', String(pid), '/f', '/t'], { stdio: 'ignore' });
+        killer.once('exit', resolve);
+        killer.once('error', resolve);
+      });
     } else {
-      process.kill(-server.pid, 'SIGTERM');
+      process.kill(-pid, 'SIGTERM');
     }
   } catch {
     /* already gone */
   }
-  server = null;
   try {
     fs.closeSync(serverLogFd);
   } catch {
@@ -458,8 +489,19 @@ async function testResponsive(browser) {
   for (const surface of SURFACES()) {
     const context = await newAuthedContext(browser, surface.cookies);
     const page = await context.newPage();
+    // Collect browser-side failures so a stuck surface reports WHY (page
+    // exceptions, console errors, failed fetches) instead of only the timeout.
+    const browserIssues = [];
+    page.on('pageerror', (e) => browserIssues.push(`pageerror: ${e.message.split('\n')[0]}`));
+    page.on('console', (m) => {
+      if (m.type() === 'error') browserIssues.push(`console: ${m.text().slice(0, 300)}`);
+    });
+    page.on('requestfailed', (r) =>
+      browserIssues.push(`requestfailed: ${r.url().slice(0, 160)} ${r.failure()?.errorText ?? ''}`)
+    );
     for (const [vpName, width, height] of VIEWPORTS) {
       await page.setViewportSize({ width, height });
+      browserIssues.length = 0;
       try {
         await page.goto(surface.url, { waitUntil: 'domcontentloaded' });
         await surface.ready(page);
@@ -479,7 +521,8 @@ async function testResponsive(browser) {
         check(
           `${surface.name} @ ${vpName} (${width}×${height}): renders without error`,
           false,
-          `${String(err.message).split('\n')[0]} | body: ${snippet}`
+          `${String(err.message).split('\n')[0]} | body: ${snippet}` +
+            (browserIssues.length ? ` | issues: ${browserIssues.join(' || ')}` : '')
         );
       }
     }
@@ -512,6 +555,11 @@ async function testThemes(browser) {
         }
       }, theme);
       const page = await context.newPage();
+      const themeIssues = [];
+      page.on('pageerror', (e) => themeIssues.push(`pageerror: ${e.message.split('\n')[0]}`));
+      page.on('console', (m) => {
+        if (m.type() === 'error') themeIssues.push(`console: ${m.text().slice(0, 300)}`);
+      });
       const vp = theme === 'system' ? ['system', 1440, 900] : [theme, 1440, 900];
       await page.setViewportSize({ width: vp[1], height: vp[2] });
       try {
@@ -534,7 +582,8 @@ async function testThemes(browser) {
         check(
           `${surfaceName} theme=${theme}: page renders`,
           false,
-          String(err.message).split('\n')[0]
+          String(err.message).split('\n')[0] +
+            (themeIssues.length ? ` | issues: ${themeIssues.join(' || ')}` : '')
         );
       }
       await context.close();
@@ -642,7 +691,7 @@ try {
   } catch (err) {
     check('cleanup removed all fixtures', false, String(err?.message ?? err));
   }
-  stopServer();
+  await stopServer();
 }
 
 console.log(`\nScreenshots: ${SHOT_DIR}`);

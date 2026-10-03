@@ -13,13 +13,25 @@ export const dynamic = 'force-dynamic';
 /**
  * Deep link for a notification. Exam notifications carry assessment/attempt
  * ids (student side); a manual identity-verification request carries the
- * roster's `offering_id` (faculty side). Authorization is still enforced when
- * the target page loads (RLS scopes everything to the signed-in user), so a
- * stale or foreign id simply resolves to nothing.
+ * roster's `offering_id` (faculty side); generation outcomes are explicitly
+ * marked `faculty_assessment` and link to the faculty assessment workspace.
+ * Authorization is still enforced when the target page loads (RLS scopes
+ * everything to the signed-in user), so a stale or foreign id simply
+ * resolves to nothing.
  */
 function notificationHref(data: Record<string, unknown> | null): string | null {
   if (!data) return null;
+
+  const offeringId = data.offering_id;
   const assessmentId = data.assessment_id;
+  if (
+    data.faculty_assessment === true &&
+    typeof offeringId === 'string' && offeringId &&
+    typeof assessmentId === 'string' && assessmentId
+  ) {
+    return `/faculty/subjects/${offeringId}/assessments/${assessmentId}`;
+  }
+
   if (typeof assessmentId === 'string' && assessmentId) {
     const attemptId = data.attempt_id;
     if (typeof attemptId === 'string' && attemptId) {
@@ -28,7 +40,6 @@ function notificationHref(data: Record<string, unknown> | null): string | null {
     return `/student/assessments/${assessmentId}`;
   }
 
-  const offeringId = data.offering_id;
   if (typeof offeringId === 'string' && offeringId) {
     return `/faculty/subjects/${offeringId}/students`;
   }

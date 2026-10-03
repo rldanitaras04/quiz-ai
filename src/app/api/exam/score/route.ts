@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { scoreAttempt } from '@/lib/scoring';
+import { scoreAttempt, upsertAssessmentResult } from '@/lib/scoring';
 
 export async function POST(request: Request) {
   try {
@@ -77,32 +77,15 @@ export async function POST(request: Request) {
     // Scoring reads answer keys (RLS-denied to students) and writes results,
     // so it must run with the service-role client.
     const admin = createAdminClient();
-    const { rawScore, possibleScore, percentage } = await scoreAttempt(attemptId, admin);
+    await scoreAttempt(attemptId, admin);
 
-    const { data: existingResult } = await admin
-      .from('assessment_results')
-      .select('id')
-      .eq('attempt_id', attemptId)
-      .single();
-
-    if (existingResult) {
-      await admin
-        .from('assessment_results')
-        .update({
-          raw_score: rawScore,
-          possible_score: possibleScore || 1,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', existingResult.id);
-    } else {
-      await admin.from('assessment_results').insert({
-        attempt_id: attemptId,
-        student_id: attempt.student_id,
-        deployment_id: attempt.deployment_id,
-        raw_score: rawScore,
-        possible_score: possibleScore || 1,
-        status: 'pending',
-      });
+    // Shared upsert — same totals definition as submit / review / release.
+    const totals = await upsertAssessmentResult(admin, attemptId, {
+      studentId: attempt.student_id,
+      deploymentId: attempt.deployment_id,
+    });
+    if (!totals || !totals.ok) {
+      return NextResponse.json({ error: 'Failed to record result totals' }, { status: 500 });
     }
 
     const { data: deployment } = await admin
@@ -129,10 +112,14 @@ export async function POST(request: Request) {
       }
     }
 
+    const percentage = totals.possibleScore > 0
+      ? (totals.rawScore / totals.possibleScore) * 100
+      : 0;
+
     return NextResponse.json({
       success: true,
-      rawScore,
-      possibleScore,
+      rawScore: totals.rawScore,
+      possibleScore: totals.possibleScore,
       percentage,
     });
   } catch (error) {

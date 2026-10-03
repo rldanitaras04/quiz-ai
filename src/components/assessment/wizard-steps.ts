@@ -5,6 +5,7 @@ export type StepId =
   | 'basic'
   | 'sources'
   | 'genConfig'
+  | 'tos'
   | 'custom'
   | 'generate'
   | 'manual'
@@ -19,8 +20,8 @@ export type StepId =
  */
 export const STEP_CONFIG: Record<AssessmentCreationMode, { ids: StepId[]; labels: string[] }> = {
   ai: {
-    ids: ['mode', 'basic', 'sources', 'genConfig', 'custom', 'generate', 'review', 'approve'],
-    labels: ['Creation Mode', 'Basic Info', 'Source Materials', 'Generation Config', 'Custom Instructions', 'Generate', 'Review & Edit', 'Approve & Schedule'],
+    ids: ['mode', 'basic', 'sources', 'genConfig', 'tos', 'custom', 'generate', 'review', 'approve'],
+    labels: ['Creation Mode', 'Basic Info', 'Source Materials', 'Generation Config', 'Table of Specs', 'Custom Instructions', 'Generate', 'Review & Edit', 'Approve & Schedule'],
   },
   manual: {
     ids: ['mode', 'basic', 'manual', 'review', 'approve'],

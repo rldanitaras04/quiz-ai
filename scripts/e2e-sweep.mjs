@@ -334,6 +334,20 @@ async function testSweep() {
     depClose.status === 'closed',
     `status=${depClose.status}`
   );
+  // Scope §32 faculty event: the close transition notifies every faculty
+  // member assigned to the offering (trigger in 20261013000000), once.
+  const { data: facultyClosedNotes } = await admin
+    .from('notifications')
+    .select('id, body')
+    .eq('user_id', created.faculty.id)
+    .eq('type', 'assessment_closed')
+    .contains('data', { deployment_id: ids.depClose });
+  check(
+    'faculty of the offering is notified once when their exam closes',
+    (facultyClosedNotes ?? []).length === 1 &&
+      /submitted/i.test(facultyClosedNotes?.[0]?.body ?? ''),
+    `count=${facultyClosedNotes?.length ?? 0} body=${facultyClosedNotes?.[0]?.body?.slice(0, 60)}`
+  );
   const depAfterCloseRow = await getRow('assessment_deployments', ids.depAfterClose, 'status');
   check(
     'release-mode deployment also closes',
@@ -432,6 +446,77 @@ async function testSweep() {
 }
 
 // ---------------------------------------------------------------------------
+// Generation-job state machine (WP-4): the stall reaper
+// ---------------------------------------------------------------------------
+
+async function testJobStallReap() {
+  const { ids } = created;
+  const stale = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+
+  const staleQueued = await insertReturning('assessment_generation_jobs', {
+    assessment_id: ids.assessment,
+    requested_by: created.faculty.id,
+    operation: 'generate_questions',
+    status: 'queued',
+    updated_at: stale,
+  });
+  const staleProcessing = await insertReturning('assessment_generation_jobs', {
+    assessment_id: ids.assessment,
+    requested_by: created.faculty.id,
+    operation: 'generate_questions',
+    status: 'processing',
+    updated_at: stale,
+  });
+  const freshProcessing = await insertReturning('assessment_generation_jobs', {
+    assessment_id: ids.assessment,
+    requested_by: created.faculty.id,
+    operation: 'generate_questions',
+    status: 'processing',
+  });
+
+  // A healthy batch re-runs the route's processing update per question, so
+  // only a dead client leaves a row this old. pg_cron may also have reaped
+  // the fixtures already (it runs every minute when available) — the
+  // per-row assertions below hold either way.
+  const { data: reaped, error } = await admin.rpc('fail_stalled_generation_jobs');
+  if (error) throw new Error(`fail_stalled_generation_jobs: ${error.message}`);
+  check('stall reaper runs and reports a count', typeof reaped === 'number', `failed=${reaped}`);
+
+  const q = await getRow('assessment_generation_jobs', staleQueued, 'status, error_message');
+  check(
+    'stale queued job is reaped as failed with a stall reason',
+    q.status === 'failed' && /15 minutes/.test(q.error_message ?? ''),
+    `status=${q.status} err=${(q.error_message ?? '').slice(0, 60)}`
+  );
+
+  const p = await getRow('assessment_generation_jobs', staleProcessing, 'status, error_message');
+  check(
+    'stale processing job is reaped as failed',
+    p.status === 'failed' && /15 minutes/.test(p.error_message ?? ''),
+    `status=${p.status} err=${(p.error_message ?? '').slice(0, 60)}`
+  );
+
+  const fresh = await getRow('assessment_generation_jobs', freshProcessing, 'status');
+  check(
+    'a fresh in-flight job is left untouched',
+    fresh.status === 'processing',
+    `status=${fresh.status}`
+  );
+
+  const { data: second } = await admin.rpc('fail_stalled_generation_jobs');
+  check(
+    'reaping is idempotent (second run finds nothing)',
+    second === 0,
+    `failed=${second}`
+  );
+
+  await admin
+    .from('assessment_generation_jobs')
+    .delete()
+    .in('id', [staleQueued, staleProcessing, freshProcessing]);
+}
+
+// ---------------------------------------------------------------------------
 
 async function cleanup() {
   const { ids } = created;
@@ -477,6 +562,7 @@ let exitCode = 0;
 try {
   await createFixtures();
   await testSweep();
+  await testJobStallReap();
 } catch (err) {
   exitCode = 1;
   console.error('\nRUN ERROR:', err);

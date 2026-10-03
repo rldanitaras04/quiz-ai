@@ -266,6 +266,89 @@ export const SETTING_DEFS = {
     integer: true,
     step: 5,
   },
+  // --- Item and distractor analysis (scope §29) -----------------------------
+  // "Interpretation thresholds must be configurable and treated as analytic
+  // guidance, not unquestionable conclusions."
+  analysis_group_percent: {
+    label: 'Discrimination group size (%)',
+    description:
+      'Share of the top and bottom scored attempts that form the comparison groups for the discrimination index D = (RU/NU) − (RL/NL). The classic psychometric default is 27%.',
+    default: 27,
+    min: 5,
+    max: 50,
+    integer: true,
+    step: 1,
+  },
+  analysis_pass_mark: {
+    label: 'Pass mark (%)',
+    description:
+      'Percentage score at or above which a submitted attempt counts as passing in the analytics pass-rate.',
+    default: 60,
+    min: 1,
+    max: 100,
+    integer: true,
+    step: 1,
+  },
+  analysis_easy_p: {
+    label: 'Too-easy threshold (P ≥)',
+    description:
+      'Items whose difficulty index P reaches this value are flagged "too easy" for faculty review.',
+    default: 0.9,
+    min: 0.5,
+    max: 1,
+    integer: false,
+    step: 0.05,
+  },
+  analysis_hard_p: {
+    label: 'Too-hard threshold (P <)',
+    description:
+      'Items whose difficulty index P falls below this value are flagged "too hard" for faculty review.',
+    default: 0.3,
+    min: 0,
+    max: 0.5,
+    integer: false,
+    step: 0.05,
+  },
+  analysis_min_disc: {
+    label: 'Weak discrimination flag (D <)',
+    description:
+      'Items with a discrimination index below this value (but not negative) are flagged as weakly discriminating.',
+    default: 0.1,
+    min: 0,
+    max: 0.5,
+    integer: false,
+    step: 0.05,
+  },
+  analysis_good_d: {
+    label: 'Discrimination rating: Good (D ≥)',
+    description:
+      'Cut-off at or above which an item is rated Good. Should be higher than the Fair cut-off.',
+    default: 0.3,
+    min: 0,
+    max: 1,
+    integer: false,
+    step: 0.05,
+  },
+  analysis_fair_d: {
+    label: 'Discrimination rating: Fair (D ≥)',
+    description:
+      'Cut-off at or above which an item is rated Fair (below Good). Should be lower than the Good cut-off.',
+    default: 0.2,
+    min: 0,
+    max: 1,
+    integer: false,
+    step: 0.05,
+  },
+  analysis_low_distractor_pct: {
+    label: 'Low-use distractor threshold (%)',
+    description:
+      'Distractors selected by fewer than this share of respondents are flagged for item review.',
+    default: 5,
+    min: 0,
+    max: 50,
+    integer: true,
+    step: 1,
+  },
 } as const satisfies Record<string, SettingDef>;
 
 export type SettingKey = keyof typeof SETTING_DEFS;
@@ -279,4 +362,12 @@ export const DEFAULT_SETTINGS: AppSettings = {
   max_upload_size_mb: SETTING_DEFS.max_upload_size_mb.default,
   similarity_threshold: SETTING_DEFS.similarity_threshold.default,
   default_page_size: SETTING_DEFS.default_page_size.default,
+  analysis_group_percent: SETTING_DEFS.analysis_group_percent.default,
+  analysis_pass_mark: SETTING_DEFS.analysis_pass_mark.default,
+  analysis_easy_p: SETTING_DEFS.analysis_easy_p.default,
+  analysis_hard_p: SETTING_DEFS.analysis_hard_p.default,
+  analysis_min_disc: SETTING_DEFS.analysis_min_disc.default,
+  analysis_good_d: SETTING_DEFS.analysis_good_d.default,
+  analysis_fair_d: SETTING_DEFS.analysis_fair_d.default,
+  analysis_low_distractor_pct: SETTING_DEFS.analysis_low_distractor_pct.default,
 };

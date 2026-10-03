@@ -4,7 +4,7 @@ import { useState, useCallback, type JSX } from 'react';
 import Button from '@/components/ui/Button';
 import Spinner from '@/components/ui/Spinner';
 import { notifyError, notifySuccess } from '@/components/ui/alerts';
-import { createAssessment, updateGenerationConfig, triggerGeneration } from '@/app/(dashboard)/faculty/subjects/[offeringId]/assessments/actions';
+import { createAssessment, updateGenerationConfig, triggerGeneration, completeGenerationJob, failGenerationJob } from '@/app/(dashboard)/faculty/subjects/[offeringId]/assessments/actions';
 import { useSupabase } from '@/lib/hooks';
 import type {
   QuestionType,
@@ -140,6 +140,9 @@ export default function StepGenerate({
     onUpdate({ isGenerating: true, generationError: null });
     setGenerationError(null);
     setCurrentPhase(0);
+    // Generation job row (state machine: queued → processing → terminal).
+    // Declared outside try so the catch can record the failure too.
+    let generationJobId: string | null = null;
 
     try {
       // Phase 1: Create assessment
@@ -168,13 +171,14 @@ export default function StepGenerate({
       // Phase 3: Trigger generation
       setCurrentPhase(2);
       updatePhase(2, 'active');
-      await triggerGeneration(assessment.id, {        source_material_ids: state.selectedSourceIds,
+      const job = await triggerGeneration(assessment.id, {        source_material_ids: state.selectedSourceIds,
         question_types: state.questionTypes,
         count_per_type: state.countPerType,
         difficulty_distribution: state.difficultyDistribution,
         bloom_distribution: state.bloomDistribution,
         custom_instructions: state.customInstructions || undefined,
       });
+      generationJobId = job?.id ?? null;
       updatePhase(2, 'done');
 
       // Phase 4: Call AI generation API
@@ -228,6 +232,7 @@ export default function StepGenerate({
                 customInstructions: state.customInstructions,
                 assessmentId: assessment.id,
                 offeringId,
+                jobId: generationJobId,
               }),
             });
 
@@ -256,6 +261,21 @@ export default function StepGenerate({
 
       updatePhase(3, 'done');
 
+      // Job state machine: record the batch outcome (best-effort — finalizing
+      // bookkeeping must never fail a run that produced questions; if this
+      // write is lost the sweep reaps the job as stalled).
+      if (generationJobId) {
+        try {
+          await completeGenerationJob(generationJobId, {
+            generated: allGeneratedQuestions.length,
+            failed: errors.length,
+            requested: totalQ,
+          });
+        } catch (finalizeErr) {
+          console.warn('Could not finalize generation job:', finalizeErr);
+        }
+      }
+
       notifySuccess(
         'Questions generated',
         `${allGeneratedQuestions.length} question${allGeneratedQuestions.length === 1 ? '' : 's'} ready to review.`
@@ -272,6 +292,16 @@ export default function StepGenerate({
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Generation failed';
+      // Job state machine: record the failure on the generation job so the
+      // faculty dashboard's failed-jobs view reflects reality (best-effort;
+      // if this write is lost the sweep reaps the job as stalled).
+      if (generationJobId) {
+        try {
+          await failGenerationJob(generationJobId, msg);
+        } catch {
+          // bookkeeping only — the UI error below is what the user sees
+        }
+      }
       setGenerationError(msg);
       notifyError('Generation failed', msg);
       onUpdate({ isGenerating: false, generationError: msg });

@@ -292,6 +292,15 @@ export default function StepQuestionBank({ offeringId, topics, onImport, existin
                           <Badge variant="outline">{item.bloom_level}</Badge>
                           <Badge variant="default">{item.points} pt{item.points === 1 ? '' : 's'}</Badge>
                           {item.usage_count > 0 && <Badge variant="outline">Used {item.usage_count}×</Badge>}
+                          {item.item_stats && (
+                            <Badge variant="success">
+                              P {item.item_stats.difficulty_index.toFixed(2)}
+                              {item.item_stats.discrimination_index !== null
+                                ? ` · D ${item.item_stats.discrimination_index.toFixed(2)}`
+                                : ''}
+                              {' '}· n={item.item_stats.n}
+                            </Badge>
+                          )}
                           {itemImage && <Badge variant="info">Image</Badge>}
                         </div>
                         <p className="text-xs text-[var(--color-muted)] mt-1 truncate">Answer: <span className="text-[var(--color-foreground)]">{answer}</span></p>

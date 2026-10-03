@@ -9,6 +9,8 @@ import type { QuestionType, Difficulty, BloomLevel, QuestionBankItem } from '@/l
 import { parseExamText, type ParsedExamItem } from '@/lib/import/exam-parse';
 import { extractFromDOCX, extractFromPDF, extractFromTXT } from '@/lib/ai/text-extraction';
 import { generateEmbedding } from '@/lib/ai';
+import { getSettings } from '@/lib/settings';
+import { summarizeItemStats, type ItemStatsSnapshot } from '@/lib/item-analysis';
 
 /** How many rows of a bulk bank save we embed up front; the rest rely on the
  * generate route's bounded backfill so a big approve can't stall on serial
@@ -41,6 +43,88 @@ async function embedBankItem(
     console.warn('Could not generate bank item embedding; backfill will retry:', error);
     return false;
   }
+}
+
+/**
+ * Historical item statistics for bank saves (scope §30). Aggregates every
+ * scored attempt of the given version(s) — across all of its deployments —
+ * and builds a snapshot per question (null when the question has no
+ * responses: there is no history yet).
+ *
+ * Service-role reads of `student_responses`/`assessment_results` (revoked to
+ * the session role since 20261005000000); callers must have authorized the
+ * assessment first — the same gates-then-admin contract as touchBankItems.
+ */
+async function computeBankItemStats(
+  rows: { id: string; question_type: string; assessment_version_id: string }[]
+): Promise<Map<string, ItemStatsSnapshot | null>> {
+  const out = new Map<string, ItemStatsSnapshot | null>();
+  if (rows.length === 0) return out;
+
+  const versionIds = [...new Set(rows.map(r => r.assessment_version_id))];
+  const admin = createAdminClient();
+  const settings = await getSettings();
+
+  const { data: attempts } = await admin
+    .from('exam_attempts')
+    .select('id')
+    .in('assessment_version_id', versionIds)
+    .in('status', ['submitted', 'auto_submitted']);
+  const attemptIds = (attempts ?? []).map(a => a.id);
+  if (attemptIds.length === 0) return out;
+
+  const { data: results } = await admin
+    .from('assessment_results')
+    .select('attempt_id, percentage')
+    .in('attempt_id', attemptIds);
+  const totalByAttempt = new Map<string, number>(
+    (results ?? []).map(r => [r.attempt_id, r.percentage])
+  );
+
+  const { data: responses } = await admin
+    .from('student_responses')
+    .select('attempt_id, question_id, selected_choice_id, earned_points')
+    .in('attempt_id', attemptIds)
+    .in(
+      'question_id',
+      rows.map(r => r.id)
+    );
+  if (!responses || responses.length === 0) return out;
+
+  const { data: keys } = await admin
+    .from('answer_keys')
+    .select('question_id, correct_choice_id')
+    .in('question_id', rows.map(r => r.id));
+  const correctByQuestion = new Map<string, string | null>(
+    (keys ?? []).map(k => [k.question_id, k.correct_choice_id])
+  );
+
+  const { data: choices } = await admin
+    .from('question_choices')
+    .select('id, question_id, choice_key, position')
+    .in('question_id', rows.map(r => r.id));
+  const choicesByQuestion = new Map<string, { id: string; choice_key: string }[]>();
+  for (const c of choices ?? []) {
+    const list = choicesByQuestion.get(c.question_id) ?? [];
+    list.push({ id: c.id, choice_key: c.choice_key });
+    choicesByQuestion.set(c.question_id, list);
+  }
+
+  for (const row of rows) {
+    const rowResponses = responses.filter(r => r.question_id === row.id);
+    out.set(
+      row.id,
+      summarizeItemStats({
+        questionType: row.question_type,
+        responses: rowResponses,
+        choices: choicesByQuestion.get(row.id) ?? [],
+        correctChoiceId: correctByQuestion.get(row.id) ?? null,
+        totalByAttempt,
+        groupPercent: settings.analysis_group_percent,
+      })
+    );
+  }
+  return out;
 }
 
 async function requireUser() {
@@ -85,7 +169,7 @@ export async function getQuestionBank(
   let query = supabase
     .from('question_bank')
     .select(`
-      id, subject_id, topic_id, question_type, question_text, difficulty, bloom_level, points, image_url, image_storage_path, source_question_id, source_metadata, created_by, status, usage_count, last_used_at, created_at, updated_at,
+      id, subject_id, topic_id, question_type, question_text, difficulty, bloom_level, points, image_url, image_storage_path, source_question_id, source_metadata, created_by, status, usage_count, last_used_at, item_stats, created_at, updated_at,
       topic:topics(id, title, description),
       question_bank_choices(id, bank_question_id, choice_key, choice_text, position),
       question_bank_answer_keys(id, bank_question_id, correct_choice_id, canonical_answer, accepted_answers)
@@ -122,6 +206,7 @@ export async function getQuestionBank(
     status: row.status,
     usage_count: row.usage_count,
     last_used_at: row.last_used_at,
+    item_stats: row.item_stats ?? null,
     created_at: row.created_at,
     updated_at: row.updated_at,
     question_bank_choices: row.question_bank_choices ?? [],
@@ -502,6 +587,12 @@ export async function saveAssessmentQuestionToBank(
   const answerKey = Array.isArray((q as any).answer_keys) ? (q as any).answer_keys[0] : (q as any).answer_keys;
   const choices = (q as any).question_choices as Array<{ id: string; choice_key: string; choice_text: string; position: number }>;
 
+  // §30: snapshot the question's historical item statistics (null while it
+  // has never been scored).
+  const statsMap = await computeBankItemStats([
+    { id: q.id, question_type: q.question_type, assessment_version_id: q.assessment_version_id },
+  ]);
+
   const { data: inserted, error } = await supabase
     .from('question_bank')
     .insert({
@@ -518,6 +609,7 @@ export async function saveAssessmentQuestionToBank(
       source_metadata: { copied_from_assessment: ver.assessment_id },
       created_by: userId,
       status: 'active',
+      item_stats: statsMap.get(q.id) ?? null,
     })
     .select('id')
     .single();
@@ -634,6 +726,22 @@ export async function saveAssessmentQuestionsToBank(
     (existing ?? []).map((r) => (r as { source_question_id: string }).source_question_id)
   );
   const toInsert = rows.filter((r) => !already.has(r.id));
+
+  // §30: historical item statistics for this version's questions — carried on
+  // the fresh inserts, and refreshed on rows saved by an earlier approve.
+  const statsMap = await computeBankItemStats(
+    rows.map((r) => ({
+      id: r.id,
+      question_type: r.question_type,
+      assessment_version_id: assess.current_version_id as string,
+    }))
+  );
+  const statsAdmin = createAdminClient();
+  for (const row of (existing ?? []) as { id: string; source_question_id: string }[]) {
+    const snap = statsMap.get(row.source_question_id);
+    if (!snap) continue;
+    await statsAdmin.from('question_bank').update({ item_stats: snap }).eq('id', row.id);
+  }
   if (toInsert.length === 0) return { saved: 0, skipped: already.size };
 
   const { data: inserted, error: iErr } = await supabase
@@ -653,6 +761,7 @@ export async function saveAssessmentQuestionsToBank(
         source_metadata: { copied_from_assessment: assessmentId },
         created_by: userId,
         status: 'active',
+        item_stats: statsMap.get(r.id) ?? null,
       }))
     )
     .select('id, source_question_id');

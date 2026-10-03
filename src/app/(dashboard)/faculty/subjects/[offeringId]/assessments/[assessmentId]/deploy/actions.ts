@@ -6,7 +6,7 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { notifyOfferingStudents } from '@/lib/notifications';
 import { recordAuditLog } from '@/lib/audit';
 import { isFacultyOfOffering, isFacultyOfOfferingOrSubject } from '@/lib/auth';
-import { scoreAttempt } from '@/lib/scoring';
+import { scoreAttempt, upsertAssessmentResult } from '@/lib/scoring';
 import {
   SECURITY_POLICY_KEYS,
   normalizeSecurityPolicy,
@@ -615,15 +615,15 @@ const { data: deployment } = await supabase
       if (existing) continue;
 
       try {
-        const { rawScore, possibleScore } = await scoreAttempt(attempt.id, admin);
-        await admin.from('assessment_results').insert({
-          attempt_id: attempt.id,
-          student_id: attempt.student_id,
-          deployment_id: deploymentId,
-          raw_score: rawScore,
-          possible_score: possibleScore || 1,
-          status: 'pending',
+        await scoreAttempt(attempt.id, admin);
+        // Shared upsert: same totals definition as the submit path (all
+        // version questions count toward possible, held review items toward
+        // 0 of raw) instead of calculateScore's narrower view.
+        const totals = await upsertAssessmentResult(admin, attempt.id, {
+          studentId: attempt.student_id,
+          deploymentId,
         });
+        if (!totals?.ok) throw new Error('result upsert failed');
       } catch {
         // Leave this attempt for a later re-score; keep releasing the rest.
       }

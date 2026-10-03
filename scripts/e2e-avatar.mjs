@@ -12,6 +12,7 @@
  */
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
+import net from 'node:net';
 import path from 'node:path';
 import { createClient } from '@supabase/supabase-js';
 import { createServerClient } from '@supabase/ssr';
@@ -144,7 +145,29 @@ const password = process.env.E2E_AVATAR_PASSWORD || process.argv[3];
 let server = null;
 let serverLogFd = -1;
 
+/**
+ * Fail fast when the test port is already taken: a leaked `next start` from
+ * an earlier run answers the readiness probe before the freshly spawned child
+ * can report EADDRINUSE, so the run would silently test a stale server whose
+ * chunk files no longer match the current .next build.
+ */
+async function assertPortFree() {
+  const busy = await new Promise((resolve) => {
+    const probe = net.createServer();
+    probe.once('error', (err) => resolve(err.code === 'EADDRINUSE'));
+    probe.once('listening', () => probe.close(() => resolve(false)));
+    probe.listen(PORT);
+  });
+  if (busy) {
+    throw new Error(
+      `Port ${PORT} is already in use — a leaked server from an earlier run would ` +
+        'answer the readiness probe while serving a stale build. Kill it first.'
+    );
+  }
+}
+
 async function startServer() {
+  await assertPortFree();
   const serverLogPath = path.join('scripts', '.e2e-server.log');
   serverLogFd = fs.openSync(serverLogPath, 'w');
   const nextBin = path.join('node_modules', 'next', 'dist', 'bin', 'next');
@@ -172,18 +195,26 @@ async function startServer() {
   }
 }
 
-function stopServer() {
+async function stopServer() {
   if (!server) return;
+  const pid = server.pid;
+  server = null;
   try {
     if (process.platform === 'win32') {
-      spawn('taskkill', ['/pid', String(server.pid), '/f', '/t'], { stdio: 'ignore' });
+      // Await the kill: fire-and-forget let `process.exit` run before taskkill
+      // completed, leaking a stale server that later answered readiness probes
+      // while serving a wiped .next build.
+      await new Promise((resolve) => {
+        const killer = spawn('taskkill', ['/pid', String(pid), '/f', '/t'], { stdio: 'ignore' });
+        killer.once('exit', resolve);
+        killer.once('error', resolve);
+      });
     } else {
-      process.kill(-server.pid, 'SIGTERM');
+      process.kill(-pid, 'SIGTERM');
     }
   } catch {
     /* already gone */
   }
-  server = null;
   try {
     fs.closeSync(serverLogFd);
   } catch {
@@ -275,7 +306,7 @@ try {
       console.error('Cleanup error:', err);
     }
   }
-  stopServer();
+  await stopServer();
 }
 
 console.log(`\n${results.filter((r) => r.ok).length}/${results.length} checks passed.`);

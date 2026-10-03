@@ -4,6 +4,7 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { checkSimilarity, generateEmbedding, generateQuestions } from '@/lib/ai';
 import { logAiUsage } from '@/lib/ai/logger';
 import { getSettings } from '@/lib/settings';
+import { notifyFacultyOfOffering } from '@/lib/notifications';
 import type { GenerateQuestionsParams, QuestionValidation } from '@/lib/ai/types';
 import { parseEmbedding, type ExistingQuestionRef } from '@/lib/ai/duplicate-check';
 
@@ -44,6 +45,17 @@ export async function POST(request: NextRequest) {
   // page-data collection during `next build` succeeds without env vars.
   const supabase = createAdminClient();
 
+  // Scope §32: once the caller is known to be the owning faculty member,
+  // generation outcomes (completion/failure) are notified even if the
+  // request later dies mid-flight. Set only after the assignment gate —
+  // validation/auth rejections are responses the caller already sees, not
+  // generation outcomes.
+  const notifyCtx: { userId: string | null; offeringId: string | null; assessmentId: string | null } = {
+    userId: null,
+    offeringId: null,
+    assessmentId: null,
+  };
+
   try {
     // Authenticate user
     const authHeader = request.headers.get('Authorization');
@@ -81,6 +93,7 @@ export async function POST(request: NextRequest) {
       customInstructions,
       assessmentId,
       offeringId,
+      jobId,
     } = body;
 
     // Validate input
@@ -109,6 +122,28 @@ export async function POST(request: NextRequest) {
 
     if (!assignment) {
       return NextResponse.json({ error: 'Forbidden: not assigned to this offering' }, { status: 403 });
+    }
+
+    notifyCtx.userId = user.id;
+    notifyCtx.offeringId = typeof offeringId === 'string' && offeringId ? offeringId : null;
+    notifyCtx.assessmentId = typeof assessmentId === 'string' && assessmentId ? assessmentId : null;
+
+    // Generation job state machine (queued → processing): every
+    // per-question call of a batch re-runs this statement, keeping
+    // updated_at fresh (the table's BEFORE UPDATE trigger bumps it) so the
+    // maintenance sweep can reap a batch whose client died as
+    // "failed — stalled". Scoped to the caller's own row and non-terminal
+    // statuses, so a stray late call can never resurrect a finalized job.
+    if (typeof jobId === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(jobId)) {
+      const { error: jobError } = await supabase
+        .from('assessment_generation_jobs')
+        .update({ status: 'processing', updated_at: new Date().toISOString() })
+        .eq('id', jobId)
+        .eq('requested_by', user.id)
+        .in('status', ['queued', 'processing']);
+      if (jobError) {
+        console.warn('Generation job could not be marked processing:', jobError.message);
+      }
     }
 
     if (assessmentId) {
@@ -441,6 +476,26 @@ export async function POST(request: NextRequest) {
       status: 'success',
     });
 
+    // Scope §32: generation completion reaches the requesting faculty even
+    // if they navigated away. Best-effort — never blocks the response.
+    if (notifyCtx.userId && notifyCtx.offeringId) {
+      await notifyFacultyOfOffering({
+        offeringId: notifyCtx.offeringId,
+        type: 'generation_completed',
+        title: 'Question generation finished',
+        body:
+          `${payloadQuestions.length} question${payloadQuestions.length === 1 ? '' : 's'} ready for review` +
+          (flagged > 0 ? ` (${flagged} still flagged by the quality gate).` : '.'),
+        data: {
+          assessment_id: notifyCtx.assessmentId,
+          offering_id: notifyCtx.offeringId,
+          faculty_assessment: Boolean(notifyCtx.assessmentId),
+          count: payloadQuestions.length,
+          flagged,
+        },
+      });
+    }
+
     return NextResponse.json({
       questions: payloadQuestions,
       metadata: {
@@ -454,6 +509,22 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     console.error('Question generation error:', error);
+    // Scope §32: generation failure reaches the requesting faculty too — the
+    // wizard page may have been closed while the provider was working.
+    if (notifyCtx.userId && notifyCtx.offeringId) {
+      const message = error instanceof Error ? error.message : 'Internal server error';
+      await notifyFacultyOfOffering({
+        offeringId: notifyCtx.offeringId,
+        type: 'generation_failed',
+        title: 'Question generation failed',
+        body: message.length > 200 ? `${message.slice(0, 200)}…` : message,
+        data: {
+          assessment_id: notifyCtx.assessmentId,
+          offering_id: notifyCtx.offeringId,
+          faculty_assessment: Boolean(notifyCtx.assessmentId),
+        },
+      });
+    }
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Internal server error' },
       { status: 500 }

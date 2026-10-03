@@ -13,6 +13,7 @@ import StepCreationMode from '@/components/assessment/StepCreationMode';
 import StepManualEntry from '@/components/assessment/StepManualEntry';
 import StepQuestionBank from '@/components/assessment/StepQuestionBank';
 import StepImportExam from '@/components/assessment/StepImportExam';
+import StepTos from '@/components/assessment/StepTos';
 import { STEP_CONFIG, type StepId } from '@/components/assessment/wizard-steps';
 import type {
   QuestionType,
@@ -21,6 +22,7 @@ import type {
   DraftQuestion,
   SourceMaterial,
   Topic,
+  TosState,
   AssessmentCreationMode,
 } from '@/lib/types';
 import { getTopicsForOffering, createTopic } from '@/app/(dashboard)/faculty/subjects/[offeringId]/topics/actions';
@@ -54,6 +56,8 @@ export interface WizardState {
   defaultTopicId: string | null;
   // Explicit opt-in: save the approved questions into the question bank too.
   saveToBank: boolean;
+  // TOS (scope §10) — approved blueprint gating entry to AI generation.
+  tos: TosState | null;
 }
 
 const INITIAL_STATE: WizardState = {
@@ -87,6 +91,7 @@ const INITIAL_STATE: WizardState = {
   attemptLimit: 1,
   defaultTopicId: null,
   saveToBank: false,
+  tos: null,
 };
 
 interface StepProps {
@@ -191,6 +196,17 @@ export default function SubjectNewAssessmentClient({
             errors.bloom = `Bloom total (${totalBloom}) must equal question count (${totalQuestions})`;
           break;
         }
+        case 'tos':
+          // Scope §10: "approve it before final question generation".
+          if (!state.tos || state.tos.status !== 'approved')
+            errors.tos = 'Approve the Table of Specifications before generating questions.';
+          else if (state.tos.rows.length === 0)
+            errors.tos = 'The approved TOS has no rows — edit it and re-approve.';
+          break;
+        case 'generate':
+          if (!state.tos || state.tos.status !== 'approved')
+            errors.tos = 'The TOS is no longer approved — re-approve it in the Table of Specs step.';
+          break;
         case 'manual':
           if (state.creationMode !== 'mixed' && state.generatedQuestions.length === 0) errors.manual = 'Add at least one question. You can also import from the Question Bank in the next step.';
           break;
@@ -250,7 +266,24 @@ export default function SubjectNewAssessmentClient({
       case 'sources':
         return <StepSourceMaterials {...stepProps} />;
       case 'genConfig':
-        return <StepGenerationConfig {...stepProps} />;
+        // Editing the inputs the TOS was validated against invalidates an
+        // approved blueprint — the faculty must re-approve before generating.
+        return (
+          <StepGenerationConfig
+            {...stepProps}
+            onUpdate={(updates) => {
+              const TOS_INPUT_KEYS = ['questionTypes', 'countPerType', 'difficultyDistribution', 'bloomDistribution'];
+              const touchesTos = Object.keys(updates).some((k) => TOS_INPUT_KEYS.includes(k));
+              updateState(
+                touchesTos && state.tos?.status === 'approved'
+                  ? { ...updates, tos: { ...state.tos, status: 'draft', approvedAt: null } }
+                  : updates
+              );
+            }}
+          />
+        );
+      case 'tos':
+        return <StepTos {...stepProps} topics={topics} />;
       case 'custom':
         return <StepCustomInstructions {...stepProps} />;
       case 'generate':

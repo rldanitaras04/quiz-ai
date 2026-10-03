@@ -119,8 +119,12 @@ export default function StepApprove({
         return;
       }
 
-      // 2. Approve assessment + version.
-      await approveAssessment(assessmentId);
+      // 2. Approve assessment + version. An approved TOS (scope §10) travels
+      //    with the approval and is snapshotted onto the version.
+      await approveAssessment(
+        assessmentId,
+        state.tos?.status === 'approved' ? { rows: state.tos.rows } : null
+      );
       setApproved(true);
       notifySuccess('Assessment approved', 'Review it, then deploy when you are ready.');
 
@@ -220,6 +224,18 @@ export default function StepApprove({
           <div className="flex justify-between">
             <dt className="text-sm text-[var(--color-muted)]">Total Points</dt>
             <dd className="text-sm font-semibold text-[var(--color-foreground)]">{totalPoints}</dd>
+          </div>
+          <div className="flex justify-between items-center">
+            <dt className="text-sm text-[var(--color-muted)]">Table of Specifications</dt>
+            <dd>
+              {state.tos?.status === 'approved' ? (
+                <Badge variant="success">
+                  Approved — {state.tos.rows.reduce((sum, r) => sum + r.count, 0)} items planned
+                </Badge>
+              ) : (
+                <Badge variant="outline">Not planned</Badge>
+              )}
+            </dd>
           </div>
         </dl>
 

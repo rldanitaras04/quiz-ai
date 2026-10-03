@@ -120,3 +120,72 @@ export async function notifyOfferingStudents({
 
   return studentIds.length;
 }
+
+export interface NotifyFacultyInput {
+  offeringId: string;
+  type: NotificationType;
+  title: string;
+  body: string;
+  data?: Record<string, unknown>;
+}
+
+/**
+ * Insert one notification per faculty member assigned to an offering
+ * (scope §32 faculty events: submission progress, responses needing review,
+ * generation completion/failure). Service-role only — notifications INSERT
+ * is REVOKE'd from `authenticated`, the same rule `notifyOfferingStudents`
+ * follows for the student direction. Always best-effort: returns the number
+ * of faculty notified and never throws, so callers can fire it without
+ * jeopardizing their primary write.
+ */
+export async function notifyFacultyOfOffering({
+  offeringId,
+  type,
+  title,
+  body,
+  data,
+}: NotifyFacultyInput): Promise<number> {
+  const admin = createAdminClient();
+
+  const [{ data: assignments }, context] = await Promise.all([
+    admin
+      .from('faculty_assignments')
+      .select('faculty_id')
+      .eq('subject_offering_id', offeringId),
+    getOfferingNotificationContext(offeringId),
+  ]);
+
+  const facultyIds = [
+    ...new Set((assignments ?? []).map((a) => a.faculty_id as string)),
+  ].filter(Boolean);
+
+  if (facultyIds.length === 0) return 0;
+
+  const contextData = {
+    subject_id: context.subjectId,
+    subject_label: context.subjectLabel,
+    section_name: context.sectionName,
+    subject_offering_id: offeringId,
+  };
+
+  const bodyWithSubject = context.subjectLabel
+    ? `${context.subjectLabel} — ${body}`
+    : body;
+
+  const { error } = await admin.from('notifications').insert(
+    facultyIds.map((userId) => ({
+      user_id: userId,
+      type,
+      title,
+      body: bodyWithSubject,
+      data: { ...(data ?? {}), ...contextData },
+    }))
+  );
+
+  if (error) {
+    console.error('Failed to create faculty notifications:', error.message);
+    return 0;
+  }
+
+  return facultyIds.length;
+}

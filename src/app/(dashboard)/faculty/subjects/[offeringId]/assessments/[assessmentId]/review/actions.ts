@@ -4,6 +4,10 @@ import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { recordAuditLog } from '@/lib/audit';
 import { getFacultyAssessment, isFacultyOfOfferingOrSubject } from '@/lib/auth';
+import { upsertAssessmentResult } from '@/lib/scoring';
+import { activeChatProvider, chatCompletion, hasChatProvider, type ChatCompletionResult } from '@/lib/ai/chat';
+import { buildRecommendationPrompt, parseScoreRecommendation, type ScoreRecommendation } from '@/lib/ai/recommendation';
+import { logAiUsage } from '@/lib/ai/logger';
 
 async function requireUser() {
   const supabase = await createClient();
@@ -27,6 +31,8 @@ export interface IdentificationReviewItem {
   earned_points: number | null;
   max_points: number;
   scoring_status: string;
+  /** Machine verdict evidence { method, similarity, candidate } when scored automatically. */
+  scoring_metadata: Record<string, unknown> | null;
   assessment_title: string;
 }
 
@@ -81,7 +87,7 @@ export async function getIdentificationResponsesNeedingReview(
   const admin = createAdminClient();
   const { data: responses } = await admin
     .from('student_responses')
-    .select('id, attempt_id, question_id, text_answer, normalized_answer, earned_points, scoring_status')
+    .select('id, attempt_id, question_id, text_answer, normalized_answer, earned_points, scoring_status, scoring_metadata')
     .in('question_id', questionIds)
     .not('text_answer', 'is', null)
     .neq('text_answer', '');
@@ -130,6 +136,7 @@ export async function getIdentificationResponsesNeedingReview(
         earned_points: r.earned_points,
         max_points: q?.points ?? 1,
         scoring_status: r.scoring_status,
+        scoring_metadata: r.scoring_metadata,
         assessment_title: assessment.title,
       };
     })
@@ -182,6 +189,15 @@ export async function scoreIdentificationResponse(
 
   const clampedPoints = Math.max(0, Math.min(earnedPoints, question.points));
 
+  // scoring_metadata is service-role only (20261005000000), so it is read
+  // through the admin client — gates-then-admin — and merged, preserving the
+  // machine's verdict evidence while recording the faculty override.
+  const { data: currentRow } = await admin
+    .from('student_responses')
+    .select('scoring_metadata')
+    .eq('id', responseId)
+    .single();
+
   const { error: updateErr } = await admin
     .from('student_responses')
     .update({
@@ -189,10 +205,26 @@ export async function scoreIdentificationResponse(
       scoring_status: 'scored',
       scored_at: new Date().toISOString(),
       scored_by: userId,
+      // Preserve the machine's verdict evidence; append who overrode it.
+      scoring_metadata: {
+        ...(currentRow?.scoring_metadata ?? {}),
+        faculty: { points: clampedPoints, at: new Date().toISOString() },
+      },
     })
     .eq('id', responseId);
 
   if (updateErr) return { success: false, error: updateErr.message };
+
+  // Propagate the new score to the attempt total: without this the result row
+  // kept the submit-time raw score and a faculty correction never reached
+  // the student's percentage (scope §27).
+  const totals = await upsertAssessmentResult(admin, response.attempt_id);
+  if (!totals || !totals.ok) {
+    return {
+      success: false,
+      error: 'Score saved, but the attempt total could not be refreshed — retry the review action.',
+    };
+  }
 
   await recordAuditLog({
     actorUserId: userId,
@@ -208,4 +240,184 @@ export async function scoreIdentificationResponse(
   });
 
   return { success: true };
+}
+
+// ---------------------------------------------------------------------------
+// AI score recommendation — scope §26 (advisory only).
+// ---------------------------------------------------------------------------
+// "AI may recommend a judgment for ambiguous identification answers, but
+// faculty confirms final scoring where confidence is insufficient." This
+// action NEVER writes earned_points/scoring_status — it stores the verdict in
+// scoring_metadata.ai (service-role column) for the review UI, and the faculty
+// decision still travels through scoreIdentificationResponse above.
+
+export interface ScoreRecommendationOutcome {
+  verdict: 'correct' | 'incorrect' | 'uncertain';
+  confidence: number;
+  rationale: string;
+  /** Points the verdict implies, or null when the verdict is `uncertain`. */
+  suggestedPoints: number | null;
+}
+
+export async function getScoreRecommendation(
+  responseId: string
+): Promise<{ success: boolean; recommendation?: ScoreRecommendationOutcome; error?: string }> {
+  const { supabase, userId } = await requireUser();
+
+  // Gates-then-admin: the session client reads only the granted columns
+  // (20261005000000). Ownership of the whole response chain is verified before
+  // any answer-key content is fetched or an AI call is made.
+  const { data: response } = await supabase
+    .from('student_responses')
+    .select('id, attempt_id, question_id, text_answer')
+    .eq('id', responseId)
+    .single();
+  if (!response) return { success: false, error: 'Response not found' };
+
+  const { data: attempt } = await supabase
+    .from('exam_attempts')
+    .select('id, deployment_id')
+    .eq('id', response.attempt_id)
+    .single();
+  if (!attempt) return { success: false, error: 'Attempt not found' };
+
+  const { data: deployment } = await supabase
+    .from('assessment_deployments')
+    .select('id, subject_offering_id')
+    .eq('id', attempt.deployment_id)
+    .single();
+  if (!deployment?.subject_offering_id) return { success: false, error: 'Deployment not found' };
+
+  if (!(await isFacultyOfOfferingOrSubject(supabase, userId, deployment.subject_offering_id))) {
+    return { success: false, error: 'Not authorized' };
+  }
+
+  if (!hasChatProvider()) {
+    return {
+      success: false,
+      error: 'No AI provider configured — set GROQ_API_KEY or OPENAI_API_KEY.',
+    };
+  }
+
+  const admin = createAdminClient();
+
+  const { data: question } = await admin
+    .from('questions')
+    .select(
+      'question_text, points, question_type, assessment_version:assessment_versions(assessment_id)'
+    )
+    .eq('id', response.question_id)
+    .single();
+  if (!question) return { success: false, error: 'Question not found' };
+  if (question.question_type !== 'identification') {
+    return { success: false, error: 'AI recommendations apply to identification responses only' };
+  }
+
+  const { data: answerKey } = await admin
+    .from('answer_keys')
+    .select('canonical_answer, accepted_answers')
+    .eq('question_id', response.question_id)
+    .single();
+
+  const assessmentId =
+    (question.assessment_version as { assessment_id?: string } | null)?.assessment_id ?? null;
+
+  const { system, user } = buildRecommendationPrompt({
+    questionText: question.question_text,
+    points: question.points ?? 1,
+    canonicalAnswer: answerKey?.canonical_answer ?? null,
+    acceptedAnswers: answerKey?.accepted_answers ?? [],
+    studentAnswer: response.text_answer ?? '',
+  });
+
+  let chat: ChatCompletionResult;
+  try {
+    chat = await chatCompletion(system, user, { temperature: 0, maxTokens: 400 });
+  } catch (err) {
+    await logAiUsage({
+      userId,
+      assessmentId,
+      provider: activeChatProvider(),
+      model: '-',
+      operation: 'score_recommendation',
+      tokensUsed: 0,
+      durationMs: 0,
+      status: 'error',
+      errorCode: err instanceof Error ? err.message.slice(0, 120) : 'unknown',
+    });
+    return { success: false, error: 'The AI provider could not be reached — try again.' };
+  }
+
+  let parsed: ScoreRecommendation;
+  try {
+    parsed = parseScoreRecommendation(chat.content);
+  } catch {
+    await logAiUsage({
+      userId,
+      assessmentId,
+      provider: chat.provider,
+      model: chat.model,
+      operation: 'score_recommendation',
+      tokensUsed: chat.tokensUsed,
+      durationMs: chat.duration,
+      status: 'error',
+      errorCode: 'parse_error',
+    });
+    return { success: false, error: 'The AI returned an unreadable recommendation — try again.' };
+  }
+
+  // Advisory by construction: only scoring_metadata.ai is written. Read the
+  // current metadata through the admin client (service-role column) and merge
+  // so the machine verdict and any faculty decision survive.
+  const { data: currentRow } = await admin
+    .from('student_responses')
+    .select('scoring_metadata')
+    .eq('id', responseId)
+    .single();
+
+  const { error: metaErr } = await admin
+    .from('student_responses')
+    .update({
+      scoring_metadata: {
+        ...(currentRow?.scoring_metadata ?? {}),
+        ai: {
+          verdict: parsed.verdict,
+          confidence: parsed.confidence,
+          rationale: parsed.rationale,
+          provider: chat.provider,
+          model: chat.model,
+          requested_by: userId,
+          at: new Date().toISOString(),
+        },
+      },
+    })
+    .eq('id', responseId);
+
+  if (metaErr) return { success: false, error: metaErr.message };
+
+  await logAiUsage({
+    userId,
+    assessmentId,
+    provider: chat.provider,
+    model: chat.model,
+    operation: 'score_recommendation',
+    tokensUsed: chat.tokensUsed,
+    durationMs: chat.duration,
+    status: 'success',
+  });
+
+  return {
+    success: true,
+    recommendation: {
+      verdict: parsed.verdict,
+      confidence: parsed.confidence,
+      rationale: parsed.rationale,
+      suggestedPoints:
+        parsed.verdict === 'correct'
+          ? (question.points ?? 1)
+          : parsed.verdict === 'incorrect'
+            ? 0
+            : null,
+    },
+  };
 }

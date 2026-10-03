@@ -4,6 +4,16 @@ import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { isFacultyOfOfferingOrSubject } from '@/lib/auth';
 import { EVENT_TYPE_LABELS } from '@/lib/exam-security';
+import { getSettings } from '@/lib/settings';
+import {
+  computeDiscriminationIndex,
+  discriminationRating,
+  itemFlags,
+  passRate as computePassRate,
+  type AnalysisThresholds,
+  type DiscriminationRating,
+  type ItemFlag,
+} from '@/lib/item-analysis';
 
 async function requireUser() {
   const supabase = await createClient();
@@ -27,6 +37,8 @@ export interface DeploymentAnalytics {
   pass_rate: number;
   score_distribution: { range: string; count: number }[];
   item_analysis: ItemAnalysis[];
+  /** The system_settings thresholds these numbers were interpreted against. */
+  thresholds: AnalysisThresholds;
 }
 
 export interface ItemAnalysis {
@@ -41,6 +53,10 @@ export interface ItemAnalysis {
   difficulty_index: number;
   discrimination_index: number | null;
   distractor_analysis: DistractorAnalysis[];
+  /** Interpretation of D against the configured cut-offs (§29 guidance). */
+  rating: DiscriminationRating;
+  /** Item review flags against the configured thresholds (§29/§31). */
+  flags: ItemFlag[];
 }
 
 export interface DistractorAnalysis {
@@ -50,39 +66,6 @@ export interface DistractorAnalysis {
   selection_count: number;
   selection_percentage: number;
   is_correct: boolean;
-}
-
-/**
- * Upper/lower 27% discrimination index D = (RU/NU) − (RL/NL).
- * Respondents are ranked by total percentage; the top and bottom 27% (at least
- * 3 each when n allows) form the groups. Returns null when there are too few
- * scored attempts to form meaningful groups, or when the item has no variance
- * (everyone correct or everyone incorrect).
- */
-function computeDiscriminationIndex(
-  items: { attemptId: string; correct: boolean }[],
-  totalByAttempt: Map<string, number>
-): number | null {
-  const scored = items.filter(i => totalByAttempt.has(i.attemptId));
-  const n = scored.length;
-  if (n < 6) return null;
-
-  const correctCount = scored.filter(i => i.correct).length;
-  if (correctCount === 0 || correctCount === n) return null;
-
-  const groupSize = Math.max(3, Math.ceil(n * 0.27));
-  if (groupSize * 2 > n) return null;
-
-  const sorted = scored
-    .slice()
-    .sort((a, b) => (totalByAttempt.get(b.attemptId) ?? 0) - (totalByAttempt.get(a.attemptId) ?? 0));
-
-  const upper = sorted.slice(0, groupSize);
-  const lower = sorted.slice(sorted.length - groupSize);
-
-  const ru = upper.filter(i => i.correct).length / upper.length;
-  const rl = lower.filter(i => i.correct).length / lower.length;
-  return ru - rl;
 }
 
 export async function getDeploymentAnalytics(
@@ -100,6 +83,22 @@ export async function getDeploymentAnalytics(
   if (!(await isFacultyOfOfferingOrSubject(supabase, userId, deployment.subject_offering_id))) {
     return { data: null, error: 'Not authorized' };
   }
+
+  // Interpretation thresholds from system_settings — scope §29: "Interpretation
+  // thresholds must be configurable and treated as analytic guidance, not
+  // unquestionable conclusions." Returned alongside the numbers so the UI can
+  // label its legend with the values actually applied.
+  const settings = await getSettings();
+  const thresholds: AnalysisThresholds = {
+    groupPercent: settings.analysis_group_percent,
+    passMark: settings.analysis_pass_mark,
+    easyP: settings.analysis_easy_p,
+    hardP: settings.analysis_hard_p,
+    minDisc: settings.analysis_min_disc,
+    goodD: settings.analysis_good_d,
+    fairD: settings.analysis_fair_d,
+    lowDistractorPct: settings.analysis_low_distractor_pct,
+  };
 
   // Get assessment title
   const { data: version } = await supabase
@@ -153,7 +152,7 @@ export async function getDeploymentAnalytics(
     ? scores.reduce((sum, s) => sum + Math.pow(s - meanScore, 2), 0) / scores.length
     : 0;
   const standardDeviation = Math.sqrt(variance);
-  const passRate = scores.length > 0 ? (scores.filter(s => s >= 60).length / scores.length) * 100 : 0;
+  const passRate = computePassRate(scores, thresholds.passMark);
 
   // Score distribution
   const ranges = [
@@ -243,7 +242,8 @@ export async function getDeploymentAnalytics(
         attemptId: r.attempt_id,
         correct: isCorrect(r),
       })),
-      totalByAttempt
+      totalByAttempt,
+      thresholds.groupPercent
     );
 
     const distractorAnalysis: DistractorAnalysis[] = [];
@@ -272,6 +272,19 @@ export async function getDeploymentAnalytics(
       }
     }
 
+    const rating = discriminationRating(discriminationIndex, thresholds);
+    const flags = itemFlags(
+      {
+        responses: totalResponses,
+        difficultyIndex,
+        discriminationIndex,
+        distractorPercentages: distractorAnalysis
+          .filter(d => !d.is_correct)
+          .map(d => d.selection_percentage),
+      },
+      thresholds
+    );
+
     itemAnalysis.push({
       question_id: question.id,
       question_text: question.question_text,
@@ -284,6 +297,8 @@ export async function getDeploymentAnalytics(
       difficulty_index: difficultyIndex,
       discrimination_index: discriminationIndex,
       distractor_analysis: distractorAnalysis,
+      rating,
+      flags,
     });
   }
 
@@ -303,6 +318,7 @@ export async function getDeploymentAnalytics(
       pass_rate: passRate,
       score_distribution: scoreDistribution,
       item_analysis: itemAnalysis,
+      thresholds,
     },
   };
 }

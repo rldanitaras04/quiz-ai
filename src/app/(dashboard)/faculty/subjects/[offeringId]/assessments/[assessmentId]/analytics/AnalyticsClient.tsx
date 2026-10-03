@@ -16,6 +16,7 @@ import {
   BLOOM_LABELS,
   QUESTION_TYPE_SHORT_LABELS,
 } from '@/lib/constants';
+import { ITEM_FLAG_LABELS, type ItemFlag } from '@/lib/item-analysis';
 import {
   downloadDocx,
   safeDocxFilename,
@@ -28,6 +29,7 @@ import type { BloomLevel, Difficulty, QuestionType } from '@/lib/types';
 import {
   getDeploymentAnalytics,
   type DeploymentAnalytics,
+  type ItemAnalysis,
 } from './actions';
 import SecuritySummaryCard from './SecuritySummaryCard';
 
@@ -37,12 +39,34 @@ interface AnalyticsClientProps {
   deploymentId: string;
 }
 
-function discriminationBadge(value: number | null): JSX.Element {
-  if (value === null) return <Badge variant="default">—</Badge>;
-  if (value >= 0.3) return <Badge variant="success">Good</Badge>;
-  if (value >= 0.2) return <Badge variant="info">Fair</Badge>;
-  if (value >= 0) return <Badge variant="warning">Weak</Badge>;
-  return <Badge variant="danger">Negative</Badge>;
+/** Server-computed interpretation of D against the configured cut-offs (§29). */
+function ratingBadge(rating: ItemAnalysis['rating']): JSX.Element {
+  switch (rating) {
+    case 'good':
+      return <Badge variant="success">Good</Badge>;
+    case 'fair':
+      return <Badge variant="info">Fair</Badge>;
+    case 'weak':
+      return <Badge variant="warning">Weak</Badge>;
+    case 'negative':
+      return <Badge variant="danger">Negative</Badge>;
+    default:
+      return <Badge variant="default">—</Badge>;
+  }
+}
+
+/** Item review flags — prompts for faculty judgement, not verdicts (§29). */
+function flagBadges(flags: ItemFlag[]): JSX.Element {
+  if (flags.length === 0) return <span className="text-muted">—</span>;
+  return (
+    <span className="flex flex-wrap gap-1">
+      {flags.map(flag => (
+        <Badge key={flag} variant={flag === 'no_responses' ? 'default' : 'warning'}>
+          {ITEM_FLAG_LABELS[flag]}
+        </Badge>
+      ))}
+    </span>
+  );
 }
 
 function buildItemAnalysisDocument(analytics: DeploymentAnalytics): ReturnType<typeof buildDocument> {
@@ -50,11 +74,11 @@ function buildItemAnalysisDocument(analytics: DeploymentAnalytics): ReturnType<t
     heading('Item Analysis', HeadingLevel.HEADING_1),
     paragraph(analytics.assessment_title, { bold: true, spacing: { after: 60 } }),
     paragraph(
-      `Submitted: ${analytics.total_submitted}  ·  Mean: ${analytics.mean_score.toFixed(1)}%  ·  Pass rate: ${analytics.pass_rate.toFixed(1)}%`
+      `Submitted: ${analytics.total_submitted}  ·  Mean: ${analytics.mean_score.toFixed(1)}%  ·  Pass rate: ${analytics.pass_rate.toFixed(1)}% (mark ≥ ${analytics.thresholds.passMark}%)`
     ),
     heading('Items'),
     simpleTable(
-      ['#', 'Type', 'Difficulty', 'Bloom', 'Responses', 'Correct', 'P (Difficulty)', 'D (Discrimination)'],
+      ['#', 'Type', 'Difficulty', 'Bloom', 'Responses', 'Correct', 'P (Difficulty)', 'D (Discrimination)', 'D rating', 'Flags'],
       analytics.item_analysis.map((item, index) => [
         index + 1,
         QUESTION_TYPE_SHORT_LABELS[item.question_type as QuestionType] ?? item.question_type,
@@ -64,7 +88,13 @@ function buildItemAnalysisDocument(analytics: DeploymentAnalytics): ReturnType<t
         item.correct_count,
         item.difficulty_index.toFixed(2),
         item.discrimination_index === null ? '—' : item.discrimination_index.toFixed(2),
+        item.rating,
+        item.flags.length > 0 ? item.flags.map(f => ITEM_FLAG_LABELS[f]).join('; ') : '—',
       ])
+    ),
+    paragraph(
+      `Interpretation against /admin/settings: Good D ≥ ${analytics.thresholds.goodD}, Fair D ≥ ${analytics.thresholds.fairD}, weak flag D < ${analytics.thresholds.minDisc}; too easy P ≥ ${analytics.thresholds.easyP}, too hard P < ${analytics.thresholds.hardP}. Analytic guidance, not conclusions.`,
+      { spacing: { before: 120 } }
     ),
   ];
 
@@ -260,7 +290,7 @@ export default function AnalyticsClient({ deploymentId }: AnalyticsClientProps):
         </Card>
         <Card>
           <CardContent className="py-4">
-            <p className="text-sm text-muted">Pass Rate</p>
+            <p className="text-sm text-muted">Pass Rate (≥ {analytics.thresholds.passMark}%)</p>
             <p className="text-lg font-bold text-foreground">{analytics.pass_rate.toFixed(1)}%</p>
           </CardContent>
         </Card>
@@ -344,7 +374,8 @@ export default function AnalyticsClient({ deploymentId }: AnalyticsClientProps):
                     <TH align="right">Correct</TH>
                     <TH align="right">P (Difficulty)</TH>
                     <TH align="right">D (Discrimination)</TH>
-                    <TH>Rating</TH>
+                    <TH>D rating</TH>
+                    <TH>Flags</TH>
                     <TH>Distractors</TH>
                   </TR>
                 </THead>
@@ -374,13 +405,10 @@ export default function AnalyticsClient({ deploymentId }: AnalyticsClientProps):
                           : item.discrimination_index.toFixed(2)}
                       </TD>
                       <TD>
-                        <Badge variant={
-                          item.difficulty_index >= 0.6 ? 'success' :
-                          item.difficulty_index >= 0.4 ? 'warning' : 'danger'
-                        }>
-                          {item.difficulty_index >= 0.6 ? 'Good' :
-                           item.difficulty_index >= 0.4 ? 'Moderate' : 'Difficult'}
-                        </Badge>
+                        {ratingBadge(item.rating)}
+                      </TD>
+                      <TD className="max-w-[14rem]">
+                        {flagBadges(item.flags)}
                       </TD>
                       <TD>
                         {item.distractor_analysis.length > 0 ? (
@@ -442,11 +470,22 @@ export default function AnalyticsClient({ deploymentId }: AnalyticsClientProps):
                 </TBody>
               </Table>
               <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-muted">
-                <span>Discrimination:</span>
-                {discriminationBadge(0.4)}
-                {discriminationBadge(0.25)}
-                {discriminationBadge(0.1)}
-                {discriminationBadge(-0.1)}
+                <span>
+                  D rating (guidance, /admin/settings): Good ≥{' '}
+                  {analytics.thresholds.goodD.toFixed(2)} · Fair ≥{' '}
+                  {analytics.thresholds.fairD.toFixed(2)} · Weak ≥ 0 · Negative &lt; 0 —
+                </span>
+                {ratingBadge('good')}
+                {ratingBadge('fair')}
+                {ratingBadge('weak')}
+                {ratingBadge('negative')}
+                <span>
+                  Flags: too easy P ≥ {analytics.thresholds.easyP} · too hard P &lt;{' '}
+                  {analytics.thresholds.hardP} · weak D &lt; {analytics.thresholds.minDisc} ·
+                  low-use distractor &lt; {analytics.thresholds.lowDistractorPct}% selected ·
+                  group {analytics.thresholds.groupPercent}% · pass ≥{' '}
+                  {analytics.thresholds.passMark}%
+                </span>
               </div>
             </div>
           )}

@@ -8,6 +8,7 @@ import type {
   SecurityMode,
   SecurityResponseMode,
 } from '@/lib/exam-security';
+import type { ItemStatsSnapshot } from '@/lib/item-analysis';
 
 export type UserRole = 'super_admin' | 'faculty' | 'student';
 
@@ -88,6 +89,10 @@ export type NotificationType =
   | 'result_released'
   | 'exception_granted'
   | 'submission_confirmed'
+  | 'submission_progress'
+  | 'review_required'
+  | 'generation_completed'
+  | 'generation_failed'
   | 'identity_verification_requested'
   | 'reminder'
   | 'system';
@@ -272,6 +277,35 @@ export interface Topic {
   created_by: string | null;
   created_at: string;
   updated_at: string;
+}
+
+// ---------------------------------------------------------------------------
+// Table of Specifications (scope §10)
+// ---------------------------------------------------------------------------
+
+/**
+ * One cell of the TOS matrix: how many items of a given shape (type +
+ * difficulty + Bloom level) are planned for a topic. The approved rows are
+ * snapshotted onto `assessment_versions.tos_snapshot` at approval time.
+ */
+export interface TosRow {
+  topic: string;
+  question_type: QuestionType;
+  difficulty: Difficulty;
+  bloom_level: BloomLevel;
+  count: number;
+}
+
+/**
+ * The wizard's TOS state. `status: 'approved'` gates entry to the AI
+ * generation step (scope §10: "approve it before final question
+ * generation"); any edit to the rows or to the generation config that the
+ * TOS derives from returns it to `draft`.
+ */
+export interface TosState {
+  rows: TosRow[];
+  status: 'draft' | 'approved';
+  approvedAt: string | null;
 }
 
 export interface SourceChunk {
@@ -499,6 +533,12 @@ export interface StudentResponse {
   normalized_answer: string | null;
   earned_points: number | null;
   scoring_status: ScoringStatus;
+  /**
+   * Machine scoring verdict evidence (scope §26): { method, similarity,
+   * candidate } plus faculty override provenance once applied. Service-role
+   * only — never readable by students.
+   */
+  scoring_metadata: Record<string, unknown> | null;
   scored_at: string | null;
   scored_by: string | null;
   client_revision: number;
@@ -681,6 +721,8 @@ export interface QuestionBankItem {
   status: string;
   usage_count: number;
   last_used_at: string | null;
+  /** Historical item statistics snapshot at bank-save time (scope §30). */
+  item_stats?: ItemStatsSnapshot | null;
   created_at: string;
   updated_at: string;
   question_bank_choices?: QuestionBankChoice[];

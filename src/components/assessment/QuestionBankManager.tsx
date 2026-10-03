@@ -284,6 +284,15 @@ export default function QuestionBankManager({ offeringId, topics }: Props): JSX.
                     <Badge variant="default">{it.points} pt</Badge>
                     {it.topic_id ? <Badge variant="default">{topics.find((t) => t.id === it.topic_id)?.title ?? 'Topic'}</Badge> : <Badge variant="outline">Uncategorized</Badge>}
                     {it.usage_count > 0 && <Badge variant="outline">Used {it.usage_count}×</Badge>}
+                    {it.item_stats && (
+                      <Badge variant="success">
+                        P {it.item_stats.difficulty_index.toFixed(2)}
+                        {it.item_stats.discrimination_index !== null
+                          ? ` · D ${it.item_stats.discrimination_index.toFixed(2)}`
+                          : ''}
+                        {' '}· n={it.item_stats.n}
+                      </Badge>
+                    )}
                   </div>
                   {(it.question_type === 'multiple_choice' || it.question_type === 'true_false') &&
                     (it as any).question_bank_choices && (

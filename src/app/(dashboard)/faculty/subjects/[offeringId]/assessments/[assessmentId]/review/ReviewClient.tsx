@@ -11,11 +11,48 @@ import { notifySuccess, notifyError } from '@/components/ui/alerts';
 import {
   getIdentificationResponsesNeedingReview,
   scoreIdentificationResponse,
+  getScoreRecommendation,
   type IdentificationReviewItem,
+  type ScoreRecommendationOutcome,
 } from './actions';
 
 interface ReviewClientProps {
   assessmentId: string;
+}
+
+/** Human labels for the scoring vocabulary (scope §26 tiers). */
+const STATUS_LABELS: Record<string, string> = {
+  pending: 'not yet scored',
+  auto_scored: 'auto-scored',
+  manual_review: 'held for review',
+  scored: 'scored by faculty',
+};
+
+/**
+ * Render the machine's verdict evidence (scoring_metadata { method,
+ * similarity, candidate }) so faculty can see *why* a response was held or
+ * auto-scored before overriding it.
+ */
+function describeAutoVerdict(meta: Record<string, unknown> | null): string | null {
+  if (!meta || typeof meta.method !== 'string') return null;
+  const candidate = typeof meta.candidate === 'string' ? ` “${meta.candidate}”` : '';
+  const similarity =
+    typeof meta.similarity === 'number' ? `${Math.round(meta.similarity * 100)}% similar` : null;
+
+  switch (meta.method) {
+    case 'exact':
+      return 'exact match to the key';
+    case 'alias':
+      return `matches an approved answer${candidate}`;
+    case 'fuzzy':
+      return `close match${similarity ? ` (${similarity})` : ''} to${candidate}`;
+    case 'choice':
+      return 'selected choice compared to the key';
+    case 'none':
+      return 'no usable comparison — your judgment decides';
+    default:
+      return null;
+  }
 }
 
 export default function ReviewClient({ assessmentId }: ReviewClientProps) {
@@ -24,6 +61,8 @@ export default function ReviewClient({ assessmentId }: ReviewClientProps) {
   const [scoringModal, setScoringModal] = useState<IdentificationReviewItem | null>(null);
   const [scoreInput, setScoreInput] = useState('');
   const [scoring, setScoring] = useState(false);
+  const [recommendation, setRecommendation] = useState<ScoreRecommendationOutcome | null>(null);
+  const [recommending, setRecommending] = useState(false);
 
   const loadItems = useCallback(async () => {
     setLoading(true);
@@ -43,6 +82,28 @@ export default function ReviewClient({ assessmentId }: ReviewClientProps) {
   const openScoringModal = (item: IdentificationReviewItem) => {
     setScoringModal(item);
     setScoreInput(String(item.earned_points ?? 0));
+    setRecommendation(null);
+  };
+
+  // Scope §26: the AI recommends, the faculty confirms. The call only reads +
+  // records an advisory note (scoring_metadata.ai); the score itself is still
+  // saved exclusively through handleScore below.
+  const handleRecommend = async () => {
+    if (!scoringModal || recommending) return;
+
+    setRecommending(true);
+    setRecommendation(null);
+    const result = await getScoreRecommendation(scoringModal.response_id);
+    setRecommending(false);
+
+    if (!result.success || !result.recommendation) {
+      notifyError(result.error ?? 'Could not get an AI recommendation');
+      return;
+    }
+    setRecommendation(result.recommendation);
+    if (result.recommendation.suggestedPoints !== null) {
+      setScoreInput(String(result.recommendation.suggestedPoints));
+    }
   };
 
   const handleScore = async () => {
@@ -119,7 +180,10 @@ export default function ReviewClient({ assessmentId }: ReviewClientProps) {
                     Score This Response
                   </Button>
                   <span className="text-xs text-muted">
-                    Status: {item.scoring_status}
+                    Status: {STATUS_LABELS[item.scoring_status] ?? item.scoring_status}
+                    {describeAutoVerdict(item.scoring_metadata)
+                      ? ` — ${describeAutoVerdict(item.scoring_metadata)}`
+                      : ''}
                   </span>
                 </div>
               </div>
@@ -174,6 +238,55 @@ export default function ReviewClient({ assessmentId }: ReviewClientProps) {
                 className="w-full rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-foreground)]"
               />
             </div>
+
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-xs text-muted">
+                Optional: let the AI judge this answer (scope §26) — advisory only, you still
+                confirm the score.
+              </p>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={handleRecommend}
+                loading={recommending}
+              >
+                Ask AI
+              </Button>
+            </div>
+
+            {recommendation && (
+              <div
+                className="p-3 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-hover)]"
+                role="status"
+                aria-label="AI recommendation"
+              >
+                <div className="flex items-center gap-2 mb-1">
+                  <Badge
+                    variant={
+                      recommendation.verdict === 'correct'
+                        ? 'success'
+                        : recommendation.verdict === 'incorrect'
+                          ? 'danger'
+                          : 'warning'
+                    }
+                  >
+                    AI: {recommendation.verdict}
+                  </Badge>
+                  <span className="text-xs text-muted">
+                    {Math.round(recommendation.confidence * 100)}% confidence
+                    {recommendation.suggestedPoints !== null
+                      ? ` — suggested ${recommendation.suggestedPoints} point(s) loaded below`
+                      : ''}
+                  </span>
+                </div>
+                <p className="text-sm text-foreground">
+                  {recommendation.rationale || 'No rationale provided.'}
+                </p>
+                <p className="text-[11px] text-muted mt-1">
+                  Advisory only — nothing is saved until you press Save Score.
+                </p>
+              </div>
+            )}
           </div>
         )}
       </Modal>

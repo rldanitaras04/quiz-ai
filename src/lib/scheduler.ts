@@ -31,6 +31,17 @@ export async function runScheduledMaintenance(): Promise<MaintenanceResult | nul
       console.error('Scheduled maintenance failed:', error.message);
       return null;
     }
+
+    // Companion reaper (migration 20261015000000): queued/processing
+    // generation jobs with no progress for 15 minutes were abandoned
+    // mid-batch by a dead client — mark them failed so the activity feed
+    // and the dashboard's failed-jobs query stay truthful. Best-effort like
+    // the sweep itself: a failure here never breaks the page or the sweep.
+    const { error: stallError } = await admin.rpc('fail_stalled_generation_jobs');
+    if (stallError) {
+      console.error('Stalled generation-job cleanup failed:', stallError.message);
+    }
+
     return data as MaintenanceResult;
   } catch (error) {
     console.error('Scheduled maintenance failed:', error);
