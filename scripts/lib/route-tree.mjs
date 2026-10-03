@@ -103,7 +103,7 @@ export function normalizeTarget(raw) {
 
 /**
  * Match a (possibly wildcard-bearing) target against the route tree.
- * Returns the matched route pattern, or null.
+ * Returns the BEST-matching route pattern, or null.
  * Rules:
  *  - exact string matches are tried first;
  *  - a `*` target segment (from `${...}` interpolation) may only fill a
@@ -111,14 +111,23 @@ export function normalizeTarget(raw) {
  *    never silently resolve to an unrelated route;
  *  - a concrete target segment fills a `[param]` or must equal the static
  *    route segment; empty segments only match empty (root path).
+ * Ambiguity is resolved by score (exact static segment > concrete value
+ * filling [param] > `*` filling [param]), NOT by filesystem order:
+ * `readdirSync` order differs between platforms (NTFS vs ext4), and a link
+ * like `.../assessments/new` also matches `.../assessments/[assessmentId]` —
+ * first-match would mark different routes as linked on Windows and Linux.
+ * Ties break lexicographically so the result is fully deterministic.
  */
 export function matchRoute(target, routes) {
   if (target === null) return null;
   if (routes.has(target)) return target;
   const t = target.split('/');
+  let best = null;
+  let bestScore = -1;
   for (const r of routes.keys()) {
     const s = r.split('/');
     if (s.length !== t.length) continue;
+    let score = 0;
     let ok = true;
     for (let i = 0; i < s.length; i++) {
       const rs = s[i];
@@ -129,22 +138,34 @@ export function matchRoute(target, routes) {
           ok = false;
           break;
         }
+        score += 1; // interpolated value filling a [param]
         continue;
       }
       if (ts === '') {
-        if (rs === '') continue; // leading slash; root path has a trailing ''
+        if (rs === '') {
+          score += 3; // leading slash; root path has a trailing ''
+          continue;
+        }
         ok = false;
         break;
       }
-      if (rsDynamic) continue; // concrete value filling a [param]
+      if (rsDynamic) {
+        score += 2; // concrete value filling a [param]
+        continue;
+      }
       if (rs !== ts) {
         ok = false;
         break;
       }
+      score += 3; // exact static segment
     }
-    if (ok) return r;
+    if (!ok) continue;
+    if (score > bestScore || (score === bestScore && best !== null && r < best)) {
+      best = r;
+      bestScore = score;
+    }
   }
-  return null;
+  return best;
 }
 
 /**
