@@ -226,6 +226,7 @@ export default function SetupPage() {
             <Input
               label="Password"
               type="password"
+              revealable
               value={adminPassword}
               onChange={(e) => setAdminPassword(e.target.value)}
               placeholder="Min 8 characters"

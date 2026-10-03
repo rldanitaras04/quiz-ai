@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import Input from "@/components/ui/Input";
 import { registerUser } from "./actions";
 import {
   validateEmail,
@@ -191,8 +192,10 @@ export default function RegisterForm({
     );
   }
 
+  // Matches the shared Input component's radius so password fields (which
+  // ARE Inputs) and the hand-rolled fields here sit at the same corner curve.
   const inputClass =
-    "w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-foreground)] placeholder:text-[var(--color-muted-light)] focus:border-[var(--color-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-focus-ring)] disabled:cursor-not-allowed disabled:opacity-50";
+    "w-full rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-foreground)] placeholder:text-[var(--color-muted-light)] focus:border-[var(--color-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-focus-ring)] disabled:cursor-not-allowed disabled:opacity-50";
 
   return (
     <div className="rounded-xl bg-[var(--color-surface)] p-8 shadow-lg">
@@ -285,64 +288,37 @@ export default function RegisterForm({
         </div>
 
         <div>
-          <label
-            htmlFor="password"
-            className="mb-1 block text-sm font-medium text-[var(--color-foreground)]"
-          >
-            Password <span className="text-[var(--color-danger)]">*</span>
-          </label>
-          <input
+          <Input
             id="password"
             name="password"
+            label="Password"
             type="password"
+            revealable
             autoComplete="new-password"
             required
-            aria-invalid={!!errors.password}
-            aria-describedby={errors.password ? "password-error" : undefined}
+            error={errors.password}
             value={form.password}
             onChange={handleChange}
             placeholder="Min. 8 characters"
-            className={inputClass}
             disabled={isLoading}
           />
-          {errors.password && (
-            <p id="password-error" className="mt-1 text-xs text-[var(--color-danger)]">
-              {errors.password}
-            </p>
-          )}
         </div>
 
         <div>
-          <label
-            htmlFor="confirmPassword"
-            className="mb-1 block text-sm font-medium text-[var(--color-foreground)]"
-          >
-            Confirm password <span className="text-[var(--color-danger)]">*</span>
-          </label>
-          <input
+          <Input
             id="confirmPassword"
             name="confirmPassword"
+            label="Confirm password"
             type="password"
+            revealable
             autoComplete="new-password"
             required
-            aria-invalid={!!errors.confirmPassword}
-            aria-describedby={
-              errors.confirmPassword ? "confirmPassword-error" : undefined
-            }
+            error={errors.confirmPassword}
             value={form.confirmPassword}
             onChange={handleChange}
             placeholder="Re-enter your password"
-            className={inputClass}
             disabled={isLoading}
           />
-          {errors.confirmPassword && (
-            <p
-              id="confirmPassword-error"
-              className="mt-1 text-xs text-[var(--color-danger)]"
-            >
-              {errors.confirmPassword}
-            </p>
-          )}
         </div>
 
         <fieldset>

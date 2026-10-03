@@ -63,6 +63,7 @@ export default function LoginPage(): JSX.Element {
         <Input
           label="Password"
           type="password"
+          revealable
           placeholder="••••••••"
           required
           value={password}
