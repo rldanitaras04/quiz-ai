@@ -232,6 +232,92 @@ export async function isFacultyOfOfferingOrSubject(
   return isFacultyOfSubject(supabase, userId, offering.subject_id);
 }
 
+// ---------------------------------------------------------------------------
+// Proctor authorization helpers (scope §42)
+// ---------------------------------------------------------------------------
+
+/** True when the user holds the super_admin role (scope §2.1). */
+export async function isSuperAdmin(
+  supabase: SupabaseClient,
+  userId: string
+): Promise<boolean> {
+  if (!userId) return false;
+
+  const { data } = await supabase
+    .from('user_roles')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('role', 'super_admin')
+    .maybeSingle();
+
+  return Boolean(data);
+}
+
+/**
+ * True when the user is an assigned proctor of the deployment (scope §42).
+ *
+ * Reads `exam_proctors` through the caller's session: RLS lets a proctor see
+ * their own rows and faculty see rows on their offerings, so a non-proctor
+ * simply resolves to false.
+ */
+export async function isProctorOfDeployment(
+  supabase: SupabaseClient,
+  userId: string,
+  deploymentId: string
+): Promise<boolean> {
+  if (!deploymentId || !userId) return false;
+
+  const { data } = await supabase
+    .from('exam_proctors')
+    .select('id')
+    .eq('deployment_id', deploymentId)
+    .eq('proctor_id', userId)
+    .maybeSingle();
+
+  return Boolean(data);
+}
+
+/**
+ * True when the user is a proctor of ANY deployment of this assessment in
+ * this offering — the monitor-page gate for someone who is not faculty of
+ * the offering. Proctors only ever see the deployments they are assigned to
+ * (RLS + the page's deployment list), never sibling sections' sittings.
+ */
+export async function isProctorOfWorkspace(
+  supabase: SupabaseClient,
+  userId: string,
+  assessmentId: string,
+  offeringId: string
+): Promise<boolean> {
+  if (!userId || !assessmentId || !offeringId) return false;
+
+  const { data } = await supabase
+    .from('exam_proctors')
+    .select('id, assessment_deployments!inner(id)')
+    .eq('proctor_id', userId)
+    .eq('assessment_deployments.assessment_id', assessmentId)
+    .eq('assessment_deployments.subject_offering_id', offeringId)
+    .limit(1)
+    .maybeSingle();
+
+  return Boolean(data);
+}
+
+/**
+ * True when the user may assign/remove proctors on the offering (scope §42):
+ * faculty of the offering or its subject, or a super administrator. Content
+ * ownership stays with `isFacultyOfOfferingOrSubject`; proctor assignment is
+ * an invigilation setting, not an answer-key capability.
+ */
+export async function canManageProctors(
+  supabase: SupabaseClient,
+  userId: string,
+  offeringId: string
+): Promise<boolean> {
+  if (await isFacultyOfOfferingOrSubject(supabase, userId, offeringId)) return true;
+  return isSuperAdmin(supabase, userId);
+}
+
 /**
  * The assessment a question belongs to (question → version → assessment), when
  * the user is faculty on its offering or subject; null otherwise.

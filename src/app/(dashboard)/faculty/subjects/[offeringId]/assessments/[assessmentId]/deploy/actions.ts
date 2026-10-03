@@ -7,6 +7,7 @@ import { notifyOfferingStudents } from '@/lib/notifications';
 import { recordAuditLog } from '@/lib/audit';
 import { isFacultyOfOffering, isFacultyOfOfferingOrSubject } from '@/lib/auth';
 import { scoreAttempt, upsertAssessmentResult } from '@/lib/scoring';
+import { closeDeploymentWindow } from '@/lib/submission';
 import {
   SECURITY_POLICY_KEYS,
   normalizeSecurityPolicy,
@@ -367,31 +368,15 @@ export async function closeDeployment(
     }
 
     const nowIso = new Date().toISOString();
-    const { data: updated, error: updateError } = await supabase
-      .from('assessment_deployments')
-      .update({ status: 'closed', closes_at: nowIso, updated_at: nowIso })
-      .eq('id', deploymentId)
-      .in('status', ['draft', 'scheduled', 'active'])
-      .select('id, score_release_mode')
-      .maybeSingle();
-
-    if (updateError) return { success: false, error: updateError.message };
-    if (!updated) return { success: false, error: 'Deployment could not be closed' };
-
-    // after_all_submitted: closing the window is "everyone is done" — release now.
-    if (updated.score_release_mode === 'after_all_submitted') {
-      const admin = createAdminClient();
-      await admin
-        .from('assessment_results')
-        .update({
-          status: 'released',
-          released_at: nowIso,
-          released_by: user.id,
-          updated_at: nowIso,
-        })
-        .eq('deployment_id', deploymentId)
-        .neq('status', 'released');
-    }
+    // Shared with proctor conclude-all (scope §42): same conditional close
+    // + after_all_submitted release, authorized above before touching the row.
+    const closed = await closeDeploymentWindow(
+      createAdminClient(),
+      deploymentId,
+      user.id,
+      nowIso
+    );
+    if (!closed.ok) return { success: false, error: closed.error };
 
     const { data: assessmentTitle } = await supabase
       .from('assessments')

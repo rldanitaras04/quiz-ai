@@ -23,7 +23,19 @@ interface ProfileNotificationsCardProps {
 
 function notificationHref(data: Record<string, unknown> | null): string | null {
   if (!data) return null;
+
+  // Proctor assignment (scope §42): link to the live monitor, never the
+  // student paths below.
+  const offeringId = data.offering_id;
   const assessmentId = data.assessment_id;
+  if (
+    data.proctor === true &&
+    typeof offeringId === 'string' && offeringId &&
+    typeof assessmentId === 'string' && assessmentId
+  ) {
+    return `/faculty/subjects/${offeringId}/assessments/${assessmentId}/monitor`;
+  }
+
   if (typeof assessmentId !== 'string' || !assessmentId) return null;
 
   const attemptId = data.attempt_id;

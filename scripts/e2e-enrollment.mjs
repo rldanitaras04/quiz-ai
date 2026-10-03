@@ -85,6 +85,11 @@ const ACT = {
   apply: actionId('applyAssessmentModifications', 'assessments/actions.ts'),
   quality: actionId('getPreExamQuality', 'assessments/actions.ts'),
   submitExam: actionId('submitExam', 'exam/actions.ts'),
+  assignProctor: actionId('assignProctor', 'proctoring/actions.ts'),
+  removeProctor: actionId('removeProctor', 'proctoring/actions.ts'),
+  listProctors: actionId('listProctors', 'proctoring/actions.ts'),
+  concludeAttempt: actionId('concludeAttempt', 'monitor/actions.ts'),
+  concludeAll: actionId('concludeAllAttempts', 'monitor/actions.ts'),
   reviewQueue: actionId('getIdentificationResponsesNeedingReview', 'review/actions.ts'),
   scoreResponse: actionId('scoreIdentificationResponse', 'review/actions.ts'),
   recommend: actionId('getScoreRecommendation', 'review/actions.ts'),
@@ -179,6 +184,34 @@ async function getPage(pathname, cookie) {
     });
     return { status: res.status, html: await res.text(), location: res.headers.get('location') ?? '' };
   });
+}
+
+/**
+ * GET without following redirects — guard assertions need the real Location
+ * header (fetch() strips it after following, which hides WHERE a bounce went).
+ */
+async function getPageManual(pathname, cookie) {
+  return withRetry(`GET (manual) ${pathname}`, async () => {
+    const res = await fetch(`${BASE}${pathname}`, {
+      headers: cookie ? { Cookie: cookie } : {},
+      redirect: 'manual',
+      signal: AbortSignal.timeout(45000),
+    });
+    return { status: res.status, html: await res.text(), location: res.headers.get('location') ?? '' };
+  });
+}
+
+/**
+ * Where a guard actually sent us. A redirect() thrown before the response
+ * flushes arrives as a 307 with a Location header; one thrown AFTER the shell
+ * starts streaming (these guards run after several awaits) comes back as
+ * 200 + <meta http-equiv="refresh" content="1;url=…"> — fetch never follows
+ * that, so the target lives in the document itself.
+ */
+function bounceTarget(res) {
+  if (res.location) return res.location;
+  const m = res.html.match(/http-equiv="refresh" content="\d+;url=([^"]+)"/);
+  return m ? m[1] : '';
 }
 
 /** Plain JSON POST (route handlers such as /api/exam/start). */
@@ -282,6 +315,9 @@ const fx = {
   programId: null,
   yearLevelId: null,
   facultyEmail: `e2efac-${SHORT}@e2e.test`.toLowerCase(),
+  // Second faculty member — the T35 proctoring fixture needs somebody to
+  // ASSIGN as a proctor who is not the offering's own faculty.
+  faculty2Email: `e2efac2-${SHORT}@e2e.test`.toLowerCase(),
   adminEmail: `e2eadm-${SHORT}@e2e.test`.toLowerCase(),
   s1Email: `e2es1-${SHORT}@e2e.test`.toLowerCase(),
   s2Email: `e2es2-${SHORT}@e2e.test`.toLowerCase(),
@@ -295,6 +331,7 @@ const fx = {
   programCode: `E2E${SHORT}`.slice(0, 10),
   sectionName: `S${SHORT}`.slice(0, 20),
   facultyId: null,
+  faculty2Id: null,
   adminId: null,
   s1Id: null,
   s2Id: null,
@@ -387,6 +424,7 @@ async function setupFixtures() {
   }
 
   fx.facultyId = await createUser(fx.facultyEmail, 'E2E Faculty');
+  fx.faculty2Id = await createUser(fx.faculty2Email, 'E2E Faculty Two');
   fx.adminId = await createUser(fx.adminEmail, 'E2E Admin');
   fx.s1Id = await createUser(fx.s1Email, 'E2E Student One');
   fx.s2Id = await createUser(fx.s2Email, 'E2E Student Two');
@@ -394,12 +432,16 @@ async function setupFixtures() {
 
   await admin.from('user_roles').insert([
     { user_id: fx.facultyId, role: 'faculty' },
+    { user_id: fx.faculty2Id, role: 'faculty' },
     { user_id: fx.adminId, role: 'super_admin' },
     { user_id: fx.s1Id, role: 'student' },
     { user_id: fx.s2Id, role: 'student' },
     { user_id: fx.s3Id, role: 'student' },
   ]);
-  await admin.from('faculty_profiles').insert({ user_id: fx.facultyId });
+  await admin.from('faculty_profiles').insert([
+    { user_id: fx.facultyId },
+    { user_id: fx.faculty2Id },
+  ]);
   await admin.from('student_profiles').insert([
     { user_id: fx.s1Id, student_number: fx.s1Number, program_id: fx.programId, year_level_id: fx.yearLevelId, section_id: null, verification_status: 'verified' },
     { user_id: fx.s2Id, student_number: fx.s2Number, program_id: fx.programId, year_level_id: fx.yearLevelId, section_id: null, verification_status: 'verified' },
@@ -2329,6 +2371,258 @@ async function run() {
 
     // The throwaway is outside every fixture sweep — remove it.
     await admin.from('assessments').delete().eq('id', qAssessment.data.id);
+  }
+
+  // T35 — Proctoring (scope §42): assignment, monitor access, conclude =
+  // submit & score, revocation. Uses a second faculty member so the proctor
+  // is somebody who is NOT the offering's own faculty.
+  {
+    const dep35 = await fx.exam.mkDeployment({
+      opens_at: new Date(Date.now() - 60_000).toISOString(),
+      closes_at: new Date(Date.now() + 3_600_000).toISOString(),
+      status: 'active',
+    });
+    const monitorPath = `/faculty/subjects/${o1}/assessments/${fx.exam.assessmentId}/monitor`;
+
+    const mkAttempt35 = async (studentId) => {
+      const { data, error } = await admin
+        .from('exam_attempts')
+        .insert({
+          deployment_id: dep35,
+          student_id: studentId,
+          attempt_number: 1,
+          status: 'in_progress',
+          started_at: new Date().toISOString(),
+          expires_at: new Date(Date.now() + 1_800_000).toISOString(),
+          assessment_version_id: fx.exam.versionId,
+        })
+        .select('id')
+        .single();
+      if (error) throw new Error(`T35 attempt: ${error.message}`);
+      return data.id;
+    };
+    const attemptA = await mkAttempt35(fx.s1Id);
+    const attemptB = await mkAttempt35(fx.s2Id);
+
+    const facultyCookie = (await signIn(fx.facultyEmail, fx.password)).cookie;
+    const proctorCookie = (await signIn(fx.faculty2Email, fx.password)).cookie;
+    const adminCookie = (await signIn(fx.adminEmail, fx.password)).cookie;
+    const studentCookie = (await signIn(fx.s2Email, fx.password)).cookie;
+
+    // Before assignment nobody but the offering's faculty reaches the monitor:
+    // an unassigned faculty member is bounced to their course list.
+    const monBefore = await getPageManual(monitorPath, proctorCookie);
+    check('T35 unassigned faculty is bounced away from the live monitor',
+      bounceTarget(monBefore).includes('/faculty/subjects'),
+      `status=${monBefore.status} bounce=${bounceTarget(monBefore) || '(none)'} hasMonitor=${monBefore.html.includes('Live Exam Monitor')}`);
+
+    // 1. Faculty of the offering assigns the second faculty as proctor.
+    const assigned = await callAction({
+      cookie: facultyCookie,
+      actionId: ACT.assignProctor,
+      pathname: monitorPath,
+      args: [{ deploymentId: dep35, proctorUserId: fx.faculty2Id }],
+      label: 'T35 assignProctor',
+    });
+    check('T35 faculty assigns a proctor to the deployment',
+      /"success"\s*:\s*true/.test(assigned.text),
+      actionError(assigned.text) ?? `status=${assigned.status}`);
+
+    const { data: proctorNotes } = await admin
+      .from('notifications')
+      .select('id, data')
+      .eq('user_id', fx.faculty2Id)
+      .eq('type', 'proctor_assigned');
+    check('T35 the assigned proctor is notified with a monitor deep link',
+      (proctorNotes ?? []).length === 1 &&
+        proctorNotes[0].data?.assessment_id === fx.exam.assessmentId &&
+        proctorNotes[0].data?.proctor === true,
+      `count=${proctorNotes?.length ?? 0} data=${JSON.stringify(proctorNotes?.[0]?.data ?? null)}`);
+
+    // 2. Assignment opens the gate: the proctor now reads the live monitor
+    //    (RLS proctor policies + the extended page guard), while an admin
+    //    WITHOUT a proctor row still gets no exam access (scope §2.1) — they
+    //    land on the proctoring page where they can assign one.
+    const monProctor = await getPageManual(monitorPath, proctorCookie);
+    check('T35 assigned proctor opens the live monitor',
+      monProctor.status === 200 && monProctor.html.includes('Live Exam Monitor'),
+      `status=${monProctor.status} loc=${monProctor.location}`);
+
+    const monAdmin = await getPageManual(monitorPath, adminCookie);
+    check('T35 admin without a proctor row is bounced to the proctoring page',
+      bounceTarget(monAdmin).includes('/faculty/proctoring'),
+      `status=${monAdmin.status} bounce=${bounceTarget(monAdmin) || '(none)'} hasMonitor=${monAdmin.html.includes('Live Exam Monitor')}`);
+
+    const monStudent = await getPageManual(monitorPath, studentCookie);
+    check('T35 student is bounced out of the faculty workspace',
+      monStudent.status >= 300 && monStudent.status < 400,
+      `status=${monStudent.status} loc=${monStudent.location}`);
+
+    // 3. Assignment management stays with faculty/admin (scope §42): a proctor
+    //    can use the monitor but is refused the proctoring-management actions
+    //    (the Proctors card is not even rendered for them).
+    const listRes = await callAction({
+      cookie: proctorCookie,
+      actionId: ACT.listProctors,
+      pathname: monitorPath,
+      args: [dep35],
+      label: 'T35 listProctors',
+    });
+    check('T35 proctor is refused proctor-assignment management',
+      Boolean(actionError(listRes.text)?.includes('Not authorized to manage proctors')),
+      actionError(listRes.text) ?? `status=${listRes.status}`);
+
+    // 4. Full intervention authority: the proctor concludes one attempt —
+    //    submit & score, never invalidated (scope §42).
+    const concluded = await callAction({
+      cookie: proctorCookie,
+      actionId: ACT.concludeAttempt,
+      pathname: monitorPath,
+      args: [{ attemptId: attemptA, offeringId: o1, assessmentId: fx.exam.assessmentId }],
+      label: 'T35 concludeAttempt',
+    });
+    check('T35 proctor concludes the attempt (submit & score)',
+      /"success"\s*:\s*true/.test(concluded.text),
+      actionError(concluded.text) ?? `status=${concluded.status}`);
+
+    const { data: attA } = await admin
+      .from('exam_attempts')
+      .select('status, submitted_at')
+      .eq('id', attemptA)
+      .single();
+    check('T35 concluded attempt is submitted, not invalidated',
+      attA?.status === 'submitted' && Boolean(attA?.submitted_at),
+      `status=${attA?.status}`);
+
+    const { data: resA } = await admin
+      .from('assessment_results')
+      .select('id, status')
+      .eq('attempt_id', attemptA)
+      .maybeSingle();
+    check('T35 conclude scores the attempt into a result row',
+      resA !== null && resA.status === 'released', // fixture deployment is score_release_mode=immediate
+      `result=${JSON.stringify(resA)}`);
+
+    const { data: events35 } = await admin
+      .from('exam_events')
+      .select('event_type, metadata')
+      .eq('attempt_id', attemptA)
+      .in('event_type', ['faculty_intervention', 'submission_completed']);
+    const intervention = (events35 ?? []).find((e) => e.event_type === 'faculty_intervention');
+    check('T35 conclude records the intervention event tagged proctor',
+      intervention?.metadata?.action === 'conclude_attempt' &&
+        intervention?.metadata?.actor_role === 'proctor' &&
+        (events35 ?? []).some((e) => e.event_type === 'submission_completed'),
+      JSON.stringify(events35));
+
+    // Idempotency: a second conclude finds no in-progress attempt.
+    const again = await callAction({
+      cookie: proctorCookie,
+      actionId: ACT.concludeAttempt,
+      pathname: monitorPath,
+      args: [{ attemptId: attemptA, offeringId: o1, assessmentId: fx.exam.assessmentId }],
+      label: 'T35 conclude again',
+    });
+    check('T35 a second conclude is refused (not in progress)',
+      /"success"\s*:\s*false/.test(again.text),
+      actionError(again.text) ?? `status=${again.status}`);
+
+    // 5. No implicit access (scope §42 / §2.1): an admin without a proctor
+    //    row cannot conclude, and the attempt is untouched.
+    const denied = await callAction({
+      cookie: adminCookie,
+      actionId: ACT.concludeAttempt,
+      pathname: monitorPath,
+      args: [{ attemptId: attemptB, offeringId: o1, assessmentId: fx.exam.assessmentId }],
+      label: 'T35 conclude by non-proctor',
+    });
+    check('T35 an admin without a proctor row cannot conclude',
+      /"success"\s*:\s*false/.test(denied.text),
+      actionError(denied.text) ?? `status=${denied.status}`);
+    const { data: attBPre } = await admin
+      .from('exam_attempts')
+      .select('status')
+      .eq('id', attemptB)
+      .single();
+    check('T35 the refused conclude left the attempt in progress',
+      attBPre?.status === 'in_progress',
+      `status=${attBPre?.status}`);
+
+    // 6. Revocation restores the wall.
+    const removed = await callAction({
+      cookie: facultyCookie,
+      actionId: ACT.removeProctor,
+      pathname: monitorPath,
+      args: [{ deploymentId: dep35, proctorUserId: fx.faculty2Id }],
+      label: 'T35 removeProctor',
+    });
+    check('T35 faculty revokes the proctor assignment',
+      /"success"\s*:\s*true/.test(removed.text),
+      actionError(removed.text) ?? `status=${removed.status}`);
+
+    const monAfter = await getPageManual(monitorPath, proctorCookie);
+    check('T35 revoked proctor loses the live monitor',
+      bounceTarget(monAfter).includes('/faculty/subjects'),
+      `status=${monAfter.status} bounce=${bounceTarget(monAfter) || '(none)'} hasMonitor=${monAfter.html.includes('Live Exam Monitor')}`);
+
+    const deniedAfter = await callAction({
+      cookie: proctorCookie,
+      actionId: ACT.concludeAttempt,
+      pathname: monitorPath,
+      args: [{ attemptId: attemptB, offeringId: o1, assessmentId: fx.exam.assessmentId }],
+      label: 'T35 conclude after revocation',
+    });
+    check('T35 revoked proctor can no longer conclude',
+      /"success"\s*:\s*false/.test(deniedAfter.text),
+      actionError(deniedAfter.text) ?? `status=${deniedAfter.status}`);
+
+    // 7. Conclude-all from the offering's faculty finalizes everyone left and
+    //    closes the window so no new attempt can start.
+    const allRes = await callAction({
+      cookie: facultyCookie,
+      actionId: ACT.concludeAll,
+      pathname: monitorPath,
+      args: [{
+        deploymentId: dep35,
+        offeringId: o1,
+        assessmentId: fx.exam.assessmentId,
+        closeWindow: true,
+      }],
+      label: 'T35 concludeAllAttempts',
+    });
+    check('T35 conclude-all succeeds',
+      /"success"\s*:\s*true/.test(allRes.text),
+      actionError(allRes.text) ?? `status=${allRes.status}`);
+    check('T35 conclude-all reports its summary including the window close',
+      String(flightString(allRes.text, 'value') ?? '').includes('window closed'),
+      `value=${String(flightString(allRes.text, 'value') ?? '')}`);
+
+    const { data: attBDone } = await admin
+      .from('exam_attempts')
+      .select('status')
+      .eq('id', attemptB)
+      .single();
+    check('T35 conclude-all finalized the remaining attempt',
+      attBDone?.status === 'submitted',
+      `status=${attBDone?.status}`);
+
+    const { data: depAfter } = await admin
+      .from('assessment_deployments')
+      .select('status')
+      .eq('id', dep35)
+      .single();
+    check('T35 conclude-all closed the deployment window',
+      depAfter?.status === 'closed',
+      `status=${depAfter?.status}`);
+
+    const { count: closedNotes } = await admin
+      .from('notifications')
+      .select('id', { count: 'exact', head: true })
+      .eq('type', 'assessment_closed')
+      .contains('data', { deployment_id: dep35 });
+    check('T35 closing the window notifies the offering\'s students',
+      (closedNotes ?? 0) >= 1,
+      `count=${closedNotes ?? 0}`);
   }
 }
 

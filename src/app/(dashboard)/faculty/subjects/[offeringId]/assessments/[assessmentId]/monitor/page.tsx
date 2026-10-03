@@ -1,5 +1,6 @@
 import { redirect, notFound } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
+import { isProctorOfWorkspace, isSuperAdmin } from '@/lib/auth';
 import PageHeader from '@/components/ui/PageHeader';
 import EmptyState from '@/components/ui/EmptyState';
 import AssessmentNavSetter from '../AssessmentNavSetter';
@@ -19,7 +20,9 @@ export default async function LiveMonitorPage({ params }: Props) {
   } = await supabase.auth.getUser();
   if (authError || !user) redirect('/login');
 
-  // RLS: only faculty assigned to this offering can read these rows.
+  // Access: faculty assigned to this offering (existing gate), OR a proctor
+  // assigned to any deployment of this assessment here (scope §42). Admins
+  // receive no implicit exam access — they arrive only via a proctor row.
   const { data: assignment } = await supabase
     .from('faculty_assignments')
     .select('id')
@@ -27,7 +30,29 @@ export default async function LiveMonitorPage({ params }: Props) {
     .eq('faculty_id', user.id)
     .maybeSingle();
 
-  if (!assignment) redirect('/faculty/subjects');
+  let proctorViewer = false;
+  if (!assignment) {
+    proctorViewer = await isProctorOfWorkspace(
+      supabase,
+      user.id,
+      assessmentId,
+      offeringId
+    );
+
+    if (!proctorViewer) {
+      // Proctors and admins land on their assignment list instead of an
+      // unrelated faculty course list they cannot use.
+      const [{ data: anyProctorRow }, admin] = await Promise.all([
+        supabase.from('exam_proctors').select('id').limit(1).maybeSingle(),
+        isSuperAdmin(supabase, user.id),
+      ]);
+      redirect(anyProctorRow || admin ? '/faculty/proctoring' : '/faculty/subjects');
+    }
+  }
+
+  const viewerIsFaculty = Boolean(assignment);
+  // Only offering faculty and administrators may assign/remove proctors.
+  const canManageProctors = viewerIsFaculty || (await isSuperAdmin(supabase, user.id));
 
   const { data: assessment } = await supabase
     .from('assessments')
@@ -118,16 +143,31 @@ export default async function LiveMonitorPage({ params }: Props) {
 
   return (
     <div>
-      <AssessmentNavSetter offeringId={offeringId} assessmentId={assessmentId} />
+      <AssessmentNavSetter
+        offeringId={offeringId}
+        assessmentId={assessmentId}
+        proctorOnly={!viewerIsFaculty}
+      />
       <PageHeader
-        breadcrumbs={[
-          { label: 'Faculty', href: '/faculty' },
-          { label: 'My Subjects', href: '/faculty/subjects' },
-          { label: 'Subject', href: `/faculty/subjects/${offeringId}` },
-          { label: 'Assessments', href: `/faculty/subjects/${offeringId}/assessments` },
-          { label: assessment.title, href: `/faculty/subjects/${offeringId}/assessments/${assessmentId}` },
-          { label: 'Live Monitor' },
-        ]}
+        breadcrumbs={
+          viewerIsFaculty
+            ? [
+                { label: 'Faculty', href: '/faculty' },
+                { label: 'My Subjects', href: '/faculty/subjects' },
+                { label: 'Subject', href: `/faculty/subjects/${offeringId}` },
+                { label: 'Assessments', href: `/faculty/subjects/${offeringId}/assessments` },
+                { label: assessment.title, href: `/faculty/subjects/${offeringId}/assessments/${assessmentId}` },
+                { label: 'Live Monitor' },
+              ]
+            : [
+                // Proctors are not faculty of this workspace: only route them
+                // through pages they can actually open.
+                { label: 'Faculty', href: '/faculty' },
+                { label: 'Proctoring', href: '/faculty/proctoring' },
+                { label: assessment.title },
+                { label: 'Live Monitor' },
+              ]
+        }
         title="Live Exam Monitor"
         description="Live session status, security events, and faculty controls for this assessment."
       />
@@ -143,6 +183,7 @@ export default async function LiveMonitorPage({ params }: Props) {
           deployments={deploymentList}
           roster={roster}
           contextLabel={contextLabel}
+          canManageProctors={canManageProctors}
         />
       )}
     </div>

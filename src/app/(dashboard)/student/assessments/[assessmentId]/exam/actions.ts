@@ -5,8 +5,8 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { recordAuditLog } from '@/lib/audit';
 import { withAuthRetry } from '@/lib/auth-errors';
 import { startExamAttempt, isStartExamSuccess } from '@/lib/exam';
-import { scoreAttempt, upsertAssessmentResult } from '@/lib/scoring';
-import { notifyFacultyOfOffering } from '@/lib/notifications';
+import { conclusionPlanFor } from '@/lib/conclude';
+import { finalizeAttemptScoring } from '@/lib/submission';
 import { applyResponseOperations, type SyncOperation } from '@/lib/exam-sync';
 import {
   closeActiveSession,
@@ -481,8 +481,10 @@ export async function submitExam(
 
   // A submit after the server-defined window is recorded as an automatic
   // submission, so the expiry is what the database reflects — not a manual
-  // turn-in the student was no longer entitled to make.
-  const isExpired = Boolean(attempt.expires_at && attempt.expires_at < now);
+  // turn-in the student was no longer entitled to make. Same shared rule the
+  // proctor/faculty conclude path follows (scope §42).
+  const plan = conclusionPlanFor(attempt.expires_at, now);
+  const isExpired = plan.autoSubmitted;
 
   // --- Reconcile still-queued local operations (pre-deadline only) ---------
   let pendingApplied = 0;
@@ -513,7 +515,7 @@ export async function submitExam(
   const { error: submitError } = await admin
     .from('exam_attempts')
     .update({
-      status: isExpired ? 'auto_submitted' : 'submitted',
+      status: plan.status,
       submitted_at: now,
       updated_at: now,
     })
@@ -525,7 +527,7 @@ export async function submitExam(
   }
 
   // Close the single active examination session.
-  await closeActiveSession(admin, attemptId, isExpired ? 'expired' : 'submitted');
+  await closeActiveSession(admin, attemptId, plan.sessionCloseReason);
   await recordExamEvent(admin, {
     attemptId,
     studentId: user.id,
@@ -550,124 +552,16 @@ export async function submitExam(
   });
 
   // 2. Score in-process (no HTTP self-call). Failures are reported but do
-  //    not undo the submission — faculty can re-score.
+  //    not undo the submission — faculty can re-score. Shared with proctor
+  //    conclude (scope §42) so every submit path scores identically.
   try {
-    await scoreAttempt(attemptId, admin);
-
-    // 3. Compute totals and upsert the result row. Shared with the faculty
-    //    review re-score and release backfill so every path writes the same
-    //    totals (scope §27: percentage = earned / possible * 100).
-    const totals = await upsertAssessmentResult(admin, attemptId, {
+    await finalizeAttemptScoring(admin, {
+      attemptId,
       studentId: user.id,
       deploymentId: attempt.deployment_id,
+      now,
+      autoSubmitted: isExpired,
     });
-    if (!totals) throw new Error('Failed to upsert assessment result');
-    const deploymentId = totals.deploymentId || attempt.deployment_id;
-
-    // 4. Release immediately if the deployment says so.
-    const { data: deployment } = await admin
-      .from('assessment_deployments')
-      .select('score_release_mode, subject_offering_id')
-      .eq('id', deploymentId)
-      .single();
-
-    if (deployment?.score_release_mode === 'immediate') {
-      const { data: result } = await admin
-        .from('assessment_results')
-        .select('id')
-        .eq('attempt_id', attemptId)
-        .single();
-
-      if (result) {
-        await admin
-          .from('assessment_results')
-          .update({
-            status: 'released',
-            released_at: now,
-          })
-          .eq('id', result.id);
-      }
-    }
-
-    // ---- Scope §32 faculty events (best-effort: a notify hiccup must never
-    //      fail an already-recorded submission) --------------------------
-    if (deployment?.subject_offering_id) {
-      const offeringId = deployment.subject_offering_id;
-
-      // (a) Responses requiring manual review: identification items that
-      //     scored zero (possible alternative phrasing the accepted-answers
-      //     list does not know) or were left pending/manual by scoring.
-      const { data: reviewRows } = await admin
-        .from('student_responses')
-        .select('id, earned_points, scoring_status, question:questions(question_type)')
-        .eq('attempt_id', attemptId);
-      const needsReview = (reviewRows ?? []).filter((r) => {
-        // supabase-js without generated types types the embed as an array;
-        // normalize so both shapes behave the same.
-        const embedded = Array.isArray(r.question) ? r.question[0] : r.question;
-        return (
-          r.scoring_status === 'pending' ||
-          r.scoring_status === 'manual_review' ||
-          (r.earned_points === 0 && embedded?.question_type === 'identification')
-        );
-      });
-      if (needsReview.length > 0) {
-        await notifyFacultyOfOffering({
-          offeringId,
-          type: 'review_required',
-          title: 'Responses need review',
-          body:
-            `${needsReview.length} identification response${needsReview.length === 1 ? '' : 's'} ` +
-            `scored zero or could not be auto-scored — review ${
-              isExpired ? 'the auto-submitted' : 'the'
-            } paper before releasing results.`,
-          data: {
-            deployment_id: deploymentId,
-            attempt_id: attemptId,
-            offering_id: offeringId,
-            count: needsReview.length,
-          },
-        });
-      }
-
-      // (b) Submission progress: one event per deployment, fired when every
-      //     enrolled student has an attempt in (auto)submitted state.
-      const [{ data: enrolledRows }, { data: submittedRows }] = await Promise.all([
-        admin
-          .from('enrollments')
-          .select('student_id')
-          .eq('subject_offering_id', offeringId)
-          .eq('status', 'enrolled'),
-        admin
-          .from('exam_attempts')
-          .select('student_id')
-          .eq('deployment_id', deploymentId)
-          .in('status', ['submitted', 'auto_submitted']),
-      ]);
-      const enrolledCount = new Set((enrolledRows ?? []).map((r) => r.student_id)).size;
-      const submittedCount = new Set((submittedRows ?? []).map((r) => r.student_id)).size;
-      if (enrolledCount > 0 && submittedCount >= enrolledCount) {
-        const { count: existingProgress } = await admin
-          .from('notifications')
-          .select('id', { count: 'exact', head: true })
-          .eq('type', 'submission_progress')
-          .contains('data', { deployment_id: deploymentId });
-        if ((existingProgress ?? 0) === 0) {
-          await notifyFacultyOfOffering({
-            offeringId,
-            type: 'submission_progress',
-            title: 'All submissions received',
-            body: `All ${enrolledCount} enrolled students have submitted — you can review and release results.`,
-            data: {
-              deployment_id: deploymentId,
-              offering_id: offeringId,
-              enrolled: enrolledCount,
-              submitted: submittedCount,
-            },
-          });
-        }
-      }
-    }
 
     return { success: true, scored: true, pendingApplied, pendingSkipped };
   } catch (scoringError) {

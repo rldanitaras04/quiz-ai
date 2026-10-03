@@ -24,6 +24,18 @@ function notificationHref(data: Record<string, unknown> | null): string | null {
 
   const offeringId = data.offering_id;
   const assessmentId = data.assessment_id;
+
+  // Proctor assignment (scope §42): deep-link straight into the live monitor —
+  // a proctor is not faculty of this workspace, so neither the assessment
+  // workspace nor the student paths below are reachable for them.
+  if (
+    data.proctor === true &&
+    typeof offeringId === 'string' && offeringId &&
+    typeof assessmentId === 'string' && assessmentId
+  ) {
+    return `/faculty/subjects/${offeringId}/assessments/${assessmentId}/monitor`;
+  }
+
   if (
     data.faculty_assessment === true &&
     typeof offeringId === 'string' && offeringId &&
@@ -72,6 +84,7 @@ export default async function NotificationsPage() {
     switch (type) {
       case 'assessment_published':
       case 'assessment_opened':
+      case 'proctor_assigned':
         return 'info';
       case 'assessment_closed':
       case 'reminder':

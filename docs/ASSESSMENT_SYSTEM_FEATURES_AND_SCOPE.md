@@ -801,3 +801,63 @@ OCR/image-source extraction and additional assessment formats.
     manual setup required.
 12. Do not declare a feature complete until its complete end-to-end
     workflow has been tested.
+
+
+------------------------------------------------------------------------
+
+## 42. Proctoring and Live Supervision
+
+An examination MAY be supervised by a designated proctor in addition to
+(or instead of) the faculty member who created the deployment.
+
+### Assignment
+
+- Faculty of the offering or subject, or a super administrator, MAY
+  assign one or more proctors to a deployment (one exam sitting).
+- A proctor MAY be any active faculty member or a super administrator.
+- Assignment is optional; an examination runs unchanged without one.
+- Assignment is explicit and revocable. Record who granted it and when.
+- Proctors see only the deployments they are assigned to.
+
+### Proctor capabilities
+
+A proctor MAY:
+
+- View the live exam monitor for their assigned deployments (roster,
+  progress, heartbeats, security events) with the same visibility as
+  the faculty of the offering.
+- Use every live monitor intervention: grant extra time, allow session
+  recovery, require reverification, and terminate an attempt.
+- Conclude an individual student's attempt: finalize it as a
+  submission, score saved answers, and release results according to
+  the deployment's score-release policy.
+- Conclude the exam for all students: finalize every in-progress
+  attempt, optionally closing the deployment window so no new attempts
+  can start.
+
+A proctor MAY NOT:
+
+- Create, modify, or delete deployments, assessments, questions, or
+  answer keys.
+- Manage enrollment or grant pre-start exceptions (scope §20).
+- Release or alter results outside the deployment's release policy.
+
+The one deployment state a proctor may change is the conclude-all
+option above: closing the window is an effect of concluding the exam,
+not deployment editing — a deployment's schedule and settings
+otherwise remain faculty-owned.
+
+Concluding an attempt is a submission, not a penalty: it never
+invalidates work. Terminating an attempt (scope §25 handling) remains
+the separate integrity action.
+
+### Constraints
+
+- Every proctor action is authorized server-side (assignment check per
+  deployment), written to the audit trail (scope §34), and recorded as
+  factual exam events (scope §25) — signals, not findings.
+- Unsynced offline answers on the student's device at conclude time
+  are not recoverable; interfaces MUST warn when pending synchroniza-
+  tion exists before confirming.
+- Administrators receive no implicit access to exam data: monitor
+  access requires an explicit proctor assignment (scope §2.1).

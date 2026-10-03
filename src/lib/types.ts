@@ -94,6 +94,7 @@ export type NotificationType =
   | 'generation_completed'
   | 'generation_failed'
   | 'identity_verification_requested'
+  | 'proctor_assigned'
   | 'reminder'
   | 'system';
 
@@ -479,6 +480,19 @@ export interface ExamEventRow {
   severity: EventSeverity;
   metadata: Record<string, unknown>;
   recorded_at: string;
+  created_at: string;
+}
+
+/**
+ * Optional per-deployment supervision grant (exam_proctors, scope §42).
+ * Written only by trusted server actions after an explicit authorization
+ * check; never by the browser directly (no write policies on the table).
+ */
+export interface ExamProctor {
+  id: string;
+  deployment_id: string;
+  proctor_id: string;
+  granted_by: string | null;
   created_at: string;
 }
 

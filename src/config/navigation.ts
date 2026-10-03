@@ -29,6 +29,7 @@ import {
   Wrench,
   FolderOpen,
   Stack,
+  Binoculars,
 } from '@phosphor-icons/react';
 
 // ============================================================================
@@ -112,6 +113,7 @@ export const ROUTES = {
   // Faculty
   facultyDashboard: '/faculty',
   facultySubjects: '/faculty/subjects',
+  facultyProctoring: '/faculty/proctoring',
 
   // Student
   studentDashboard: '/student',
@@ -159,6 +161,7 @@ export const routes = {
   faculty: {
     dashboard: () => ROUTES.facultyDashboard,
     subjects: () => ROUTES.facultySubjects,
+    proctoring: () => ROUTES.facultyProctoring,
     subject: (offeringId: string) => `/faculty/subjects/${offeringId}` as const,
     subjectStudents: (offeringId: string) => `/faculty/subjects/${offeringId}/students` as const,
     subjectAssessments: (offeringId: string) => `/faculty/subjects/${offeringId}/assessments` as const,
@@ -212,6 +215,9 @@ export const GLOBAL_NAVIGATION: Record<UserRole, NavigationGroup[]> = {
       label: 'Overview',
       items: [
         { id: 'admin-dashboard', label: 'Dashboard', href: ROUTES.adminDashboard, icon: SquaresFour, exact: true },
+        // Assignment administration for a role that has no faculty workspace:
+        // admins reach proctoring through this shared page (scope §42).
+        { id: 'admin-proctoring', label: 'Proctoring', href: ROUTES.facultyProctoring, icon: Binoculars },
       ],
     },
     {
@@ -283,6 +289,7 @@ export const GLOBAL_NAVIGATION: Record<UserRole, NavigationGroup[]> = {
       label: 'Overview',
       items: [
         { id: 'faculty-dashboard', label: 'Dashboard', href: ROUTES.facultyDashboard, icon: SquaresFour, exact: true },
+        { id: 'faculty-proctoring', label: 'Proctoring', href: ROUTES.facultyProctoring, icon: Binoculars },
       ],
     },
     {
@@ -355,6 +362,16 @@ export function getAssessmentWorkspaceNav(offeringId: string, assessmentId: stri
     { id: 'assess-monitor', label: 'Live Monitor', href: routes.faculty.assessmentMonitor(offeringId, assessmentId), icon: Pulse },
     { id: 'assess-analytics', label: 'Analytics', href: routes.faculty.assessmentAnalytics(offeringId, assessmentId), icon: ChartLineUp },
   ];
+}
+
+/**
+ * Narrow the assessment workspace tabs to what a proctor-only viewer may open
+ * (scope §42): the Live Monitor. Every other tab lives behind a faculty guard
+ * this viewer is not part of, so leaving them visible would only bounce them
+ * out of the page they are allowed to use.
+ */
+export function proctorOnlyWorkspaceNav(items: NavigationItem[]): NavigationItem[] {
+  return items.filter((item) => item.id === 'assess-monitor');
 }
 
 // ============================================================================

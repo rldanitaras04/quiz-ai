@@ -20,10 +20,13 @@ import {
 } from '@/lib/exam-security';
 import {
   allowSessionRecovery,
+  concludeAllAttempts,
+  concludeAttempt,
   grantExtraTime,
   requireReverification,
   terminateAttempt,
 } from './actions';
+import ProctorManager from './ProctorManager';
 
 export interface MonitorDeployment {
   id: string;
@@ -157,12 +160,15 @@ export default function MonitorClient({
   deployments,
   roster,
   contextLabel,
+  canManageProctors,
 }: {
   offeringId: string;
   assessmentId: string;
   deployments: MonitorDeployment[];
   roster: MonitorStudent[];
   contextLabel?: string;
+  /** Offering faculty / administrators may assign proctors (scope §42). */
+  canManageProctors: boolean;
 }) {
   const [deploymentId, setDeploymentId] = useState(
     deployments.find((d) => d.status === 'active')?.id ?? deployments[0]?.id ?? ''
@@ -177,6 +183,8 @@ export default function MonitorClient({
   const [now, setNow] = useState(() => new Date());
   const [selectedAttemptId, setSelectedAttemptId] = useState<string | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
+  const [concludeAllOpen, setConcludeAllOpen] = useState(false);
+  const [closeWindow, setCloseWindow] = useState(true);
   const [extraTimeAttempt, setExtraTimeAttempt] = useState<AttemptRow | null>(null);
   const [extraMinutes, setExtraMinutes] = useState(10);
 
@@ -518,6 +526,50 @@ export default function MonitorClient({
     );
   };
 
+  // Conclude (scope §42): submit & score — never a penalty, never invalidates
+  // work. Warns first when the device still holds unsynced answers: those are
+  // not recoverable once the attempt is finalized.
+  const handleConclude = async (row: MonitorRow) => {
+    const attempt = row.attempt;
+    if (!attempt) return;
+    const pending = row.session?.pending_sync_count ?? 0;
+    const ok = await confirmAction({
+      title: 'Conclude this attempt?',
+      text:
+        pending > 0
+          ? `${row.student.fullName} still has ${pending} answer${pending === 1 ? '' : 's'} syncing from their device — unsynced answers cannot be recovered after concluding. The attempt is submitted as saved, then scored (results follow the deployment's release policy).`
+          : `${row.student.fullName}'s attempt is submitted as saved, then scored (results follow the deployment's release policy). This never invalidates work — Terminate remains the separate integrity action.`,
+      confirmText: 'Conclude & score',
+    });
+    if (!ok) return;
+    await runAction(
+      `conclude-${attempt.id}`,
+      () => concludeAttempt({ attemptId: attempt.id, offeringId, assessmentId }),
+      'Attempt concluded',
+      (v) =>
+        v === 'scoring_failed'
+          ? 'Submitted, but scoring failed — re-score it from Results.'
+          : 'Submitted and scored. The student sees it on their next heartbeat (within about 20 seconds).'
+    );
+  };
+
+  const handleConcludeAll = async () => {
+    setConcludeAllOpen(false);
+    await runAction(
+      'conclude-all',
+      () =>
+        concludeAllAttempts({
+          deploymentId,
+          offeringId,
+          assessmentId,
+          closeWindow,
+        }),
+      'Exam concluded',
+      (v) => v ?? undefined
+    );
+    setCloseWindow(true);
+  };
+
   // -------------------------------------------------------------------------
   // Render helpers
   // -------------------------------------------------------------------------
@@ -580,6 +632,13 @@ export default function MonitorClient({
 
   const activeDeployment = deployments.find((d) => d.id === deploymentId);
 
+  // Full roster (not the filtered table view) — the conclude-all dialog must
+  // always speak for every attempt in the deployment.
+  const inProgressRows = rows.filter((r) => r.attempt?.status === 'in_progress');
+  const pendingSyncRows = inProgressRows.filter(
+    (r) => (r.session?.pending_sync_count ?? 0) > 0
+  );
+
   return (
     <div className="space-y-6">
       <Card>
@@ -599,20 +658,30 @@ export default function MonitorClient({
               <span className="text-xs text-[var(--color-muted)]">{contextLabel}</span>
             )}
           </div>
-          {deployments.length > 1 && (
-            <Select
-              label="Deployment"
-              value={deploymentId}
-              onChange={(e) => setDeploymentId(e.target.value)}
-              className="sm:w-72"
+          <div className="flex items-end gap-2">
+            {deployments.length > 1 && (
+              <Select
+                label="Deployment"
+                value={deploymentId}
+                onChange={(e) => setDeploymentId(e.target.value)}
+                className="sm:w-72"
+              >
+                {deployments.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.status} · opens {new Date(d.opens_at).toLocaleString()}
+                  </option>
+                ))}
+              </Select>
+            )}
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={Boolean(busyAction)}
+              onClick={() => setConcludeAllOpen(true)}
             >
-              {deployments.map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.status} · opens {new Date(d.opens_at).toLocaleString()}
-                </option>
-              ))}
-            </Select>
-          )}
+              Conclude exam…
+            </Button>
+          </div>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex flex-wrap gap-2 text-xs">
@@ -846,6 +915,14 @@ export default function MonitorClient({
                                 </Button>
                                 <Button
                                   size="sm"
+                                  variant="secondary"
+                                  disabled={busy}
+                                  onClick={() => handleConclude(row)}
+                                >
+                                  Conclude
+                                </Button>
+                                <Button
+                                  size="sm"
                                   variant="danger"
                                   disabled={busy}
                                   onClick={() => row.attempt && handleTerminate(row.attempt.id)}
@@ -871,6 +948,11 @@ export default function MonitorClient({
           </p>
         </CardContent>
       </Card>
+
+      {/* Proctor assignment (scope §42) — offering faculty / admins only */}
+      {canManageProctors && (
+        <ProctorManager offeringId={offeringId} deploymentId={deploymentId} />
+      )}
 
       {/* Session detail + event timeline + full control set */}
       <Modal
@@ -1121,6 +1203,80 @@ export default function MonitorClient({
             value={extraMinutes}
             onChange={(e) => setExtraMinutes(Number(e.target.value))}
           />
+        </div>
+      </Modal>
+
+      {/* Conclude exam for all students (scope §42) */}
+      <Modal
+        open={concludeAllOpen}
+        onClose={() => setConcludeAllOpen(false)}
+        title="Conclude exam for all students"
+        actions={
+          <>
+            <Button variant="secondary" onClick={() => setConcludeAllOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleConcludeAll} disabled={Boolean(busyAction)}>
+              {busyAction === 'conclude-all'
+                ? 'Concluding…'
+                : closeWindow
+                  ? 'Conclude & close window'
+                  : 'Conclude attempts'}
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-3 text-sm">
+          <p>
+            Finalizes <strong>every in-progress attempt</strong> as a
+            submission: saved answers are scored and results follow the
+            deployment&apos;s release policy. Nothing is invalidated — terminating
+            remains the separate integrity action.
+          </p>
+
+          <p className="text-xs text-[var(--color-muted)]">
+            {inProgressRows.length === 0
+              ? 'No attempts are in progress right now.'
+              : `${inProgressRows.length} attempt${inProgressRows.length === 1 ? '' : 's'} currently in progress.`}
+          </p>
+
+          {pendingSyncRows.length > 0 && (
+            <div className="rounded-md border border-[var(--color-warning)] p-3">
+              <p className="text-sm font-medium">
+                {pendingSyncRows.length} student
+                {pendingSyncRows.length === 1 ? ' has' : 's have'} unsynced
+                answers
+              </p>
+              <p className="mt-1 text-xs text-[var(--color-muted)]">
+                Those answers still live on their device and cannot be recovered
+                after concluding — only what reached the server is scored.
+              </p>
+              <ul className="mt-2 space-y-0.5 text-xs">
+                {pendingSyncRows.map((r) => (
+                  <li key={r.student.id}>
+                    {r.student.fullName} — {r.session?.pending_sync_count} pending
+                    {r.session?.connection_state === 'offline' ? ' · offline' : ''}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          <label className="flex cursor-pointer items-start gap-3">
+            <input
+              type="checkbox"
+              checked={closeWindow}
+              onChange={(e) => setCloseWindow(e.target.checked)}
+              className="mt-0.5 h-4 w-4 rounded border-[var(--color-border)] text-[var(--color-primary)] focus:ring-[var(--color-focus-ring)]"
+            />
+            <span className="text-sm">
+              Also close the exam window so no new attempts can start
+              <span className="block text-xs text-[var(--color-muted)]">
+                Recommended — otherwise a student who has not started yet could
+                still begin while the window is open.
+              </span>
+            </span>
+          </label>
         </div>
       </Modal>
     </div>

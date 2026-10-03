@@ -189,3 +189,43 @@ export async function notifyFacultyOfOffering({
 
   return facultyIds.length;
 }
+
+export interface NotifyUserInput {
+  userId: string;
+  type: NotificationType;
+  title: string;
+  body: string;
+  data?: Record<string, unknown>;
+}
+
+/**
+ * Insert a notification for one specific user (e.g. `proctor_assigned`,
+ * scope §42). Same service-role-only, best-effort rule as the bulk helpers:
+ * returns true when the row was created, false otherwise, and never throws —
+ * callers fire it after their primary write without jeopardizing it.
+ */
+export async function notifyUser({
+  userId,
+  type,
+  title,
+  body,
+  data,
+}: NotifyUserInput): Promise<boolean> {
+  if (!userId) return false;
+
+  const admin = createAdminClient();
+  const { error } = await admin.from('notifications').insert({
+    user_id: userId,
+    type,
+    title,
+    body,
+    data: data ?? {},
+  });
+
+  if (error) {
+    console.error('Failed to create user notification:', error.message);
+    return false;
+  }
+
+  return true;
+}
