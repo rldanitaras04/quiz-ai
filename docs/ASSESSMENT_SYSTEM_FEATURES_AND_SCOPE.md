@@ -831,6 +831,9 @@ A proctor MAY:
 - Conclude an individual student's attempt: finalize it as a
   submission, score saved answers, and release results according to
   the deployment's score-release policy.
+- Conclude selected students: pick any set of in-progress attempts
+  from the roster and finalize exactly those; unselected attempts
+  keep running and the deployment window stays open.
 - Conclude the exam for all students: finalize every in-progress
   attempt, optionally closing the deployment window so no new attempts
   can start.

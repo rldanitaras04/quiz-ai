@@ -22,6 +22,7 @@ import {
   allowSessionRecovery,
   concludeAllAttempts,
   concludeAttempt,
+  concludeSelectedAttempts,
   grantExtraTime,
   requireReverification,
   terminateAttempt,
@@ -184,6 +185,9 @@ export default function MonitorClient({
   const [selectedAttemptId, setSelectedAttemptId] = useState<string | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [concludeAllOpen, setConcludeAllOpen] = useState(false);
+  const [concludeSelectedOpen, setConcludeSelectedOpen] = useState(false);
+  // Per-student selection for the bulk conclude (scope §42), keyed by attempt id.
+  const [selectedAttemptIds, setSelectedAttemptIds] = useState<string[]>([]);
   const [closeWindow, setCloseWindow] = useState(true);
   const [extraTimeAttempt, setExtraTimeAttempt] = useState<AttemptRow | null>(null);
   const [extraMinutes, setExtraMinutes] = useState(10);
@@ -437,6 +441,28 @@ export default function MonitorClient({
     [rows, selectedAttemptId]
   );
 
+  // Per-student conclude selection (scope §42): only in-progress attempts can
+  // be concluded, so only those rows are selectable. Everything below is
+  // re-derived from the live roster each time — a row that finishes in the
+  // meantime simply drops out of the count instead of going stale.
+  const selectedRows: MonitorRow[] = useMemo(
+    () =>
+      rows.filter(
+        (r) => r.attempt?.status === 'in_progress' && selectedAttemptIds.includes(r.attempt.id)
+      ),
+    [rows, selectedAttemptIds]
+  );
+
+  const selectedPendingSyncRows = selectedRows.filter(
+    (r) => (r.session?.pending_sync_count ?? 0) > 0
+  );
+
+  // The visible in-progress rows — what the header checkbox selects.
+  const selectableFilteredRows = filteredRows.filter((r) => r.attempt?.status === 'in_progress');
+  const allSelectableSelected =
+    selectableFilteredRows.length > 0 &&
+    selectableFilteredRows.every((r) => selectedAttemptIds.includes(r.attempt?.id ?? ''));
+
   // All sessions for the open detail (multi-session history after recovery).
   const selectedSessions = useMemo(() => {
     if (!selectedRow?.attempt) return [];
@@ -461,7 +487,7 @@ export default function MonitorClient({
       fn: () => Promise<{ success: boolean; error?: string; value?: string }>,
       successTitle: string,
       successText?: string | ((value?: string) => string | undefined)
-    ) => {
+    ): Promise<boolean> => {
       setBusyAction(key);
       try {
         const result = await fn();
@@ -470,9 +496,10 @@ export default function MonitorClient({
             typeof successText === 'function' ? successText(result.value) : successText;
           notifySuccess(successTitle, detail);
           await fetchData();
-        } else {
-          notifyError('Action failed', result.error);
+          return true;
         }
+        notifyError('Action failed', result.error);
+        return false;
       } finally {
         setBusyAction(null);
       }
@@ -540,6 +567,7 @@ export default function MonitorClient({
           ? `${row.student.fullName} still has ${pending} answer${pending === 1 ? '' : 's'} syncing from their device — unsynced answers cannot be recovered after concluding. The attempt is submitted as saved, then scored (results follow the deployment's release policy).`
           : `${row.student.fullName}'s attempt is submitted as saved, then scored (results follow the deployment's release policy). This never invalidates work — Terminate remains the separate integrity action.`,
       confirmText: 'Conclude & score',
+      destructive: true,
     });
     if (!ok) return;
     await runAction(
@@ -568,6 +596,47 @@ export default function MonitorClient({
       (v) => v ?? undefined
     );
     setCloseWindow(true);
+  };
+
+  // Per-student selection for the bulk conclude (scope §42). Only rows with an
+  // in-progress attempt are selectable — anything else has nothing to conclude.
+  const toggleSelectAttempt = (attemptId: string) =>
+    setSelectedAttemptIds((ids) =>
+      ids.includes(attemptId) ? ids.filter((i) => i !== attemptId) : [...ids, attemptId]
+    );
+
+  const toggleSelectFiltered = () => {
+    const visibleIds = selectableFilteredRows
+      .map((r) => r.attempt?.id ?? '')
+      .filter((id) => id !== '');
+    const allOn =
+      visibleIds.length > 0 && visibleIds.every((id) => selectedAttemptIds.includes(id));
+    setSelectedAttemptIds(
+      allOn
+        ? selectedAttemptIds.filter((id) => !visibleIds.includes(id))
+        : [...new Set([...selectedAttemptIds, ...visibleIds])]
+    );
+  };
+
+  const handleConcludeSelected = async () => {
+    const ids = selectedRows.map((r) => r.attempt?.id ?? '').filter((id) => id !== '');
+    setConcludeSelectedOpen(false);
+    if (ids.length === 0) return;
+    const ok = await runAction(
+      'conclude-selected',
+      () =>
+        concludeSelectedAttempts({
+          deploymentId,
+          attemptIds: ids,
+          offeringId,
+          assessmentId,
+        }),
+      'Selected attempts concluded',
+      (v) => v ?? undefined
+    );
+    // Clear the pick only after a successful conclude so a failed action
+    // keeps the user's selection for a retry.
+    if (ok) setSelectedAttemptIds([]);
   };
 
   // -------------------------------------------------------------------------
@@ -663,7 +732,11 @@ export default function MonitorClient({
               <Select
                 label="Deployment"
                 value={deploymentId}
-                onChange={(e) => setDeploymentId(e.target.value)}
+                onChange={(e) => {
+                  setDeploymentId(e.target.value);
+                  // Attempt ids belong to the previous sitting.
+                  setSelectedAttemptIds([]);
+                }}
                 className="sm:w-72"
               >
                 {deployments.map((d) => (
@@ -675,7 +748,7 @@ export default function MonitorClient({
             )}
             <Button
               size="sm"
-              variant="secondary"
+              variant="danger"
               disabled={Boolean(busyAction)}
               onClick={() => setConcludeAllOpen(true)}
             >
@@ -748,6 +821,36 @@ export default function MonitorClient({
             </Select>
           </div>
 
+          {selectedRows.length > 0 && (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--color-border)] px-3 py-2">
+              <span className="text-sm">
+                <strong>{selectedRows.length}</strong> student
+                {selectedRows.length === 1 ? '' : 's'} selected for conclude
+                <span className="ml-2 text-xs text-[var(--color-muted)]">
+                  Only in-progress attempts can be concluded — everyone else keeps running.
+                </span>
+              </span>
+              <div className="flex gap-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={Boolean(busyAction)}
+                  onClick={() => setSelectedAttemptIds([])}
+                >
+                  Clear
+                </Button>
+                <Button
+                  variant="danger"
+                  size="sm"
+                  disabled={Boolean(busyAction)}
+                  onClick={() => setConcludeSelectedOpen(true)}
+                >
+                  Conclude selected…
+                </Button>
+              </div>
+            </div>
+          )}
+
           {loadError && <p className="text-sm text-[var(--color-danger)]">{loadError}</p>}
 
           {loading ? (
@@ -769,6 +872,18 @@ export default function MonitorClient({
               <table className="w-full min-w-[1120px] text-sm">
                 <thead>
                   <tr className="border-b border-[var(--color-border)] text-left text-xs uppercase tracking-wide text-[var(--color-muted)]">
+                    <th className="py-2 pr-3">
+                      <input
+                        type="checkbox"
+                        aria-label="Select all in-progress students shown"
+                        checked={allSelectableSelected}
+                        disabled={
+                          selectableFilteredRows.length === 0 || Boolean(busyAction)
+                        }
+                        onChange={toggleSelectFiltered}
+                        className="h-4 w-4 rounded border-[var(--color-border)] text-[var(--color-primary)] focus:ring-[var(--color-focus-ring)]"
+                      />
+                    </th>
                     <th className="py-2 pr-3">Student</th>
                     <th className="py-2 pr-3">Status</th>
                     <th className="py-2 pr-3">Progress</th>
@@ -793,6 +908,7 @@ export default function MonitorClient({
                     const total = row.session?.total_items ?? null;
                     const answered = row.session?.answered_count ?? 0;
                     const isActive = row.attempt?.status === 'in_progress';
+                    const attemptId = row.attempt?.id ?? null;
                     const busy = row.attempt
                       ? [
                           `time-${row.attempt.id}`,
@@ -807,6 +923,18 @@ export default function MonitorClient({
                         key={row.student.id}
                         className="border-b border-[var(--color-border)] align-middle"
                       >
+                        <td className="py-3 pr-3">
+                          {isActive && attemptId ? (
+                            <input
+                              type="checkbox"
+                              aria-label={`Select ${row.student.fullName}`}
+                              checked={selectedAttemptIds.includes(attemptId)}
+                              disabled={Boolean(busyAction)}
+                              onChange={() => toggleSelectAttempt(attemptId)}
+                              className="h-4 w-4 rounded border-[var(--color-border)] text-[var(--color-primary)] focus:ring-[var(--color-focus-ring)]"
+                            />
+                          ) : null}
+                        </td>
                         <td className="py-3 pr-3">
                           <div className="font-medium text-[var(--color-foreground)]">
                             {row.student.fullName}
@@ -915,7 +1043,7 @@ export default function MonitorClient({
                                 </Button>
                                 <Button
                                   size="sm"
-                                  variant="secondary"
+                                  variant="danger"
                                   disabled={busy}
                                   onClick={() => handleConclude(row)}
                                 >
@@ -1216,7 +1344,7 @@ export default function MonitorClient({
             <Button variant="secondary" onClick={() => setConcludeAllOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={handleConcludeAll} disabled={Boolean(busyAction)}>
+            <Button variant="danger" onClick={handleConcludeAll} disabled={Boolean(busyAction)}>
               {busyAction === 'conclude-all'
                 ? 'Concluding…'
                 : closeWindow
@@ -1277,6 +1405,75 @@ export default function MonitorClient({
               </span>
             </span>
           </label>
+        </div>
+      </Modal>
+
+      {/* Conclude a selected set of students (scope §42) */}
+      <Modal
+        open={concludeSelectedOpen}
+        onClose={() => setConcludeSelectedOpen(false)}
+        title="Conclude the selected students"
+        actions={
+          <>
+            <Button variant="secondary" onClick={() => setConcludeSelectedOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="danger"
+              onClick={handleConcludeSelected}
+              disabled={Boolean(busyAction)}
+            >
+              {busyAction === 'conclude-selected'
+                ? 'Concluding…'
+                : `Conclude & score ${selectedRows.length} attempt${selectedRows.length === 1 ? '' : 's'}`}
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-3 text-sm">
+          <p>
+            Finalizes the selected attempt{selectedRows.length === 1 ? '' : 's'} as a
+            submission: saved answers are scored and results follow the
+            deployment&apos;s release policy. Students left unselected keep
+            working undisturbed — nothing is invalidated either way, and the
+            deployment window stays open.
+          </p>
+
+          <ul className="max-h-40 space-y-1 overflow-y-auto">
+            {selectedRows.map((r) => (
+              <li
+                key={r.student.id}
+                className="flex items-center justify-between rounded-lg border border-[var(--color-border)] px-2.5 py-1.5 text-xs"
+              >
+                <span className="font-medium">{r.student.fullName}</span>
+                <span className="text-[var(--color-muted)]">
+                  {r.student.studentNumber || r.student.email}
+                </span>
+              </li>
+            ))}
+          </ul>
+
+          {selectedPendingSyncRows.length > 0 && (
+            <div className="rounded-md border border-[var(--color-warning)] p-3">
+              <p className="text-sm font-medium">
+                {selectedPendingSyncRows.length} student
+                {selectedPendingSyncRows.length === 1 ? ' has' : 's have'} unsynced
+                answers
+              </p>
+              <p className="mt-1 text-xs text-[var(--color-muted)]">
+                Those answers still live on their device and cannot be recovered
+                after concluding — only what reached the server is scored.
+              </p>
+              <ul className="mt-2 space-y-0.5 text-xs">
+                {selectedPendingSyncRows.map((r) => (
+                  <li key={r.student.id}>
+                    {r.student.fullName} — {r.session?.pending_sync_count} pending
+                    {r.session?.connection_state === 'offline' ? ' · offline' : ''}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
       </Modal>
     </div>

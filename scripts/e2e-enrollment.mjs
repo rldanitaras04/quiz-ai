@@ -89,6 +89,7 @@ const ACT = {
   removeProctor: actionId('removeProctor', 'proctoring/actions.ts'),
   listProctors: actionId('listProctors', 'proctoring/actions.ts'),
   concludeAttempt: actionId('concludeAttempt', 'monitor/actions.ts'),
+  concludeSelected: actionId('concludeSelectedAttempts', 'monitor/actions.ts'),
   concludeAll: actionId('concludeAllAttempts', 'monitor/actions.ts'),
   reviewQueue: actionId('getIdentificationResponsesNeedingReview', 'review/actions.ts'),
   scoreResponse: actionId('scoreIdentificationResponse', 'review/actions.ts'),
@@ -2381,9 +2382,14 @@ async function run() {
       opens_at: new Date(Date.now() - 60_000).toISOString(),
       closes_at: new Date(Date.now() + 3_600_000).toISOString(),
       status: 'active',
+      // Two students each take a second attempt (the selected-conclude
+      // fixtures); the enforce_attempt_limit() trigger counts them all.
+      attempt_limit: 2,
     });
     const monitorPath = `/faculty/subjects/${o1}/assessments/${fx.exam.assessmentId}/monitor`;
 
+    // The enforce_attempt_limit() trigger normalizes attempt_number to the
+    // true next number, so callers only pick the student.
     const mkAttempt35 = async (studentId) => {
       const { data, error } = await admin
         .from('exam_attempts')
@@ -2403,6 +2409,9 @@ async function run() {
     };
     const attemptA = await mkAttempt35(fx.s1Id);
     const attemptB = await mkAttempt35(fx.s2Id);
+    const attemptC = await mkAttempt35(fx.s3Id);
+    const attemptD = await mkAttempt35(fx.s1Id);
+    const attemptE = await mkAttempt35(fx.s2Id);
 
     const facultyCookie = (await signIn(fx.facultyEmail, fx.password)).cookie;
     const proctorCookie = (await signIn(fx.faculty2Email, fx.password)).cookie;
@@ -2548,6 +2557,67 @@ async function run() {
       attBPre?.status === 'in_progress',
       `status=${attBPre?.status}`);
 
+    // 5b. Selected conclude (scope §42): the proctor picks students from the
+    //     roster and concludes exactly those — unselected attempts keep
+    //     running, and the same submit-&-score pipeline is used.
+    const selectedRes = await callAction({
+      cookie: proctorCookie,
+      actionId: ACT.concludeSelected,
+      pathname: monitorPath,
+      args: [{
+        deploymentId: dep35,
+        attemptIds: [attemptB, attemptC],
+        offeringId: o1,
+        assessmentId: fx.exam.assessmentId,
+      }],
+      label: 'T35 concludeSelectedAttempts',
+    });
+    check('T35 proctor concludes the selected attempts',
+      /"success"\s*:\s*true/.test(selectedRes.text),
+      actionError(selectedRes.text) ?? `status=${selectedRes.status}`);
+    check('T35 selected conclude reports both finalized attempts',
+      String(flightString(selectedRes.text, 'value') ?? '').includes('2 attempts concluded'),
+      `value=${String(flightString(selectedRes.text, 'value') ?? '')}`);
+
+    const { data: selState } = await admin
+      .from('exam_attempts')
+      .select('id, status')
+      .in('id', [attemptB, attemptC, attemptD, attemptE]);
+    const selMap = Object.fromEntries((selState ?? []).map((r) => [r.id, r.status]));
+    check('T35 selected conclude finalized exactly the chosen attempts',
+      selMap[attemptB] === 'submitted' &&
+        selMap[attemptC] === 'submitted' &&
+        selMap[attemptD] === 'in_progress' &&
+        selMap[attemptE] === 'in_progress',
+      JSON.stringify(selMap));
+
+    // 5c. The same authority wall as the single conclude: an admin without a
+    //     proctor row cannot conclude selected students either, and the
+    //     attempt they named is untouched.
+    const selDenied = await callAction({
+      cookie: adminCookie,
+      actionId: ACT.concludeSelected,
+      pathname: monitorPath,
+      args: [{
+        deploymentId: dep35,
+        attemptIds: [attemptD],
+        offeringId: o1,
+        assessmentId: fx.exam.assessmentId,
+      }],
+      label: 'T35 selected conclude by non-proctor',
+    });
+    check('T35 an admin without a proctor row cannot conclude selected attempts',
+      /"success"\s*:\s*false/.test(selDenied.text),
+      actionError(selDenied.text) ?? `status=${selDenied.status}`);
+    const { data: attDGuard } = await admin
+      .from('exam_attempts')
+      .select('status')
+      .eq('id', attemptD)
+      .single();
+    check('T35 the refused selected conclude left the attempt in progress',
+      attDGuard?.status === 'in_progress',
+      `status=${attDGuard?.status}`);
+
     // 6. Revocation restores the wall.
     const removed = await callAction({
       cookie: facultyCookie,
@@ -2576,6 +2646,32 @@ async function run() {
       /"success"\s*:\s*false/.test(deniedAfter.text),
       actionError(deniedAfter.text) ?? `status=${deniedAfter.status}`);
 
+    // 6b. The offering's faculty keeps the selected conclude after the
+    //     proctor's revocation (faculty authority is the offering itself).
+    const facSel = await callAction({
+      cookie: facultyCookie,
+      actionId: ACT.concludeSelected,
+      pathname: monitorPath,
+      args: [{
+        deploymentId: dep35,
+        attemptIds: [attemptE],
+        offeringId: o1,
+        assessmentId: fx.exam.assessmentId,
+      }],
+      label: 'T35 faculty selected conclude',
+    });
+    check('T35 faculty concludes a selected attempt',
+      /"success"\s*:\s*true/.test(facSel.text),
+      actionError(facSel.text) ?? `status=${facSel.status}`);
+    const { data: attEDone } = await admin
+      .from('exam_attempts')
+      .select('status')
+      .eq('id', attemptE)
+      .single();
+    check('T35 faculty selected conclude submitted the attempt',
+      attEDone?.status === 'submitted',
+      `status=${attEDone?.status}`);
+
     // 7. Conclude-all from the offering's faculty finalizes everyone left and
     //    closes the window so no new attempt can start.
     const allRes = await callAction({
@@ -2597,14 +2693,14 @@ async function run() {
       String(flightString(allRes.text, 'value') ?? '').includes('window closed'),
       `value=${String(flightString(allRes.text, 'value') ?? '')}`);
 
-    const { data: attBDone } = await admin
+    const { data: attDRemain } = await admin
       .from('exam_attempts')
       .select('status')
-      .eq('id', attemptB)
+      .eq('id', attemptD)
       .single();
     check('T35 conclude-all finalized the remaining attempt',
-      attBDone?.status === 'submitted',
-      `status=${attBDone?.status}`);
+      attDRemain?.status === 'submitted',
+      `status=${attDRemain?.status}`);
 
     const { data: depAfter } = await admin
       .from('assessment_deployments')

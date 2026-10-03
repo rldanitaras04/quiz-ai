@@ -713,3 +713,111 @@ export async function concludeAllAttempts(input: {
     return { success: false, error: 'Failed to conclude the exam' };
   }
 }
+
+/**
+ * Conclude a SELECTED set of students in this deployment (scope §42): every
+ * named attempt that is still in progress is finalized and scored exactly
+ * like the individual conclude, while attempts outside the selection keep
+ * running untouched. Same deployment-level authorization as conclude-all
+ * (faculty of the offering or an assigned proctor). Attempt ids are re-scoped
+ * to this deployment server-side, so a forged list can never touch another
+ * sitting; ids that are not in progress are skipped, not errored.
+ */
+export async function concludeSelectedAttempts(input: {
+  deploymentId: string;
+  attemptIds: string[];
+  offeringId: string;
+  assessmentId: string;
+}): Promise<ActionResult> {
+  try {
+    const attemptIds = [...new Set(input.attemptIds)].filter((id) => id !== '');
+    if (attemptIds.length === 0) {
+      return { success: false, error: 'Select at least one student to conclude' };
+    }
+
+    const auth = await authorizeDeployment(
+      input.deploymentId,
+      input.offeringId,
+      input.assessmentId
+    );
+    if (!auth.userId || !auth.actorRole) {
+      return { success: false, error: auth.error ?? 'Not authorized' };
+    }
+    const actorUserId = auth.userId;
+    const actorRole = auth.actorRole;
+
+    const admin = createAdminClient();
+    const { data: attempts, error: listError } = await admin
+      .from('exam_attempts')
+      .select('id, student_id, status, expires_at')
+      .eq('deployment_id', input.deploymentId)
+      .in('id', attemptIds);
+
+    if (listError) return { success: false, error: listError.message };
+
+    const found = attempts ?? [];
+    const notFound = attemptIds.length - found.length;
+    let concluded = 0;
+    let skipped = 0;
+    let scored = true;
+
+    for (const row of found) {
+      if (row.status !== 'in_progress') {
+        skipped += 1; // selected a student who already finished — not an error
+        continue;
+      }
+      const outcome = await concludeAttemptInternal(
+        {
+          attemptId: row.id,
+          studentId: row.student_id,
+          deploymentId: input.deploymentId,
+          status: row.status,
+          expiresAt: row.expires_at,
+          offeringId: input.offeringId,
+          assessmentId: input.assessmentId,
+        },
+        actorUserId,
+        actorRole
+      );
+      if (outcome.ok) {
+        concluded += 1;
+        if (outcome.scored === false) scored = false;
+      } else {
+        skipped += 1; // raced a concurrent self-submit
+      }
+    }
+
+    if (concluded === 0 && skipped === 0) {
+      return { success: false, error: 'None of the selected students belong to this exam' };
+    }
+
+    await recordAuditLog({
+      actorUserId,
+      action: 'update',
+      entityType: 'assessment_deployment',
+      entityId: input.deploymentId,
+      metadata: {
+        intervention: 'conclude_selected_attempts',
+        actor_role: actorRole,
+        attempt_ids: attemptIds,
+        concluded,
+        skipped,
+        not_found: notFound,
+      },
+    });
+
+    revalidateMonitorPath(input.offeringId, input.assessmentId);
+
+    const parts = [
+      `${concluded} attempt${concluded === 1 ? '' : 's'} concluded`,
+      ...(skipped > 0 ? [`${skipped} already finished`] : []),
+      ...(notFound > 0 ? [`${notFound} not in this exam`] : []),
+    ];
+    const value = parts.join(' · ');
+    return scored
+      ? { success: true, value }
+      : { success: true, value: `${value} · scoring failed for some — re-score from Results` };
+  } catch {
+    return { success: false, error: 'Failed to conclude the selected attempts' };
+  }
+}

@@ -7,8 +7,14 @@
 //  2. A proctor-only viewer's workspace tabs narrow to exactly the Live
 //     Monitor — every other tab sits behind a faculty guard they fail.
 //  3. Both the faculty and admin sidebars expose the proctoring page.
+//  4. Every conclude affordance renders in the danger (red) style, and the
+//     monitor wires per-student selection into a deployment-scoped
+//     conclude-selected action (faculty or assigned proctor only).
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { conclusionPlanFor } from '../src/lib/conclude.ts';
 import {
@@ -127,4 +133,70 @@ test('faculty and admin sidebars both expose the proctoring page', () => {
 
   assert.ok(facultyItem, 'faculty nav is missing the Proctoring item');
   assert.ok(adminItem, 'admin nav is missing the Proctoring item');
+});
+
+// ---------------------------------------------------------------------------
+// 4. Monitor conclude wiring: red conclude actions + per-student selection
+// ---------------------------------------------------------------------------
+
+const monitorDir = join(
+  dirname(dirname(fileURLToPath(import.meta.url))),
+  'src',
+  'app',
+  '(dashboard)',
+  'faculty',
+  'subjects',
+  '[offeringId]',
+  'assessments',
+  '[assessmentId]',
+  'monitor'
+);
+const monitorClientSrc = readFileSync(join(monitorDir, 'MonitorClient.tsx'), 'utf8');
+const monitorActionsSrc = readFileSync(join(monitorDir, 'actions.ts'), 'utf8');
+
+test('every conclude action renders in the danger (red) style', () => {
+  // Header "Conclude exam…" (conclude-all)
+  assert.match(
+    monitorClientSrc,
+    /variant="danger"[\s\S]{0,200}setConcludeAllOpen\(true\)/,
+    'the conclude-all header button is no longer a danger button'
+  );
+  // Per-row Conclude button
+  assert.match(
+    monitorClientSrc,
+    /variant="danger"[\s\S]{0,160}handleConclude\(row\)/,
+    'the row-level Conclude button is no longer a danger button'
+  );
+  // Bulk "Conclude selected…" bar button
+  assert.match(
+    monitorClientSrc,
+    /variant="danger"[\s\S]{0,200}setConcludeSelectedOpen\(true\)/,
+    'the conclude-selected bar button is no longer a danger button'
+  );
+  // Both confirmation modals confirm in red.
+  const dangerConfirms =
+    monitorClientSrc.match(/variant="danger"\s+onClick=\{handleConclude(?:All|Selected)\}/g) ?? [];
+  assert.equal(dangerConfirms.length, 2, `danger confirms: ${dangerConfirms.length}`);
+});
+
+test('the monitor wires per-student selection into a conclude action', () => {
+  // Selection checkboxes: per in-progress row + the header select-all.
+  assert.match(monitorClientSrc, /aria-label=\{`Select \$\{row\.student\.fullName\}`\}/);
+  assert.match(monitorClientSrc, /aria-label="Select all in-progress students shown"/);
+  // The confirm dialog must warn about unsynced answers (§42 constraint).
+  assert.match(monitorClientSrc, /selectedPendingSyncRows/);
+  // The client calls the bulk action with exactly the picked attempt ids.
+  assert.match(
+    monitorClientSrc,
+    /concludeSelectedAttempts\(\s*\{\s*deploymentId,\s*attemptIds: ids,/
+  );
+  // The server action exists, authorizes at deployment level, and re-scopes
+  // the id list to this deployment so a forged list cannot touch another sitting.
+  assert.match(monitorActionsSrc, /export async function concludeSelectedAttempts/);
+  const body = monitorActionsSrc.slice(
+    monitorActionsSrc.indexOf('export async function concludeSelectedAttempts')
+  );
+  assert.match(body, /await authorizeDeployment\(/);
+  assert.match(body, /\.eq\('deployment_id', input\.deploymentId\)/);
+  assert.match(body, /\.in\('id', attemptIds\)/);
 });
