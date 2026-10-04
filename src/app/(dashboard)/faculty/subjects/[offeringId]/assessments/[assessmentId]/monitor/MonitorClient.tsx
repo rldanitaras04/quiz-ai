@@ -10,6 +10,7 @@ import Select from '@/components/ui/Select';
 import Input from '@/components/ui/Input';
 import Spinner from '@/components/ui/Spinner';
 import EmptyState from '@/components/ui/EmptyState';
+import { Table, THead, TBody, TR, TH, TD } from '@/components/ui/Table';
 import { confirmAction, notifyError, notifySuccess } from '@/components/ui/alerts';
 import {
   EVENT_TYPE_LABELS,
@@ -868,37 +869,36 @@ export default function MonitorClient({
               description="Adjust the search box or the status, security, and sync filters."
             />
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[1120px] text-sm">
-                <thead>
-                  <tr className="border-b border-[var(--color-border)] text-left text-xs uppercase tracking-wide text-[var(--color-muted)]">
-                    <th className="py-2 pr-3">
-                      <input
-                        type="checkbox"
-                        aria-label="Select all in-progress students shown"
-                        checked={allSelectableSelected}
-                        disabled={
-                          selectableFilteredRows.length === 0 || Boolean(busyAction)
-                        }
-                        onChange={toggleSelectFiltered}
-                        className="h-4 w-4 rounded border-[var(--color-border)] text-[var(--color-primary)] focus:ring-[var(--color-focus-ring)]"
-                      />
-                    </th>
-                    <th className="py-2 pr-3">Student</th>
-                    <th className="py-2 pr-3">Status</th>
-                    <th className="py-2 pr-3">Progress</th>
-                    <th className="py-2 pr-3">Item</th>
-                    <th className="py-2 pr-3">Flagged</th>
-                    <th className="py-2 pr-3">Connection</th>
-                    <th className="py-2 pr-3">Sync</th>
-                    <th className="py-2 pr-3">Security</th>
-                    <th className="py-2 pr-3">Heartbeat</th>
-                    <th className="py-2 pr-3">Time left</th>
-                    <th className="py-2 pr-3 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredRows.map((row) => {
+            <Table cards className="lg:min-w-[1120px]" caption="Live proctoring monitor: student progress and security status">
+              <THead>
+                <TR className="text-xs uppercase tracking-wide text-[var(--color-muted)]">
+                  <TH>
+                    <input
+                      type="checkbox"
+                      aria-label="Select all in-progress students shown"
+                      checked={allSelectableSelected}
+                      disabled={
+                        selectableFilteredRows.length === 0 || Boolean(busyAction)
+                      }
+                      onChange={toggleSelectFiltered}
+                      className="h-4 w-4 rounded border-[var(--color-border)] text-[var(--color-primary)] focus:ring-[var(--color-focus-ring)]"
+                    />
+                  </TH>
+                  <TH>Student</TH>
+                  <TH>Status</TH>
+                  <TH>Progress</TH>
+                  <TH>Item</TH>
+                  <TH>Flagged</TH>
+                  <TH>Connection</TH>
+                  <TH>Sync</TH>
+                  <TH>Security</TH>
+                  <TH>Heartbeat</TH>
+                  <TH>Time left</TH>
+                  <TH align="right">Actions</TH>
+                </TR>
+              </THead>
+              <TBody>
+                {filteredRows.map((row) => {
                     const st = ATTEMPT_STATUS[row.attempt?.status ?? 'created'] ?? {
                       label: 'Not started',
                       variant: 'default' as BadgeVariant,
@@ -919,11 +919,8 @@ export default function MonitorClient({
                       : false;
 
                     return (
-                      <tr
-                        key={row.student.id}
-                        className="border-b border-[var(--color-border)] align-middle"
-                      >
-                        <td className="py-3 pr-3">
+                      <TR key={row.student.id} className="align-middle">
+                        <TD label="Select">
                           {isActive && attemptId ? (
                             <input
                               type="checkbox"
@@ -934,16 +931,16 @@ export default function MonitorClient({
                               className="h-4 w-4 rounded border-[var(--color-border)] text-[var(--color-primary)] focus:ring-[var(--color-focus-ring)]"
                             />
                           ) : null}
-                        </td>
-                        <td className="py-3 pr-3">
+                        </TD>
+                        <TD primary label="Student">
                           <div className="font-medium text-[var(--color-foreground)]">
                             {row.student.fullName}
                           </div>
                           <div className="text-xs text-[var(--color-muted)]">
                             {row.student.studentNumber || row.student.email}
                           </div>
-                        </td>
-                        <td className="py-3 pr-3">
+                        </TD>
+                        <TD label="Status">
                           <div className="flex flex-col gap-1">
                             <Badge variant={st.variant}>{st.label}</Badge>
                             {row.attempt?.status === 'in_progress' && (
@@ -955,8 +952,8 @@ export default function MonitorClient({
                               <Badge variant="warning">Reverification pending</Badge>
                             )}
                           </div>
-                        </td>
-                        <td className="py-3 pr-3 tabular-nums">
+                        </TD>
+                        <TD label="Progress" className="tabular-nums">
                           {isActive && row.session ? (
                             <span>
                               {answered}
@@ -965,8 +962,8 @@ export default function MonitorClient({
                           ) : (
                             <span className="text-[var(--color-muted)]">—</span>
                           )}
-                        </td>
-                        <td className="py-3 pr-3 tabular-nums">
+                        </TD>
+                        <TD label="Item" className="tabular-nums">
                           {isActive && row.session && total !== null ? (
                             <span>
                               {row.session.current_item} / {total}
@@ -976,15 +973,15 @@ export default function MonitorClient({
                           ) : (
                             <span className="text-[var(--color-muted)]">—</span>
                           )}
-                        </td>
-                        <td className="py-3 pr-3 tabular-nums">
+                        </TD>
+                        <TD label="Flagged" className="tabular-nums">
                           {isActive && row.session ? (
                             <span>{row.session.flagged_count}</span>
                           ) : (
                             <span className="text-[var(--color-muted)]">—</span>
                           )}
-                        </td>
-                        <td className="py-3 pr-3 text-xs">
+                        </TD>
+                        <TD label="Connection" className="text-xs">
                           {isActive && row.session ? (
                             <span
                               className={
@@ -998,8 +995,8 @@ export default function MonitorClient({
                           ) : (
                             <span className="text-[var(--color-muted)]">—</span>
                           )}
-                        </td>
-                        <td className="py-3 pr-3 text-xs">
+                        </TD>
+                        <TD label="Sync" className="text-xs">
                           {isActive && row.session ? (
                             <span className="flex flex-col gap-0.5">
                               <span>{row.session.sync_state}</span>
@@ -1012,18 +1009,18 @@ export default function MonitorClient({
                           ) : (
                             <span className="text-[var(--color-muted)]">—</span>
                           )}
-                        </td>
-                        <td className="py-3 pr-3">
+                        </TD>
+                        <TD label="Security">
                           <Badge variant={sec.variant}>{sec.label}</Badge>
-                        </td>
-                        <td className="py-3 pr-3 text-xs tabular-nums">
+                        </TD>
+                        <TD label="Heartbeat" className="text-xs tabular-nums">
                           {isActive ? heartbeatAge(row.session) : '—'}
-                        </td>
-                        <td className={`py-3 pr-3 tabular-nums ${remainingClass(row.attempt)}`}>
+                        </TD>
+                        <TD label="Time left" className={`tabular-nums ${remainingClass(row.attempt)}`}>
                           {remaining(row.attempt)}
-                        </td>
-                        <td className="py-3 pr-3">
-                          <div className="flex justify-end gap-1.5">
+                        </TD>
+                        <TD label="Actions">
+                          <div className="flex flex-wrap justify-end gap-1.5">
                             <Button
                               size="sm"
                               variant="ghost"
@@ -1060,13 +1057,12 @@ export default function MonitorClient({
                               </>
                             )}
                           </div>
-                        </td>
-                      </tr>
+                        </TD>
+                      </TR>
                     );
                   })}
-                </tbody>
-              </table>
-            </div>
+              </TBody>
+            </Table>
           )}
 
           <p className="text-xs text-[var(--color-muted)]">

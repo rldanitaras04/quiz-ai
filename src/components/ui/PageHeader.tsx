@@ -24,7 +24,7 @@ export default function PageHeader({
     <div className={`mb-6 ${className}`}>
       {breadcrumbs && breadcrumbs.length > 0 && (
         <nav aria-label="Breadcrumb" className="mb-2">
-          <ol className="flex items-center gap-1 text-sm text-[var(--color-muted)]">
+          <ol className="flex flex-wrap items-center gap-1 text-sm text-[var(--color-muted)]">
             {breadcrumbs.map((item, index) => (
               <li key={index} className="flex items-center gap-1">
                 {index > 0 && (
@@ -63,7 +63,7 @@ export default function PageHeader({
             <p className="mt-1 text-sm text-[var(--color-muted)]">{description}</p>
           )}
         </div>
-        {actions && <div className="flex items-center gap-3">{actions}</div>}
+        {actions && <div className="flex flex-wrap items-center gap-3">{actions}</div>}
       </div>
     </div>
   );

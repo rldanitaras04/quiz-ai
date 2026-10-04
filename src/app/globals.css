@@ -614,4 +614,11 @@ button:disabled {
   .table-cards tbody td[colspan]::before {
     content: none;
   }
+
+  /* Content-bearing span cells (nested tables, expanded detail rows) keep the
+     empty-state cell's full width but stay left-aligned and normally padded. */
+  .table-cards tbody td[colspan].td-detail {
+    padding: 0.75rem;
+    text-align: left;
+  }
 }

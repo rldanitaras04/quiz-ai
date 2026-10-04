@@ -397,7 +397,7 @@ export default function StepTos({
 
             {/* Matrix */}
             <div className="overflow-x-auto">
-              <Table>
+              <Table cards>
                 <THead>
                   <TR>
                     <TH>Topic</TH>
@@ -412,11 +412,11 @@ export default function StepTos({
                 <TBody>
                   {rows.map((row, index) => (
                     <TR key={`${row.topic}|${row.question_type}|${row.difficulty}|${row.bloom_level}|${index}`}>
-                      <TD className="text-sm">{row.topic}</TD>
-                      <TD className="text-sm">{TYPE_LABELS[row.question_type]}</TD>
-                      <TD className="text-sm">{DIFFICULTY_LABELS[row.difficulty]}</TD>
-                      <TD className="text-sm">{BLOOM_LABELS[row.bloom_level]}</TD>
-                      <TD numeric>
+                      <TD primary label="Topic" className="text-sm">{row.topic}</TD>
+                      <TD label="Type" className="text-sm">{TYPE_LABELS[row.question_type]}</TD>
+                      <TD label="Difficulty" className="text-sm">{DIFFICULTY_LABELS[row.difficulty]}</TD>
+                      <TD label="Bloom&apos;s level" className="text-sm">{BLOOM_LABELS[row.bloom_level]}</TD>
+                      <TD numeric label="Items">
                         <input
                           type="number"
                           min={0}
@@ -427,10 +427,10 @@ export default function StepTos({
                           className="w-16 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 text-sm text-center text-[var(--color-foreground)]"
                         />
                       </TD>
-                      <TD numeric className="text-sm">
+                      <TD numeric label="%" className="text-sm">
                         {tosPercent(row.count, marginals.totalItems)}%
                       </TD>
-                      <TD numeric>
+                      <TD numeric label="Actions">
                         <button
                           type="button"
                           onClick={() => handleDelete(index)}

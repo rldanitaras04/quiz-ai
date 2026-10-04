@@ -137,7 +137,7 @@ export default function MultiSectionDeployClient({
           score_release_mode: 'immediate',
           show_raw_score: true,
           show_percentage: true,
-          show_item_correctness: false,
+          show_item_correctness: true,
           show_correct_answers: false,
           show_explanations: false,
           requires_identity_verification: false,
@@ -210,7 +210,7 @@ export default function MultiSectionDeployClient({
           </div>
         </CardHeader>
         <CardContent>
-          <Table>
+          <Table cards caption="Sections available for this deployment">
             <THead>
               <TR>
                 <TH>
@@ -229,7 +229,7 @@ export default function MultiSectionDeployClient({
             <TBody>
               {offerings.map((offering) => (
                 <TR key={offering.id}>
-                  <TD>
+                  <TD label="Select">
                     <input
                       type="checkbox"
                       checked={selectedOfferings.has(offering.id)}
@@ -237,9 +237,9 @@ export default function MultiSectionDeployClient({
                       className="rounded"
                     />
                   </TD>
-                  <TD className="font-medium text-foreground">{offering.sectionName}</TD>
-                  <TD className="text-muted">{offering.semesterName}</TD>
-                  <TD>
+                  <TD primary label="Section" className="font-medium text-foreground">{offering.sectionName}</TD>
+                  <TD label="Term" className="text-muted">{offering.semesterName}</TD>
+                  <TD label="Status">
                     <Badge variant={selectedOfferings.has(offering.id) ? 'success' : 'default'}>
                       {selectedOfferings.has(offering.id) ? 'Selected' : 'Not selected'}
                     </Badge>
@@ -342,7 +342,7 @@ export default function MultiSectionDeployClient({
             <h3 className="text-base font-semibold text-foreground">Deployment Results</h3>
           </CardHeader>
           <CardContent>
-            <Table>
+            <Table cards caption="Deployment results by section">
               <THead>
                 <TR>
                   <TH>Section</TH>
@@ -353,13 +353,13 @@ export default function MultiSectionDeployClient({
               <TBody>
                 {results.map((result) => (
                   <TR key={result.offeringId}>
-                    <TD className="font-medium text-foreground">{result.sectionName}</TD>
-                    <TD>
+                    <TD primary label="Section" className="font-medium text-foreground">{result.sectionName}</TD>
+                    <TD label="Status">
                       <Badge variant={result.success ? 'success' : 'danger'}>
                         {result.success ? 'Deployed' : 'Failed'}
                       </Badge>
                     </TD>
-                    <TD className="text-sm text-muted">{result.error ?? '—'}</TD>
+                    <TD label="Error" className="text-sm text-muted">{result.error ?? '—'}</TD>
                   </TR>
                 ))}
               </TBody>

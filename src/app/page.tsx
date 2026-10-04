@@ -42,10 +42,17 @@ export default async function Home(): Promise<JSX.Element> {
       <div className="sticky top-0 z-30 px-3 pt-3 sm:px-6 sm:pt-5">
         <nav className="mx-auto flex max-w-7xl items-center justify-between gap-4 rounded-2xl border border-[var(--color-border)]/60 bg-[var(--color-surface)]/90 px-4 py-2.5 shadow-lg shadow-slate-900/5 backdrop-blur sm:px-5">
           <Link href="/" className="shrink-0" aria-label="SEAMS AI home">
-            <Brand />
+            {/* The wordmark plus both CTAs cannot fit a 360px header — icon
+                only below sm so "Get Started" never gets pushed out. */}
+            <span className="hidden sm:inline-flex">
+              <Brand />
+            </span>
+            <span className="sm:hidden">
+              <BrandIcon alt="" />
+            </span>
           </Link>
           <SectionNav />
-          <div className="flex shrink-0 items-center gap-2 sm:gap-3">
+          <div className="flex shrink-0 items-center gap-1.5 sm:gap-3">
             <Link
               href="/login"
               className="rounded-xl border border-[var(--color-primary)]/70 px-3 py-2 text-sm font-semibold text-[var(--color-primary)] transition-colors hover:bg-[var(--color-primary-light)] sm:px-4"

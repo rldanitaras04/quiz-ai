@@ -362,7 +362,7 @@ export default function AnalyticsClient({ deploymentId }: AnalyticsClientProps):
             <p className="text-sm text-muted py-4">No questions to analyze.</p>
           ) : (
             <div className="overflow-x-auto">
-              <Table>
+              <Table cards caption="Item analysis by question">
                 <THead>
                   <TR>
                     <TH align="right">#</TH>
@@ -383,34 +383,34 @@ export default function AnalyticsClient({ deploymentId }: AnalyticsClientProps):
                   {analytics.item_analysis.map((item, index) => (
                     <Fragment key={item.question_id}>
                       <TR>
-                      <TD numeric className="text-muted">{index + 1}</TD>
-                      <TD className="max-w-xs">
+                      <TD numeric hideOnMobile className="text-muted">{index + 1}</TD>
+                      <TD primary label="Question" className="max-w-xs">
                         <span className="line-clamp-2 text-foreground">{item.question_text}</span>
                       </TD>
-                      <TD className="text-muted">
+                      <TD label="Type" className="text-muted">
                         {item.question_type === 'multiple_choice'
                           ? 'MCQ'
                           : item.question_type === 'true_false'
                             ? 'TF'
                             : 'ID'}
                       </TD>
-                      <TD className="text-muted">{DIFFICULTY_LABELS[item.difficulty as keyof typeof DIFFICULTY_LABELS]}</TD>
-                      <TD className="text-muted">{BLOOM_LABELS[item.bloom_level as keyof typeof BLOOM_LABELS]}</TD>
-                      <TD numeric className="text-foreground">{item.total_responses}</TD>
-                      <TD numeric className="text-foreground">{item.correct_count}</TD>
-                      <TD numeric className="text-foreground">{item.difficulty_index.toFixed(2)}</TD>
-                      <TD numeric className="text-foreground">
+                      <TD label="Difficulty" className="text-muted">{DIFFICULTY_LABELS[item.difficulty as keyof typeof DIFFICULTY_LABELS]}</TD>
+                      <TD label="Bloom" className="text-muted">{BLOOM_LABELS[item.bloom_level as keyof typeof BLOOM_LABELS]}</TD>
+                      <TD numeric label="Responses" className="text-foreground">{item.total_responses}</TD>
+                      <TD numeric label="Correct" className="text-foreground">{item.correct_count}</TD>
+                      <TD numeric label="P (Difficulty)" className="text-foreground">{item.difficulty_index.toFixed(2)}</TD>
+                      <TD numeric label="D (Discrimination)" className="text-foreground">
                         {item.discrimination_index === null
                           ? '—'
                           : item.discrimination_index.toFixed(2)}
                       </TD>
-                      <TD>
+                      <TD label="D rating">
                         {ratingBadge(item.rating)}
                       </TD>
-                      <TD className="max-w-[14rem]">
+                      <TD label="Flags" className="max-w-[14rem]">
                         {flagBadges(item.flags)}
                       </TD>
-                      <TD>
+                      <TD label="Distractors">
                         {item.distractor_analysis.length > 0 ? (
                           <Button
                             variant="ghost"
@@ -428,11 +428,11 @@ export default function AnalyticsClient({ deploymentId }: AnalyticsClientProps):
                       </TR>
                       {expandedId === item.question_id && (
                         <TR>
-                          <TD colSpan={11} className="bg-[var(--color-surface-hover)] p-4">
+                          <TD colSpan={11} className="bg-[var(--color-surface-hover)] p-4 td-detail">
                           <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">
                             Choice distribution
                           </p>
-                          <Table>
+                          <Table cards caption="Choice distribution">
                             <THead>
                               <TR>
                                 <TH>Choice</TH>
@@ -445,13 +445,13 @@ export default function AnalyticsClient({ deploymentId }: AnalyticsClientProps):
                             <TBody>
                               {item.distractor_analysis.map(choice => (
                                 <TR key={choice.choice_id}>
-                                  <TD className="text-muted">{choice.choice_key}</TD>
-                                  <TD className="text-foreground">{choice.choice_text}</TD>
-                                  <TD numeric className="text-foreground">{choice.selection_count}</TD>
-                                  <TD numeric className="text-foreground">
+                                  <TD primary label="Choice" className="text-muted">{choice.choice_key}</TD>
+                                  <TD label="Text" className="text-foreground">{choice.choice_text}</TD>
+                                  <TD numeric label="Selections" className="text-foreground">{choice.selection_count}</TD>
+                                  <TD numeric label="%" className="text-foreground">
                                     {choice.selection_percentage.toFixed(1)}%
                                   </TD>
-                                  <TD>
+                                  <TD label="Correct">
                                     {choice.is_correct ? (
                                       <Badge variant="success">Correct</Badge>
                                     ) : (

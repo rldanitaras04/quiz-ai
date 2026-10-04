@@ -84,7 +84,7 @@ export default function StudentSubjectWorkspaceClient({
               Available Assessments
             </h2>
           </CardHeader>
-          <Table caption="Assessments deployed for this subject">
+          <Table cards caption="Assessments deployed for this subject">
             <THead>
               <TR>
                 <TH>Assessment</TH>
@@ -109,7 +109,7 @@ export default function StudentSubjectWorkspaceClient({
 
                 return (
                   <TR key={d.id as string} className="hover:bg-[var(--color-surface-hover)] align-top">
-                    <TD className="font-medium">
+                    <TD primary label="Assessment" className="font-medium">
                       <Link
                         href={href}
                         className="text-[var(--color-foreground)] hover:text-[var(--color-primary)] hover:underline"
@@ -117,16 +117,16 @@ export default function StudentSubjectWorkspaceClient({
                         {(assessment?.title as string) ?? 'Untitled Assessment'}
                       </Link>
                     </TD>
-                    <TD numeric className="text-[var(--color-foreground)]">
+                    <TD numeric label="Items" className="text-[var(--color-foreground)]">
                       {(version?.total_items as number) ?? '—'}
                     </TD>
-                    <TD numeric className="text-[var(--color-foreground)]">
+                    <TD numeric label="Points" className="text-[var(--color-foreground)]">
                       {(version?.total_points as number) ?? '—'}
                     </TD>
-                    <TD numeric className="text-[var(--color-muted)]">
+                    <TD numeric label="Duration" className="text-[var(--color-muted)]">
                       {d.duration_minutes as number} min
                     </TD>
-                    <TD className="text-xs text-[var(--color-muted)]">
+                    <TD label="Window" className="text-xs text-[var(--color-muted)]">
                       {opensAt.toLocaleDateString()}{' '}
                       {opensAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                       <span className="block">
@@ -134,10 +134,10 @@ export default function StudentSubjectWorkspaceClient({
                         {closesAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                       </span>
                     </TD>
-                    <TD>
+                    <TD label="Status">
                       <Badge variant={status.variant}>{status.label}</Badge>
                     </TD>
-                    <TD className="text-right">
+                    <TD label="Action" className="text-right">
                       {isAvailable || canResume ? (
                         <Link
                           href={href}
@@ -173,7 +173,7 @@ export default function StudentSubjectWorkspaceClient({
               Released Results
             </h2>
           </CardHeader>
-          <Table caption="Released exam results for this subject">
+          <Table cards caption="Released exam results for this subject">
             <THead>
               <TR>
                 <TH>Assessment</TH>
@@ -197,7 +197,7 @@ export default function StudentSubjectWorkspaceClient({
 
                 return (
                   <TR key={r.id as string} className="hover:bg-[var(--color-surface-hover)]">
-                    <TD className="font-medium">
+                    <TD primary label="Assessment" className="font-medium">
                       <Link
                         href={href}
                         className="text-[var(--color-foreground)] hover:text-[var(--color-primary)] hover:underline"
@@ -205,22 +205,22 @@ export default function StudentSubjectWorkspaceClient({
                         {(assessment?.title as string) ?? 'Untitled Assessment'}
                       </Link>
                     </TD>
-                    <TD numeric className="text-[var(--color-foreground)]">
+                    <TD numeric label="Score" className="text-[var(--color-foreground)]">
                       {r.raw_score as number}/{r.possible_score as number}
                     </TD>
-                    <TD>
+                    <TD label="Percentage">
                       <div className="flex justify-end">
                         <Badge variant={percentage >= 75 ? 'success' : percentage >= 50 ? 'warning' : 'danger'}>
                           {percentage}%
                         </Badge>
                       </div>
                     </TD>
-                    <TD className="text-xs text-[var(--color-muted)]">
+                    <TD label="Released" className="text-xs text-[var(--color-muted)]">
                       {r.released_at
                         ? new Date(r.released_at as string).toLocaleDateString()
                         : new Date(r.created_at as string).toLocaleDateString()}
                     </TD>
-                    <TD className="text-right">
+                    <TD label="Detail" className="text-right">
                       <Link
                         href={href}
                         className="text-sm font-medium text-[var(--color-primary)] hover:underline"

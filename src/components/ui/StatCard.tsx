@@ -25,7 +25,7 @@ function Sparkline({ data, color }: { data: number[]; color: string }): JSX.Elem
   return (
     <svg
       viewBox={`0 0 ${width} ${height}`}
-      className="h-[30px] w-[88px] shrink-0"
+      className="hidden h-[30px] w-[88px] shrink-0 sm:block"
       aria-hidden="true"
     >
       <polyline

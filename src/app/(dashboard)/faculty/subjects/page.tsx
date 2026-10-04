@@ -145,7 +145,7 @@ export default async function FacultySubjectsPage() {
                   </Badge>
                 </div>
 
-                <Table caption={`Sections for ${subject.code}`}>
+                <Table cards caption={`Sections for ${subject.code}`}>
                   <THead>
                     <TR>
                       <TH>Section</TH>
@@ -159,24 +159,24 @@ export default async function FacultySubjectsPage() {
                   <TBody>
                     {subject.offerings.map((offering) => (
                       <TR key={offering.offeringId}>
-                        <TD className="font-medium text-[var(--color-foreground)]">
+                        <TD primary label="Section" className="font-medium text-[var(--color-foreground)]">
                           {offering.sectionName}
                         </TD>
-                        <TD className="text-[var(--color-muted)]">
+                        <TD label="Program / Year" className="text-[var(--color-muted)]">
                           {offering.programCode} · {offering.yearLevel}
                         </TD>
-                        <TD className="text-[var(--color-muted)]">
+                        <TD label="Term" className="text-[var(--color-muted)]">
                           {offering.term}
                         </TD>
-                        <TD numeric className="text-[var(--color-foreground)]">
+                        <TD numeric label="Enrolled" className="text-[var(--color-foreground)]">
                           {offering.enrolled}
                         </TD>
-                        <TD>
+                        <TD label="Status">
                           <Badge variant={offering.status === 'active' ? 'success' : 'default'}>
                             {offering.status}
                           </Badge>
                         </TD>
-                        <TD className="whitespace-nowrap text-right">
+                        <TD label="Actions" className="whitespace-nowrap text-right">
                           <div className="flex items-center justify-end gap-3">
                             <Link
                               href={`/faculty/subjects/${offering.offeringId}/students`}

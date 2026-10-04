@@ -125,7 +125,7 @@ export default function TOSBuilder({
 
           {/* TOS Matrix */}
           <div className="overflow-x-auto">
-            <Table>
+            <Table cards>
               <THead>
                 <TR>
                   <TH>Topic</TH>
@@ -138,21 +138,21 @@ export default function TOSBuilder({
               <TBody>
                 {rows.map((row, index) => (
                   <TR key={index}>
-                    <TD className="text-sm">{row.topic}</TD>
-                    <TD className="text-sm">
+                    <TD primary label="Topic" className="text-sm">{row.topic}</TD>
+                    <TD label="Type" className="text-sm">
                       {row.question_type === 'multiple_choice'
                         ? 'MCQ'
                         : row.question_type === 'true_false'
                           ? 'TF'
                           : 'ID'}
                     </TD>
-                    <TD className="text-sm">
+                    <TD label="Difficulty" className="text-sm">
                       {DIFFICULTY_LABELS[row.difficulty]}
                     </TD>
-                    <TD className="text-sm">
+                    <TD label="Bloom&apos;s Level" className="text-sm">
                       {BLOOM_LABELS[row.bloom_level]}
                     </TD>
-                    <TD numeric>
+                    <TD numeric label="Count">
                       <input
                         type="number"
                         min={0}

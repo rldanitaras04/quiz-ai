@@ -180,7 +180,7 @@ export default function AssessmentsTable({ rows, toolbar }: Props): JSX.Element 
         </div>
       </div>
 
-      <Table caption="Assessments">
+      <Table cards caption="Assessments">
         <THead>
           <TR>
             <TH>
@@ -213,7 +213,7 @@ export default function AssessmentsTable({ rows, toolbar }: Props): JSX.Element 
                 key={a.id}
                 className={`hover:bg-[var(--color-surface-hover)] ${isSelected ? 'bg-[var(--color-primary)]/5' : ''}`}
               >
-                <TD>
+                <TD label="Select">
                   <input
                     type="checkbox"
                     checked={isSelected}
@@ -222,7 +222,7 @@ export default function AssessmentsTable({ rows, toolbar }: Props): JSX.Element 
                     className="h-4 w-4 rounded border-[var(--color-border)] text-[var(--color-primary)]"
                   />
                 </TD>
-                <TD className="font-medium">
+                <TD primary label="Assessment" className="font-medium">
                   <Link
                     href={a.review_href}
                     className="text-[var(--color-foreground)] hover:text-[var(--color-primary)] hover:underline"
@@ -230,29 +230,29 @@ export default function AssessmentsTable({ rows, toolbar }: Props): JSX.Element 
                     {a.title}
                   </Link>
                 </TD>
-                <TD className="text-[var(--color-muted)]">
+                <TD label="Type" className="text-[var(--color-muted)]">
                   {formatTypes(a.question_types, a.assessment_type)}
                 </TD>
-                <TD numeric className="text-[var(--color-foreground)]">
+                <TD numeric label="Items" className="text-[var(--color-foreground)]">
                   {a.total_items ?? '—'}
                 </TD>
-                <TD numeric className="text-[var(--color-foreground)]">
+                <TD numeric label="Points" className="text-[var(--color-foreground)]">
                   {a.total_points ?? '—'}
                 </TD>
                 {a.section_label !== undefined && (
-                  <TD>
+                  <TD label="Section">
                     <Badge variant="info">{a.section_label}</Badge>
                   </TD>
                 )}
-                <TD className="text-xs text-[var(--color-muted)]">
+                <TD label="Created" className="text-xs text-[var(--color-muted)]">
                   {new Date(a.created_at).toLocaleDateString()}
                 </TD>
-                <TD>
+                <TD label="Status">
                   <Badge variant={statusVariant(a.status)}>
                     {ASSESSMENT_STATUS_LABELS[a.status as keyof typeof ASSESSMENT_STATUS_LABELS] ?? a.status}
                   </Badge>
                 </TD>
-                <TD className="whitespace-nowrap text-right">
+                <TD label="Actions" className="whitespace-nowrap text-right">
                   <Link
                     href={a.review_href}
                     className="text-sm font-medium text-[var(--color-primary)] hover:underline"

@@ -545,7 +545,7 @@ export default function AssessmentDetailClient({
               Version history ({detail.versions.length})
             </h2>
           </CardHeader>
-          <Table caption="All versions of this assessment">
+          <Table cards caption="All versions of this assessment">
             <THead>
               <TR>
                 <TH align="right">Version</TH>
@@ -565,24 +565,24 @@ export default function AssessmentDetailClient({
                     key={v.id}
                     className={v.id === detail.version?.id ? 'bg-[var(--color-primary-light)]' : ''}
                   >
-                    <TD numeric className="font-medium text-[var(--color-foreground)]">
+                    <TD primary label="Version" numeric className="font-medium text-[var(--color-foreground)]">
                       v{v.versionNumber}
                       {v.id === detail.version?.id && (
                         <span className="ml-1.5 text-xs text-[var(--color-primary)]">(current)</span>
                       )}
                     </TD>
-                    <TD>
+                    <TD label="Status">
                       <Badge variant={v.status === 'published' ? 'success' : v.status === 'approved' ? 'info' : 'warning'}>
                         {ASSESSMENT_STATUS_LABELS[v.status as keyof typeof ASSESSMENT_STATUS_LABELS] ?? v.status}
                       </Badge>
                     </TD>
-                    <TD numeric className="text-[var(--color-foreground)]">
+                    <TD numeric label="Items" className="text-[var(--color-foreground)]">
                       {v.totalItems}
                     </TD>
-                    <TD numeric className="text-[var(--color-foreground)]">
+                    <TD numeric label="Points" className="text-[var(--color-foreground)]">
                       {v.totalPoints}
                     </TD>
-                    <TD align="right" className="whitespace-nowrap">
+                    <TD label="Actions" align="right" className="whitespace-nowrap">
                       {canDiscard ? (
                         <button
                           type="button"
@@ -617,7 +617,7 @@ export default function AssessmentDetailClient({
               Deployments ({detail.deployments.length})
             </h2>
           </CardHeader>
-          <Table caption="Deployments for this assessment">
+          <Table cards caption="Deployments for this assessment">
             <THead>
               <TR>
                 <TH>Status</TH>
@@ -631,25 +631,25 @@ export default function AssessmentDetailClient({
             <TBody>
               {detail.deployments.map((d) => (
                 <TR key={d.id}>
-                  <TD>
+                  <TD label="Status">
                     <Badge variant={d.status === 'active' ? 'success' : d.status === 'scheduled' ? 'info' : 'default'}>
                       {d.status}
                     </Badge>
                   </TD>
-                  <TD numeric className="text-[var(--color-foreground)]">
+                  <TD primary label="Version" numeric className="text-[var(--color-foreground)]">
                     v{d.version_number}
                   </TD>
-                  <TD numeric className="text-[var(--color-foreground)]">
+                  <TD numeric label="Items" className="text-[var(--color-foreground)]">
                     {d.total_items}
                   </TD>
-                  <TD numeric className="text-[var(--color-muted)]">
+                  <TD numeric label="Duration" className="text-[var(--color-muted)]">
                     {d.duration_minutes} min
                   </TD>
-                  <TD className="text-xs text-[var(--color-muted)]">
+                  <TD label="Window" className="text-xs text-[var(--color-muted)]">
                     {new Date(d.opens_at).toLocaleString()}
                     <span className="block">→ {new Date(d.closes_at).toLocaleString()}</span>
                   </TD>
-                  <TD numeric className="text-[var(--color-muted)]">
+                  <TD numeric label="Attempts" className="text-[var(--color-muted)]">
                     {d.attempt_limit}
                   </TD>
                 </TR>
@@ -703,7 +703,7 @@ export default function AssessmentDetailClient({
         </CardHeader>
 
         {detail.questions.length > 0 ? (
-          <Table caption="Questions in this assessment">
+          <Table cards caption="Questions in this assessment">
             <THead>
               <TR>
                 <TH align="right">#</TH>
@@ -724,10 +724,10 @@ export default function AssessmentDetailClient({
                 const qTopicId = (question as any).topicId as string | null;
                 return (
                   <TR key={question.id} className="align-top">
-                    <TD numeric className="text-[var(--color-muted)]">
+                    <TD numeric hideOnMobile className="text-[var(--color-muted)]">
                       {question.position ?? index + 1}
                     </TD>
-                    <TD className="max-w-md">
+                    <TD primary label="Question" className="max-w-md">
                       <span className="line-clamp-2 text-[var(--color-foreground)]">
                         {question.question_text}
                       </span>
@@ -742,33 +742,33 @@ export default function AssessmentDetailClient({
                         {(question as any).imageUrl && <Badge variant="info">Image</Badge>}
                       </div>
                     </TD>
-                    <TD className="text-[var(--color-muted)] whitespace-nowrap">
+                    <TD label="Topic" className="text-[var(--color-muted)] whitespace-nowrap">
                       {qTopic ? (
                         <Badge variant="default" className="max-w-[120px] truncate">{qTopic}</Badge>
                       ) : (
                         <span className="text-xs text-[var(--color-muted-light)]">—</span>
                       )}
                     </TD>
-                    <TD className="text-[var(--color-muted)]">
+                    <TD label="Type" className="text-[var(--color-muted)]">
                       {QUESTION_TYPE_LABELS[question.question_type]}
                     </TD>
-                    <TD className="text-[var(--color-muted)]">
+                    <TD label="Difficulty" className="text-[var(--color-muted)]">
                       {DIFFICULTY_LABELS[question.difficulty]}
                     </TD>
-                    <TD className="text-[var(--color-muted)]">
+                    <TD label="Bloom" className="text-[var(--color-muted)]">
                       {BLOOM_LABELS[question.bloom_level]}
                     </TD>
-                    <TD className="max-w-xs">
+                    <TD label="Answer key" className="max-w-xs">
                       {answer ? (
                         <span className="line-clamp-2 text-[var(--color-foreground)]">{answer}</span>
                       ) : (
                         <Badge variant="danger">Missing</Badge>
                       )}
                     </TD>
-                    <TD numeric className="text-[var(--color-foreground)]">
+                    <TD numeric label="Points" className="text-[var(--color-foreground)]">
                       {question.points}
                     </TD>
-                    <TD className="whitespace-nowrap text-right">
+                    <TD label="Actions" className="whitespace-nowrap text-right">
                       {detail.questionsLocked ? (
                         <span className="text-sm text-[var(--color-muted)]">—</span>
                       ) : (

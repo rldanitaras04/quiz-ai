@@ -188,7 +188,7 @@ export default async function ExamResultsPage({ params }: Props) {
                 </p>
               </CardHeader>
               <CardContent className="p-0">
-                <Table caption="Your answers, item by item">
+                <Table cards caption="Your answers, item by item">
                   <THead>
                     <TR>
                       <TH align="right">#</TH>
@@ -226,10 +226,10 @@ export default async function ExamResultsPage({ params }: Props) {
 
                       return (
                         <TR key={r.questionId} className={`align-top ${rowTint}`.trim()}>
-                          <TD numeric className="text-[var(--color-muted)]">
+                          <TD numeric label="Item" className="text-[var(--color-muted)]">
                             {r.position ?? i + 1}
                           </TD>
-                          <TD className="text-[var(--color-foreground)]">
+                          <TD primary label="Question" className="text-[var(--color-foreground)]">
                             <span className="whitespace-pre-wrap">{r.questionText}</span>
                             {r.imageUrl && (
                               <img
@@ -241,6 +241,7 @@ export default async function ExamResultsPage({ params }: Props) {
                             )}
                           </TD>
                           <TD
+                            label="Your answer"
                             className={
                               isCorrect
                                 ? 'font-medium text-[var(--color-success)]'
@@ -252,12 +253,12 @@ export default async function ExamResultsPage({ params }: Props) {
                             {givenAnswer || <span className="text-[var(--color-muted)]">No answer</span>}
                           </TD>
                           {showCorrectAnswers && (
-                            <TD className="text-[var(--color-muted)]">
+                            <TD label="Correct answer" className="text-[var(--color-muted)]">
                               {correctAnswer ?? '—'}
                             </TD>
                           )}
                           {showItemCorrectness && (
-                            <TD>
+                            <TD label="Result">
                               {!scored ? (
                                 <Badge variant="default">—</Badge>
                               ) : (
@@ -267,7 +268,7 @@ export default async function ExamResultsPage({ params }: Props) {
                               )}
                             </TD>
                           )}
-                          <TD numeric className="font-medium text-[var(--color-foreground)]">
+                          <TD numeric label="Points" className="font-medium text-[var(--color-foreground)]">
                             {showItemCorrectness && scored
                               ? `${r.earnedPoints ?? 0}/${r.points}`
                               : r.points}

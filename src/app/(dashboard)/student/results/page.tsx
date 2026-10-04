@@ -149,7 +149,7 @@ export default async function StudentResultsPage() {
               resultCount={group.rows.length}
               defaultOpen
             >
-              <Table caption={`Released results for ${group.label}`}>
+              <Table cards caption={`Released results for ${group.label}`}>
                 <THead>
                   <TR>
                     <TH>Assessment</TH>
@@ -168,7 +168,7 @@ export default async function StudentResultsPage() {
 
                     return (
                       <TR key={r.id} className="hover:bg-[var(--color-surface-hover)]">
-                        <TD>
+                        <TD primary label="Assessment">
                           <Link
                             href={href}
                             className="font-medium text-[var(--color-primary)] hover:underline"
@@ -181,11 +181,11 @@ export default async function StudentResultsPage() {
                             </span>
                           ) : null}
                         </TD>
-                        <TD className="text-[var(--color-muted)]">{r.assessmentType}</TD>
-                        <TD numeric className="text-[var(--color-foreground)]">
+                        <TD label="Type" className="text-[var(--color-muted)]">{r.assessmentType}</TD>
+                        <TD numeric label="Score" className="text-[var(--color-foreground)]">
                           {r.rawScore}/{r.possibleScore}
                         </TD>
-                        <TD>
+                        <TD label="Percentage">
                           <div className="flex justify-end">
                             <Badge
                               variant={
@@ -200,10 +200,10 @@ export default async function StudentResultsPage() {
                             </Badge>
                           </div>
                         </TD>
-                        <TD className="text-xs text-[var(--color-muted)]">
+                        <TD label="Released" className="text-xs text-[var(--color-muted)]">
                           {r.releasedLabel}
                         </TD>
-                        <TD className="text-right">
+                        <TD label="Detail" className="text-right">
                           <Link
                             href={href}
                             className="text-sm font-medium text-[var(--color-primary)] hover:underline"

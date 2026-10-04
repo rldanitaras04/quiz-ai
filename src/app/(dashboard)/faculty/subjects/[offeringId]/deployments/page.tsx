@@ -131,7 +131,7 @@ export default async function DeploymentsPage({ params }: Props) {
 
       {list.length > 0 ? (
         <Card>
-          <Table caption="Assessment deployments for this offering">
+          <Table cards caption="Assessment deployments for this offering">
             <THead>
               <TR>
                 <TH>Assessment</TH>
@@ -155,35 +155,35 @@ export default async function DeploymentsPage({ params }: Props) {
 
                 return (
                   <TR key={d.id} className="hover:bg-[var(--color-surface-hover)] align-top">
-                    <TD className="font-medium text-[var(--color-foreground)]">
+                    <TD primary label="Assessment" className="font-medium text-[var(--color-foreground)]">
                       {assessment?.title ?? 'Untitled Assessment'}
                     </TD>
-                    <TD className="text-[var(--color-muted)] tabular-nums">
+                    <TD label="Version" className="text-[var(--color-muted)] tabular-nums">
                       {version ? `v${version.version_number}` : '—'}
                     </TD>
-                    <TD numeric className="text-[var(--color-foreground)]">
+                    <TD numeric label="Items" className="text-[var(--color-foreground)]">
                       {version?.total_items ?? '—'}
                     </TD>
-                    <TD numeric className="text-[var(--color-foreground)]">
+                    <TD numeric label="Points" className="text-[var(--color-foreground)]">
                       {version?.total_points ?? '—'}
                     </TD>
-                    <TD numeric className="text-[var(--color-muted)]">
+                    <TD numeric label="Duration" className="text-[var(--color-muted)]">
                       {d.duration_minutes} min
                     </TD>
-                    <TD numeric className="text-[var(--color-muted)]">
+                    <TD numeric label="Attempts" className="text-[var(--color-muted)]">
                       {d.attempt_limit}
                     </TD>
-                    <TD numeric className="text-[var(--color-foreground)]">
+                    <TD numeric label="Takers" className="text-[var(--color-foreground)]">
                       {d.takers}
                     </TD>
-                    <TD className="text-xs text-[var(--color-muted)]">
+                    <TD label="Window" className="text-xs text-[var(--color-muted)]">
                       {opensAt.toLocaleString()}
                       <span className="block">→ {closesAt.toLocaleString()}</span>
                     </TD>
-                    <TD>
+                    <TD label="Status">
                       <Badge variant={deploymentVariant(d.status)}>{d.status}</Badge>
                     </TD>
-                    <TD>
+                    <TD label="Actions">
                       <div className="flex items-center justify-end gap-1">
                         {d.status === 'draft' && (
                           <OpenDeploymentButton deploymentId={d.id} />

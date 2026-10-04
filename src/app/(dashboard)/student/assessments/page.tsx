@@ -79,7 +79,7 @@ export default async function StudentAssessmentsPage() {
 
       {deployments && deployments.length > 0 ? (
         <Card>
-          <Table caption="Assessments available from your enrolled subjects">
+          <Table cards caption="Assessments available from your enrolled subjects">
             <THead>
               <TR>
                 <TH>Assessment</TH>
@@ -105,7 +105,7 @@ export default async function StudentAssessmentsPage() {
 
                 return (
                   <TR key={d.id as string} className="hover:bg-[var(--color-surface-hover)] align-top">
-                    <TD>
+                    <TD primary label="Assessment">
                       <Link
                         href={href}
                         className="font-medium text-[var(--color-primary)] hover:underline"
@@ -113,21 +113,21 @@ export default async function StudentAssessmentsPage() {
                         {(assessment?.title as string) ?? 'Untitled Assessment'}
                       </Link>
                     </TD>
-                    <TD className="text-[var(--color-muted)]">
+                    <TD label="Type" className="text-[var(--color-muted)]">
                       {assessment?.assessment_type === 'multiple_choice'
                         ? 'Multiple Choice'
                         : 'Identification'}
                     </TD>
-                    <TD numeric className="text-[var(--color-foreground)]">
+                    <TD numeric label="Items" className="text-[var(--color-foreground)]">
                       {(version?.total_items as number) ?? '—'}
                     </TD>
-                    <TD numeric className="text-[var(--color-foreground)]">
+                    <TD numeric label="Points" className="text-[var(--color-foreground)]">
                       {(version?.total_points as number) ?? '—'}
                     </TD>
-                    <TD numeric className="text-[var(--color-muted)]">
+                    <TD numeric label="Duration" className="text-[var(--color-muted)]">
                       {d.duration_minutes as number} min
                     </TD>
-                    <TD className="text-xs text-[var(--color-muted)]">
+                    <TD label="Window" className="text-xs text-[var(--color-muted)]">
                       Opens {opensAt.toLocaleDateString()}{' '}
                       {opensAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                       <span className="block">
@@ -135,10 +135,10 @@ export default async function StudentAssessmentsPage() {
                         {closesAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                       </span>
                     </TD>
-                    <TD>
+                    <TD label="Status">
                       <Badge variant={status.variant}>{status.label}</Badge>
                     </TD>
-                    <TD className="text-right">
+                    <TD label="Action" className="text-right">
                       {isAvailable || canResume ? (
                         <Link
                           href={href}

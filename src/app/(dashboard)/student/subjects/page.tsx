@@ -44,7 +44,7 @@ export default async function StudentSubjectsPage() {
 
       {enrollments && enrollments.length > 0 ? (
         <Card>
-          <Table caption="Subject offerings you are enrolled in">
+          <Table cards caption="Subject offerings you are enrolled in">
             <THead>
               <TR>
                 <TH>Code</TH>
@@ -80,7 +80,7 @@ export default async function StudentSubjectsPage() {
 
                 return (
                   <TR key={e.id as string} className="hover:bg-[var(--color-surface-hover)]">
-                    <TD className="font-mono text-xs text-[var(--color-muted)]">
+                    <TD primary label="Code" className="font-mono text-xs text-[var(--color-muted)]">
                       <Link
                         href={`/student/subjects/${offering?.id as string}`}
                         className="hover:text-[var(--color-primary)] hover:underline"
@@ -88,7 +88,7 @@ export default async function StudentSubjectsPage() {
                         {(subject?.code as string) ?? '—'}
                       </Link>
                     </TD>
-                    <TD className="font-medium text-[var(--color-foreground)]">
+                    <TD label="Subject" className="font-medium text-[var(--color-foreground)]">
                       <Link
                         href={`/student/subjects/${offering?.id as string}`}
                         className="text-[var(--color-foreground)] hover:text-[var(--color-primary)] hover:underline"
@@ -96,21 +96,21 @@ export default async function StudentSubjectsPage() {
                         {(subject?.title as string) ?? '—'}
                       </Link>
                     </TD>
-                    <TD className="text-[var(--color-muted)]">
+                    <TD label="Section" className="text-[var(--color-muted)]">
                       {(section?.name as string) ?? '—'}
                     </TD>
-                    <TD className="text-[var(--color-muted)]">
+                    <TD label="Program / Year" className="text-[var(--color-muted)]">
                       {(program?.code as string) ?? '—'}
                       {yearLevel?.name ? ` · ${yearLevel.name as string}` : ''}
                     </TD>
-                    <TD className="text-[var(--color-muted)]">
+                    <TD label="Term" className="text-[var(--color-muted)]">
                       {(semester?.name as string) ?? '—'}
                       {academicYear?.name ? ` (${academicYear.name as string})` : ''}
                     </TD>
-                    <TD className="text-[var(--color-muted)]">
+                    <TD label="Instructor" className="text-[var(--color-muted)]">
                       {(faculty?.full_name as string) ?? 'Unassigned'}
                     </TD>
-                    <TD>
+                    <TD label="Status">
                       <Badge variant={offering?.status === 'active' ? 'success' : 'default'}>
                         {(offering?.status as string) ?? 'unknown'}
                       </Badge>

@@ -152,7 +152,7 @@ export default function SourcesPage({ params }: Props) {
 
       {sources && sources.length > 0 ? (
         <Card>
-          <Table caption="Source materials uploaded for this offering">
+          <Table cards caption="Source materials uploaded for this offering">
             <THead>
               <TR>
                 <TH>Title</TH>
@@ -166,7 +166,7 @@ export default function SourcesPage({ params }: Props) {
             <TBody>
               {(sources as unknown as SourceMaterialRow[]).map((s) => (
                 <TR key={s.id} className="hover:bg-[var(--color-surface-hover)]">
-                  <TD>
+                  <TD primary label="Title">
                     <span className="flex items-center gap-2">
                       <span className="flex-shrink-0" aria-hidden="true">
                         <TypeIcon sourceType={s.source_type} />
@@ -176,21 +176,21 @@ export default function SourcesPage({ params }: Props) {
                       </span>
                     </span>
                   </TD>
-                  <TD className="text-[var(--color-muted)]">
+                  <TD label="File" className="text-[var(--color-muted)]">
                     {s.original_filename || s.source_type}
                   </TD>
-                  <TD numeric className="text-[var(--color-muted)]">
+                  <TD numeric label="Size" className="text-[var(--color-muted)]">
                     {formatFileSize(s.file_size)}
                   </TD>
-                  <TD className="text-xs text-[var(--color-muted)]">
+                  <TD label="Uploaded" className="text-xs text-[var(--color-muted)]">
                     {new Date(s.created_at).toLocaleDateString()}
                   </TD>
-                  <TD>
+                  <TD label="Processing">
                     <Badge variant={statusVariant(s.processing_status)}>
                       {s.processing_status}
                     </Badge>
                   </TD>
-                  <TD>
+                  <TD label="Actions">
                     <div className="flex justify-end">
                       <DeleteSourceButton
                         sourceMaterialId={s.id}

@@ -181,7 +181,7 @@ export default function SecuritySummaryCard({ deploymentId }: { deploymentId: st
           />
         ) : (
           <div className="overflow-x-auto">
-            <Table>
+            <Table cards caption="Security summary by student attempt">
               <THead>
                 <TR>
                   <TH>Student</TH>
@@ -202,39 +202,39 @@ export default function SecuritySummaryCard({ deploymentId }: { deploymentId: st
                   };
                   return (
                     <TR key={row.attemptId}>
-                      <TD className="text-foreground">
+                      <TD primary label="Student" className="text-foreground">
                         <div className="font-medium">{row.studentName}</div>
                         {row.studentNumber && (
                           <div className="text-xs text-muted">{row.studentNumber}</div>
                         )}
                       </TD>
-                      <TD>
+                      <TD label="Status">
                         <Badge variant={badge.variant}>{badge.label}</Badge>
                       </TD>
-                      <TD numeric className="text-foreground">
+                      <TD numeric label="Sessions" className="text-foreground">
                         {row.sessionCount}
                       </TD>
-                      <TD numeric className="text-foreground">
+                      <TD numeric label="Transfers" className="text-foreground">
                         {row.sessionTransfers}
                       </TD>
-                      <TD numeric className="text-muted">
+                      <TD numeric label="Info" className="text-muted">
                         {row.counts.info}
                       </TD>
-                      <TD numeric>
+                      <TD numeric label="Attention">
                         {row.counts.warning > 0 ? (
                           <Badge variant="warning">{row.counts.warning}</Badge>
                         ) : (
                           <span className="text-muted">0</span>
                         )}
                       </TD>
-                      <TD numeric>
+                      <TD numeric label="Critical">
                         {row.counts.critical > 0 ? (
                           <Badge variant="danger">{row.counts.critical}</Badge>
                         ) : (
                           <span className="text-muted">0</span>
                         )}
                       </TD>
-                      <TD>
+                      <TD label="Recorded events">
                         {row.notableEvents.length === 0 ? (
                           <span className="text-muted">—</span>
                         ) : (

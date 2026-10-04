@@ -148,7 +148,7 @@ export default function ExceptionsClient({ deploymentId }: ExceptionsClientProps
             description="No exceptions have been granted for this deployment."
           />
         ) : (
-          <Table>
+          <Table cards caption="Student exceptions for this deployment">
             <THead>
               <TR>
                 <TH>Student</TH>
@@ -162,18 +162,18 @@ export default function ExceptionsClient({ deploymentId }: ExceptionsClientProps
             <TBody>
               {exceptions.map((ex) => (
                 <TR key={ex.id}>
-                  <TD>
+                  <TD primary label="Student">
                     <div>
                       <div className="font-medium text-foreground">{ex.student_name}</div>
                       <div className="text-xs text-muted">{ex.student_email}</div>
                     </div>
                   </TD>
-                  <TD>
+                  <TD label="Type">
                     <Badge variant={badgeVariant(ex.exception_type)}>
                       {EXCEPTION_TYPE_LABELS[ex.exception_type] ?? ex.exception_type}
                     </Badge>
                   </TD>
-                  <TD>
+                  <TD label="Details">
                     <div className="text-sm">
                       {ex.exception_type === 'extended_time' && ex.additional_minutes && (
                         <span>+{ex.additional_minutes} minutes</span>
@@ -189,13 +189,13 @@ export default function ExceptionsClient({ deploymentId }: ExceptionsClientProps
                       )}
                     </div>
                   </TD>
-                  <TD>
+                  <TD label="Reason">
                     <div className="text-sm text-muted max-w-xs truncate">{ex.reason}</div>
                   </TD>
-                  <TD>
+                  <TD label="Authorized By">
                     <div className="text-sm">{ex.authorizer_name}</div>
                   </TD>
-                  <TD>
+                  <TD label="Actions">
                     <Button
                       variant="ghost"
                       size="sm"

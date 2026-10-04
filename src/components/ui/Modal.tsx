@@ -72,7 +72,7 @@ export default function Modal({
         <div className="px-6 py-4 overflow-y-auto">{children}</div>
 
         {actions && (
-          <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-[var(--color-border)]">
+          <div className="flex flex-wrap items-center justify-end gap-3 px-6 py-4 border-t border-[var(--color-border)] [&>*]:shrink-0">
             {actions}
           </div>
         )}

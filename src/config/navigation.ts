@@ -456,7 +456,10 @@ export function hasBottomNavigation(role: UserRole): boolean {
 // Full-screen routes (navigation chrome is suppressed here)
 // ============================================================================
 
-const SECURE_EXAM_ROUTE = /^\/student\/assessments\/[^/]+\/exam(\/|$)/;
+// The secure exam ATTEMPT screen only. Its `/results` sub-route is a normal
+// dashboard page — it keeps the top bar and bottom navigation (the student is
+// done taking the exam by then).
+const SECURE_EXAM_ROUTE = /^\/student\/assessments\/[^/]+\/exam\/[^/]+\/?$/;
 
 /**
  * Routes that must render without any application chrome: no sidebar, no top

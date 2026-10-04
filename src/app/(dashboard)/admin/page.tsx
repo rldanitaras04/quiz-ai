@@ -425,7 +425,7 @@ export default async function AdminDashboardPage(): Promise<JSX.Element> {
                     <p className="text-lg font-bold text-[var(--color-foreground)]">
                       {item.value === null ? '—' : item.value.toLocaleString()}
                     </p>
-                    <p className="truncate text-xs text-[var(--color-muted)]">{item.label}</p>
+                    <p className="text-xs text-[var(--color-muted)]">{item.label}</p>
                   </div>
                 </div>
               );
