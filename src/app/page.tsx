@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server';
 import { getPrimaryRole } from '@/lib/constants';
 import Link from 'next/link';
 import { Brand, BrandIcon, BrandLogo } from '@/components/brand';
+import ThemeToggle from '@/components/ThemeToggle';
 import { SectionNav } from '@/components/landing/SectionNav';
 import type { JSX, ReactNode } from 'react';
 
@@ -53,6 +54,7 @@ export default async function Home(): Promise<JSX.Element> {
           </Link>
           <SectionNav />
           <div className="flex shrink-0 items-center gap-1.5 sm:gap-3">
+            <ThemeToggle className="p-2" />
             <Link
               href="/login"
               className="rounded-xl border border-[var(--color-primary)]/70 px-3 py-2 text-sm font-semibold text-[var(--color-primary)] transition-colors hover:bg-[var(--color-primary-light)] sm:px-4"

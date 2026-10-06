@@ -6,6 +6,7 @@ import PageHeader from '@/components/ui/PageHeader';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import Badge from '@/components/ui/Badge';
 import ProfileForm from './ProfileForm';
+import ChangePasswordForm from './ChangePasswordForm';
 import ProfileNotificationsList from './ProfileNotificationsList';
 
 export const dynamic = 'force-dynamic';
@@ -104,6 +105,15 @@ export default async function ProfilePage() {
                 fullName={profile?.full_name ?? ''}
                 avatarPath={profile?.avatar_path ?? null}
               />
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <h2 className="text-lg font-semibold">Change Password</h2>
+            </CardHeader>
+            <CardContent>
+              <ChangePasswordForm />
             </CardContent>
           </Card>
         </div>

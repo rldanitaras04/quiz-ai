@@ -4,6 +4,9 @@ import { revalidatePath } from 'next/cache';
 import { requireAdminUser, type ActionResult } from '../actions';
 import { recordAuditLog } from '@/lib/audit';
 import { enrollStudents } from '@/lib/enrollment';
+import { createAdminClient } from '@/lib/supabase/admin';
+import { notifyUser } from '@/lib/notifications';
+import { LOGIN_PATH, RESET_PASSWORD_PATH, appOrigin } from '@/lib/constants';
 
 /**
  * User and role administration (spec §2.1: "manage users and role
@@ -21,9 +24,19 @@ import { enrollStudents } from '@/lib/enrollment';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-/** Matches `profiles_status_check`. */
+/** Matches `profiles_status_check`. Reads may surface any of these. */
 const USER_STATUSES = ['active', 'inactive', 'suspended', 'pending'] as const;
 export type UserStatus = (typeof USER_STATUSES)[number];
+
+/**
+ * The subset an administrator may WRITE: activate or suspend. Email
+ * confirmation verifies the address, so the admin's remaining lever is
+ * simply letting the person in or keeping them out — setUserStatus rejects
+ * anything else (e.g. pushing a user back to 'pending').
+ */
+const ADMIN_SETTABLE_STATUSES: readonly string[] = USER_STATUSES.filter(
+  (s) => s === 'active' || s === 'suspended'
+);
 
 /** Matches the role vocabulary used throughout the app. */
 const ASSIGNABLE_ROLES = ['super_admin', 'faculty', 'student'] as const;
@@ -52,10 +65,6 @@ function friendlyError(message: string | undefined, fallback: string): string {
     return 'One of the submitted values is not allowed.';
   }
   return fallback;
-}
-
-function isUserStatus(value: string): value is UserStatus {
-  return (USER_STATUSES as readonly string[]).includes(value);
 }
 
 function isAssignableRole(value: string): value is AssignableRole {
@@ -91,6 +100,39 @@ export interface AdminUserRow {
   studentNumber: string | null;
   verificationStatus: string | null;
   sectionId: string | null;
+  /**
+   * Whether the address is confirmed in auth.users — the "email verified"
+   * badge in the admin table. Null when the lookup failed or the user has
+   * no auth row, so the UI can show "unknown" instead of a wrong answer.
+   */
+  emailConfirmed: boolean | null;
+}
+
+/**
+ * auth.users.email_confirmed_at, which the session client cannot read, so
+ * it comes from the service-role Auth API. Page size 100, walked until a
+ * short page; a hard stop keeps a pathological response from looping.
+ * Returns null when nothing could be loaded (the badge then reads
+ * "unknown" rather than mislabelling every account as unconfirmed).
+ */
+async function loadEmailConfirmation(): Promise<Map<string, boolean> | null> {
+  try {
+    const admin = createAdminClient();
+    const confirmed = new Map<string, boolean>();
+
+    for (let page = 1; page <= 100; page += 1) {
+      const { data, error } = await admin.auth.admin.listUsers({ page, perPage: 100 });
+      if (error) return confirmed.size > 0 ? confirmed : null;
+
+      const users = data?.users ?? [];
+      for (const u of users) confirmed.set(u.id, Boolean(u.email_confirmed_at));
+      if (users.length < 100) break;
+    }
+
+    return confirmed;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -100,13 +142,14 @@ export interface AdminUserRow {
 export async function getAdminUsers(): Promise<AdminUserRow[]> {
   const { supabase } = await requireAdminUser();
 
-  const [profilesResult, rolesResult, studentsResult] = await Promise.all([
+  const [profilesResult, rolesResult, studentsResult, confirmedById] = await Promise.all([
     supabase
       .from('profiles')
       .select('id, email, full_name, status, created_at')
       .order('created_at', { ascending: false }),
     supabase.from('user_roles').select('user_id, role'),
     supabase.from('student_profiles').select('user_id, student_number, verification_status, section_id'),
+    loadEmailConfirmation(),
   ]);
 
   const rolesByUser = new Map<string, string[]>();
@@ -132,6 +175,7 @@ export async function getAdminUsers(): Promise<AdminUserRow[]> {
       studentNumber: student?.student_number ?? null,
       verificationStatus: student?.verification_status ?? null,
       sectionId: student?.section_id ?? null,
+      emailConfirmed: confirmedById ? (confirmedById.get(p.id) ?? null) : null,
     };
   });
 }
@@ -140,14 +184,81 @@ export async function getAdminUsers(): Promise<AdminUserRow[]> {
 // Account status
 // ---------------------------------------------------------------------------
 
+/**
+ * Tells a user their account has been unlocked, now that approval is the
+ * only thing standing between registration and using the app.
+ *
+ * Email goes through Supabase Auth SMTP as a magic link: GoTrue can only
+ * send its own templated emails, so the "your account was approved — sign
+ * in" copy lives in the project's Magic Link template (Authentication ->
+ * Email Templates), and clicking it signs the user straight in. The link is
+ * issued by the SERVICE-ROLE client, which uses the implicit flow (no PKCE
+ * code challenge), so it can be opened from the recipient's own browser —
+ * /login consumes the tokens it lands with. `emailRedirectTo` must be on
+ * the project's redirect allowlist.
+ *
+ * If dispatching fails, fall back to an in-app notification so the approval
+ * is still visible after they sign in. Never throws: the status change has
+ * already happened and must not be rolled back over a mail problem.
+ */
+async function dispatchApprovalNotice(userId: string, email: string): Promise<string> {
+  if (!email) return 'skipped';
+
+  try {
+    const admin = createAdminClient();
+
+    const { error } = await admin.auth.signInWithOtp({
+      email,
+      options: {
+        emailRedirectTo: `${appOrigin()}${LOGIN_PATH}`,
+        // Never create a mailbox that is not already a profile: this is a
+        // notification, not a signup path.
+        shouldCreateUser: false,
+      },
+    });
+
+    if (!error) return 'email';
+    console.error('Approval email not dispatched:', error.message);
+  } catch (err) {
+    console.error('Approval email not dispatched:', err instanceof Error ? err.message : err);
+  }
+
+  const notified = await notifyUser({
+    userId,
+    type: 'system',
+    title: 'Your account was approved',
+    body: 'An administrator approved your account. Sign in with your email address and password to start using the app.',
+    data: { account_approved: true },
+  });
+
+  return notified ? 'in_app' : 'failed';
+}
+
+/**
+ * Activate or suspend an account — the two status transitions an
+ * administrator has (email confirmation verifies the address; the admin's
+ * remaining job is simply to let the person in or keep them out).
+ */
 export async function setUserStatus(userId: string, status: string): Promise<ActionResult> {
   const { supabase, userId: actorId } = await requireAdminUser();
 
   if (!UUID_RE.test(text(userId))) return { error: 'Invalid user id.' };
-  if (!isUserStatus(status)) return { error: 'Invalid account status.' };
+  if (!ADMIN_SETTABLE_STATUSES.includes(status)) {
+    return { error: 'Administrators can only activate or suspend an account.' };
+  }
   if (userId === actorId && status !== 'active') {
     return { error: 'You cannot deactivate or suspend your own account.' };
   }
+
+  // Read first: the approval notice needs the PREVIOUS status (only a
+  // transition INTO 'active' notifies) and the address to send it to.
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('status, email')
+    .eq('id', userId)
+    .maybeSingle();
+
+  if (!profile) return { error: 'That user account no longer exists.' };
 
   const { data, error } = await supabase
     .from('profiles')
@@ -159,15 +270,77 @@ export async function setUserStatus(userId: string, status: string): Promise<Act
   if (error) return { error: friendlyError(error.message, 'Failed to update the account.') };
   if (!data) return { error: 'That user account no longer exists.' };
 
+  // Unlocking an account (pending/suspended/inactive -> active) emails the
+  // user a sign-in link. Best-effort: it runs AFTER the update, so a mail
+  // failure can only downgrade the notice, never fail the action.
+  const approvalNotice =
+    status === 'active' && profile.status !== 'active'
+      ? await dispatchApprovalNotice(userId, profile.email ?? '')
+      : 'skipped';
+
   await recordAuditLog({
     actorUserId: actorId,
     action: 'update',
     entityType: 'profile',
     entityId: userId,
-    metadata: { status },
+    metadata: { status, approval_notice: approvalNotice },
   });
 
   revalidateUsers();
+  return { success: true };
+}
+
+// ---------------------------------------------------------------------------
+// Password recovery
+// ---------------------------------------------------------------------------
+
+/**
+ * Email this account a password-reset link — the administrator's escape
+ * hatch for someone who cannot get in (wrong password, lost access to the
+ * original device, no self-service recovery working). Same rules as every
+ * other emailed link: issued by the service-role client so it uses the
+ * implicit flow and opens in the recipient's own browser, redirected to an
+ * allowlisted path (/reset-password) that consumes the tokens and shows the
+ * "choose a new password" form.
+ */
+export async function sendUserPasswordReset(userId: string): Promise<ActionResult> {
+  const { supabase, userId: actorId } = await requireAdminUser();
+
+  if (!UUID_RE.test(text(userId))) return { error: 'Invalid user id.' };
+
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('email')
+    .eq('id', userId)
+    .maybeSingle();
+
+  if (!profile) return { error: 'That user account no longer exists.' };
+  if (!profile.email) return { error: 'That account has no email address on file.' };
+
+  const { error } = await createAdminClient().auth.resetPasswordForEmail(profile.email, {
+    redirectTo: `${appOrigin()}${RESET_PASSWORD_PATH}`,
+  });
+
+  if (error) {
+    const status = (error as { status?: number }).status;
+    if (status !== 429) {
+      console.error('Password reset email not dispatched:', error.message);
+    }
+    return {
+      error: /rate limit/i.test(error.message)
+        ? 'Too many requests — wait a minute and try again.'
+        : 'Could not send the reset email right now. Please try again shortly.',
+    };
+  }
+
+  await recordAuditLog({
+    actorUserId: actorId,
+    action: 'update',
+    entityType: 'profile',
+    entityId: userId,
+    metadata: { password_reset_email: true },
+  });
+
   return { success: true };
 }
 

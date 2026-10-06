@@ -4,6 +4,7 @@ import Badge from '@/components/ui/Badge';
 import ViewNotificationLink from '@/app/(dashboard)/notifications/ViewNotificationLink';
 import DeleteNotificationButton from '@/app/(dashboard)/notifications/DeleteNotificationButton';
 import ClearAllNotificationsButton from '@/app/(dashboard)/notifications/ClearAllNotificationsButton';
+import { notificationHref, subjectLabelFromData } from '@/lib/notification-links';
 
 interface NotificationSummary {
   id: string;
@@ -19,36 +20,6 @@ interface ProfileNotificationsCardProps {
   notifications: NotificationSummary[];
   /** Cap list length; "View all" still links to /notifications. */
   limit?: number;
-}
-
-function notificationHref(data: Record<string, unknown> | null): string | null {
-  if (!data) return null;
-
-  // Proctor assignment (scope §42): link to the live monitor, never the
-  // student paths below.
-  const offeringId = data.offering_id;
-  const assessmentId = data.assessment_id;
-  if (
-    data.proctor === true &&
-    typeof offeringId === 'string' && offeringId &&
-    typeof assessmentId === 'string' && assessmentId
-  ) {
-    return `/faculty/subjects/${offeringId}/assessments/${assessmentId}/monitor`;
-  }
-
-  if (typeof assessmentId !== 'string' || !assessmentId) return null;
-
-  const attemptId = data.attempt_id;
-  if (typeof attemptId === 'string' && attemptId) {
-    return `/student/assessments/${assessmentId}/exam/${attemptId}/results`;
-  }
-  return `/student/assessments/${assessmentId}`;
-}
-
-function subjectLabelFromData(data: Record<string, unknown> | null): string | null {
-  if (!data) return null;
-  const label = data.subject_label;
-  return typeof label === 'string' && label ? label : null;
 }
 
 export default function ProfileNotificationsList({

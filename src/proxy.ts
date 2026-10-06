@@ -77,6 +77,11 @@ export async function proxy(request: NextRequest) {
     !pathname.startsWith("/login") &&
     !pathname.startsWith("/register") &&
     !pathname.startsWith("/setup") &&
+    // Password recovery: these are the destinations of the emails sent to
+    // NOT-yet-authenticated (or not-yet-signed-in) recipients, and the
+    // reset page consumes its tokens BEFORE a session exists.
+    !pathname.startsWith("/forgot-password") &&
+    !pathname.startsWith("/reset-password") &&
     pathname !== "/"
   ) {
     const url = request.nextUrl.clone();

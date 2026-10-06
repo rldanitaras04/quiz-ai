@@ -212,6 +212,32 @@ export const APP_NAME = 'SEAMS AI';
 export const APP_DESCRIPTION = 'AI-Assisted Secure Examination and Assessment System';
 
 // ============================================================================
+// Email link destinations
+// ============================================================================
+
+/**
+ * Landing paths for the links Supabase Auth emails (signup confirmation,
+ * approval notice, password recovery). Each must be a real page AND listed
+ * in the project's redirect allowlist (Authentication -> URL Configuration):
+ * GoTrue refuses a redirect that is not allowlisted, which reads to the
+ * clicker as "the link is broken". Kept as constants so the route test sees
+ * the literal and the code cannot drift away from the pages.
+ */
+export const LOGIN_PATH = '/login';
+
+export const RESET_PASSWORD_PATH = '/reset-password';
+
+/**
+ * Origin every emailed link points at. `NEXT_PUBLIC_APP_URL` must be the
+ * origin users actually open the app on (localhost while developing, the
+ * real domain in production) — a link built from the wrong origin lands
+ * outside the allowlist and bounces.
+ */
+export function appOrigin(): string {
+  return process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000';
+}
+
+// ============================================================================
 // Configurable Settings
 // ============================================================================
 

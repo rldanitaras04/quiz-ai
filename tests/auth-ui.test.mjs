@@ -19,6 +19,8 @@ const read = (...parts) => readFileSync(join(repoRoot, ...parts), 'utf8');
 const PASSWORD_FIELD_FILES = [
   ['src', 'app', '(auth)', 'login', 'page.tsx'],
   ['src', 'app', '(auth)', 'register', 'RegisterForm.tsx'],
+  ['src', 'app', '(auth)', 'reset-password', 'page.tsx'],
+  ['src', 'app', '(dashboard)', 'profile', 'ChangePasswordForm.tsx'],
   ['src', 'app', 'setup', 'page.tsx'],
 ];
 

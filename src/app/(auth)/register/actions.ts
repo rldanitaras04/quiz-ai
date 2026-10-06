@@ -2,18 +2,29 @@
 
 import { createAdminClient } from '@/lib/supabase/admin';
 import { validateEmail, validatePassword, validateMinLength, validateRequired, validateStudentNumber, validatePattern } from '@/lib/validators';
+import { LOGIN_PATH, appOrigin } from '@/lib/constants';
 
 /**
  * Registration runs server-side with the service-role client so the whole
  * flow never depends on per-table RLS insert grants:
  *
- *  1. create the auth user (email confirmed — the project has no SMTP
- *     configured; accounts instead start as profiles.status='pending' and
- *     are activated by an administrator)
+ *  1. create the auth user UNCONFIRMED and email it the "confirm your
+ *     signup" link (step 4). Email verification is the first gate: GoTrue
+ *     refuses to sign an unconfirmed address in, so nobody reaches the app
+ *     on an address they do not control. The link is issued with the
+ *     implicit flow (no PKCE code challenge), so it opens from whatever
+ *     browser or phone received the email; /login consumes its tokens.
  *  2. create profiles / user_roles / student|faculty_profiles rows
+ *  3. roles: student/faculty only — super_admin cannot be created here
+ *  4. send the confirmation email; if it cannot be sent, roll everything
+ *     back so no account is ever left unconfirmed with no link to click
  *
- * If step 2 fails, the auth user is deleted again so retries start clean.
- * Roles are limited to student/faculty; super_admin cannot be created here.
+ * The second gate is profiles.status='pending', which an administrator
+ * flips to 'active' at /admin/users. So the full path is:
+ * confirm email -> admin activates -> app unlocks.
+ *
+ * If step 2 or 3 fails, the auth user is deleted again so retries start
+ * clean (the profile rows cascade with it).
  */
 
 export interface RegisterInput {
@@ -32,8 +43,6 @@ export interface RegisterResult {
   success: boolean;
   error?: string;
   fieldErrors?: Record<string, string>;
-  /** Whether the verification email was dispatched successfully. */
-  emailSent?: boolean;
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -104,68 +113,33 @@ export async function registerUser(input: RegisterInput): Promise<RegisterResult
   const admin = createAdminClient();
 
   // ------------------------------------------------------------------
-  // 2. Create the auth user AND send the verification email in one
-  //    call. inviteUserByEmail creates the (unconfirmed) user when the
-  //    email is new and dispatches the invite through Supabase's mailer.
-  //    (admin.createUser alone NEVER sends mail, and generateLink()
-  //    mints a link without sending — both were why no email arrived.)
+  // 2. Create the auth user with the form's password. email_confirm:false
+  //    leaves the address unconfirmed — step 4 then emails the link that
+  //    confirms it. createUser is used (not signUp) so registration still
+  //    works when the project's "Allow new users to sign up" toggle is off,
+  //    and so no email is dispatched before the profile rows exist.
   // ------------------------------------------------------------------
-  const { data: inviteData, error: inviteError } = await admin.auth.admin.inviteUserByEmail(email, {
-    // The email link must bounce through our PKCE callback: it lands on
-    // /api/auth/callback, which exchanges the code for a session and then
-    // sends the user to the dashboard. Redirect origins not on the project's
-    // allowlist are overridden by Supabase — add dev/prod origins in
-    // Dashboard > Authentication > URL Configuration.
-    redirectTo: `${process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'}/api/auth/callback?next=/`,
+  const { data: created, error: createError } = await admin.auth.admin.createUser({
+    email,
+    password,
+    email_confirm: false,
   });
 
-  if (inviteError) {
-    const message = inviteError.message ?? '';
-    const status = (inviteError as { status?: number }).status;
-
-    // GoTrue may have created the user before the mail send failed —
-    // remove it so a retry starts clean. (inviteData is typed null on the
-    // error path, but that typing is optimistic; re-read by email instead.)
-    const { data: maybeUser } = await admin.auth.admin.listUsers({ perPage: 5 });
-    const orphan = maybeUser?.users?.find((u) => u.email?.toLowerCase() === email);
-    if (orphan) {
-      await admin.auth.admin.deleteUser(orphan.id);
-    }
-
-    if (/already|registered|duplicate|confirmed/i.test(message)) {
+  if (createError) {
+    const message = createError.message ?? '';
+    if (/already|registered|duplicate|exists/i.test(message)) {
       return fieldError('email', 'An account with this email already exists. Please sign in instead.');
     }
-    if (status === 429 || /rate limit/i.test(message)) {
-      return {
-        success: false,
-        error:
-          'The email service is rate-limited right now (built-in mailer allows ~2 emails/hour). Please try again in a few minutes, or contact an administrator.',
-      };
-    }
-    return { success: false, error: message || 'Failed to send the verification email. Please try again.' };
+    return { success: false, error: message || 'Failed to create the account. Please try again.' };
   }
 
-  const userId = inviteData.user?.id;
+  const userId = created.user?.id;
   if (!userId) {
     return { success: false, error: 'Failed to create account.' };
   }
 
   // ------------------------------------------------------------------
-  // 3. Apply the password chosen in the form. The invite email itself
-  //    doesn't collect a password; after the user clicks the link their
-  //    address is confirmed and this password works at /login.
-  // ------------------------------------------------------------------
-  const { error: passwordError } = await admin.auth.admin.updateUserById(userId, {
-    password,
-  });
-
-  if (passwordError) {
-    await admin.auth.admin.deleteUser(userId);
-    return { success: false, error: 'Failed to set up the account. Please try again.' };
-  }
-
-  // ------------------------------------------------------------------
-  // 4. Create the profile rows. On failure, roll the auth user back.
+  // 3. Create the profile rows. On failure, roll the auth user back.
   // ------------------------------------------------------------------
   const rollback = async () => {
     await admin.auth.admin.deleteUser(userId);
@@ -233,7 +207,31 @@ export async function registerUser(input: RegisterInput): Promise<RegisterResult
     }
   }
 
-  return { success: true, emailSent: true };
+  // ------------------------------------------------------------------
+  // 4. Send the confirmation email (GoTrue's "Confirm signup" template,
+  //    customizable in Authentication -> Email Templates). The redirect
+  //    target must be on the project's allowlist. Failure rolls the whole
+  //    account back: an unconfirmed user with no way to receive the link
+  //    would be permanently stuck.
+  // ------------------------------------------------------------------
+  const { error: confirmError } = await admin.auth.resend({
+    type: 'signup',
+    email,
+    options: { emailRedirectTo: `${appOrigin()}${LOGIN_PATH}` },
+  });
+
+  if (confirmError) {
+    console.error('Confirmation email not dispatched:', confirmError.message);
+    await rollback();
+    return {
+      success: false,
+      error: 'We could not send the confirmation email. Please try again in a moment.',
+    };
+  }
+
+  // The address must be confirmed (email) and the profile activated
+  // (administrator) before this account can use the app.
+  return { success: true };
 }
 
 /**

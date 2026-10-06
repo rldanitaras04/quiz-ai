@@ -7,63 +7,9 @@ import Badge from '@/components/ui/Badge';
 import ViewNotificationLink from './ViewNotificationLink';
 import DeleteNotificationButton from './DeleteNotificationButton';
 import ClearAllNotificationsButton from './ClearAllNotificationsButton';
+import { notificationHref, subjectLabelFromData } from '@/lib/notification-links';
 
 export const dynamic = 'force-dynamic';
-
-/**
- * Deep link for a notification. Exam notifications carry assessment/attempt
- * ids (student side); a manual identity-verification request carries the
- * roster's `offering_id` (faculty side); generation outcomes are explicitly
- * marked `faculty_assessment` and link to the faculty assessment workspace.
- * Authorization is still enforced when the target page loads (RLS scopes
- * everything to the signed-in user), so a stale or foreign id simply
- * resolves to nothing.
- */
-function notificationHref(data: Record<string, unknown> | null): string | null {
-  if (!data) return null;
-
-  const offeringId = data.offering_id;
-  const assessmentId = data.assessment_id;
-
-  // Proctor assignment (scope §42): deep-link straight into the live monitor —
-  // a proctor is not faculty of this workspace, so neither the assessment
-  // workspace nor the student paths below are reachable for them.
-  if (
-    data.proctor === true &&
-    typeof offeringId === 'string' && offeringId &&
-    typeof assessmentId === 'string' && assessmentId
-  ) {
-    return `/faculty/subjects/${offeringId}/assessments/${assessmentId}/monitor`;
-  }
-
-  if (
-    data.faculty_assessment === true &&
-    typeof offeringId === 'string' && offeringId &&
-    typeof assessmentId === 'string' && assessmentId
-  ) {
-    return `/faculty/subjects/${offeringId}/assessments/${assessmentId}`;
-  }
-
-  if (typeof assessmentId === 'string' && assessmentId) {
-    const attemptId = data.attempt_id;
-    if (typeof attemptId === 'string' && attemptId) {
-      return `/student/assessments/${assessmentId}/exam/${attemptId}/results`;
-    }
-    return `/student/assessments/${assessmentId}`;
-  }
-
-  if (typeof offeringId === 'string' && offeringId) {
-    return `/faculty/subjects/${offeringId}/students`;
-  }
-  return null;
-}
-
-function subjectLabelFromData(data: Record<string, unknown> | null): string | null {
-  if (!data) return null;
-  const label = data.subject_label;
-  if (typeof label === 'string' && label) return label;
-  return null;
-}
 
 export default async function NotificationsPage() {
   const supabase = await createClient();

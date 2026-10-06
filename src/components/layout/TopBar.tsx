@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, useSyncExternalStore, type JSX } from 'react';
+import { useState, useEffect, useRef, type JSX } from 'react';
 import Link from 'next/link';
 import { useSignOut } from '@/lib/hooks';
 import type { UserRole } from '@/lib/types';
@@ -12,17 +12,10 @@ import {
   SignOut,
   CaretDown,
   CaretUp,
-  Moon,
-  Sun,
 } from '@phosphor-icons/react';
 import { BrandIcon } from '@/components/brand';
+import ThemeToggle from '@/components/ThemeToggle';
 import { APP_NAME } from '@/lib/constants';
-import {
-  getTheme,
-  getThemeServerSnapshot,
-  subscribeTheme,
-  toggleTheme,
-} from '@/lib/ui-preferences';
 
 interface TopBarProps {
   title: string;
@@ -54,8 +47,6 @@ export default function TopBar({
   const { signOut, signingOut: loggingOut } = useSignOut();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
-  const theme = useSyncExternalStore(subscribeTheme, getTheme, getThemeServerSnapshot);
-  const isDark = theme === 'dark';
 
   const initials = userName
     .split(' ')
@@ -131,18 +122,7 @@ export default function TopBar({
         </Link>
 
         {/* Theme toggle (light / dark) */}
-        <button
-          onClick={toggleTheme}
-          className="p-2 mr-1 rounded-[var(--radius-md)] text-[var(--color-muted)] hover:text-[var(--color-foreground)] hover:bg-[var(--color-surface-hover)] transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus-ring)]"
-          aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
-          title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
-        >
-          {isDark ? (
-            <Sun className="h-5 w-5" weight="regular" />
-          ) : (
-            <Moon className="h-5 w-5" weight="regular" />
-          )}
-        </button>
+        <ThemeToggle className="p-2 mr-1" />
 
         {/* Vertical divider */}
         <div className="h-8 w-px bg-[var(--color-border)] mx-2" aria-hidden="true" />

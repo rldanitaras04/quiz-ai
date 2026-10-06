@@ -185,11 +185,9 @@ export default function RegisterForm({
       return;
     }
 
-    router.push(
-      result.emailSent
-        ? "/register/success"
-        : "/register/success?email=failed"
-    );
+    // No verification email anymore: the success page explains that an
+    // administrator must approve the account before it can be used.
+    router.push("/register/success");
   }
 
   // Matches the shared Input component's radius so password fields (which

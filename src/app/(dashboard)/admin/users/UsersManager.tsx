@@ -14,7 +14,7 @@ import { confirmAction, notifyError, notifySuccess } from '@/components/ui/alert
 import { ROLE_LABELS } from '@/lib/constants';
 import type { UserRole } from '@/lib/types';
 import type { AdminUserRow } from './actions';
-import { setUserStatus, assignRole, revokeRole, setStudentVerification, setStudentSection } from './actions';
+import { setUserStatus, assignRole, revokeRole, setStudentVerification, setStudentSection, sendUserPasswordReset } from './actions';
 
 const statusVariant: Record<string, 'success' | 'warning' | 'danger' | 'default'> = {
   active: 'success',
@@ -170,7 +170,16 @@ function UserRow({
           <span className="block text-xs text-[var(--color-muted)]">{user.studentNumber}</span>
         )}
       </TD>
-      <TD label="Email" className="text-[var(--color-muted)]">{user.email}</TD>
+      <TD label="Email" className="text-[var(--color-muted)]">
+        {user.email}
+        {user.emailConfirmed !== null && (
+          <span className="mt-1 block">
+            <Badge variant={user.emailConfirmed ? 'success' : 'warning'}>
+              {user.emailConfirmed ? 'email verified' : 'email unverified'}
+            </Badge>
+          </span>
+        )}
+      </TD>
 
       <TD label="Roles">
         <div className="flex flex-wrap items-center gap-1">
@@ -270,16 +279,12 @@ function UserRow({
           <div className="flex items-center gap-1">
             {user.status !== 'active' && (
               <RowAction
-                label="Approve"
-                text={user.status === 'pending' ? 'Approve' : 'Activate'}
+                label="Activate"
+                text="Activate"
                 onClick={() => setUserStatus(user.id, 'active')}
                 onDone={onChanged}
                 disabled={isSelf}
-                successMessage={
-                  user.status === 'pending'
-                    ? `${user.fullName} approved.`
-                    : `${user.fullName} activated.`
-                }
+                successMessage={`${user.fullName} activated.`}
               />
             )}
             {user.status === 'active' && !isSelf && (
@@ -292,6 +297,14 @@ function UserRow({
                 successMessage={`${user.fullName} suspended.`}
               />
             )}
+            <RowAction
+              label="Send password reset"
+              text="Reset"
+              confirmMessage={`Email a password reset link to ${user.fullName}?`}
+              onClick={() => sendUserPasswordReset(user.id)}
+              onDone={onChanged}
+              successMessage="Password reset email sent."
+            />
           </div>
         </div>
       </TD>

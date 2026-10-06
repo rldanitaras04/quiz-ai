@@ -14,7 +14,7 @@ export { homePathForRole };
 
 export type RoleGate =
   | { status: 'ok'; user: User; role: UserRole; supabase: SupabaseClient }
-  | { status: 'blocked'; reason: 'suspended' | 'inactive' };
+  | { status: 'blocked'; reason: 'pending' | 'suspended' | 'inactive' };
 
 /**
  * Server-side role gate for a route group.
@@ -24,10 +24,10 @@ export type RoleGate =
  * never reach a section's pages at all. Unauthorized roles are redirected to
  * their own dashboard instead of being shown an empty shell.
  *
- * Accounts that an administrator has suspended or deactivated are refused
- * outright. ('pending' accounts are still allowed through: approvals are not
- * yet wired up, so treating pending as denied would lock out every account
- * created before an admin review.)
+ * Accounts awaiting administrator approval ('pending') and accounts an
+ * administrator has suspended or deactivated are refused outright:
+ * registration creates accounts as 'pending' with no email verification,
+ * so approval at /admin/users is the step that unlocks the app.
  */
 export async function requireRole(allowed: readonly UserRole[]): Promise<RoleGate> {
   const supabase = await createClient();
@@ -49,7 +49,11 @@ export async function requireRole(allowed: readonly UserRole[]): Promise<RoleGat
     .eq('id', user.id)
     .single();
 
-  if (profile?.status === 'suspended' || profile?.status === 'inactive') {
+  if (
+    profile?.status === 'pending' ||
+    profile?.status === 'suspended' ||
+    profile?.status === 'inactive'
+  ) {
     return { status: 'blocked', reason: profile.status };
   }
 

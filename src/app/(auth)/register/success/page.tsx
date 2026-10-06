@@ -1,15 +1,16 @@
+import type { JSX } from "react";
 import Link from "next/link";
 
 export const dynamic = "force-dynamic";
 
-export default async function RegisterSuccessPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ email?: string }>;
-}) {
-  const { email } = await searchParams;
-  const emailFailed = email === "failed";
-
+/**
+ * Post-registration hand-off. Registration emails a confirmation link and
+ * leaves profiles.status='pending', so this page sets the real expectation
+ * in two steps: (1) confirm the address via the emailed link — without it
+ * sign-in is refused — and (2) wait for an administrator to activate the
+ * account at /admin/users.
+ */
+export default async function RegisterSuccessPage(): Promise<JSX.Element> {
   return (
     <div className="rounded-xl bg-[var(--color-surface)] p-8 text-center shadow-lg">
       <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-[var(--color-success-light)]">
@@ -30,29 +31,30 @@ export default async function RegisterSuccessPage({
       </div>
 
       <h2 className="text-xl font-semibold text-[var(--color-foreground)]">
-        {emailFailed ? "Account created — email issue" : "Check your email"}
+        Check your email to finish
       </h2>
       <p className="mt-2 text-sm text-[var(--color-muted)]">
-        {emailFailed ? (
-          <>
-            Your account was created, but the verification email could not be
-            sent (the built-in mailer is rate-limited to ~2 emails/hour).
-            Please try registering again in a little while or contact an
-            administrator to resend the verification link.
-          </>
-        ) : (
-          <>
-            We&apos;ve sent a verification link to your email address. Please
-            check your inbox and click the link to activate your account —
-            you&apos;ll then sign in with the password you chose.
-          </>
-        )}
+        We sent a confirmation link to the address you registered with. Two
+        steps remain:
       </p>
+      <ol className="mx-auto mt-4 max-w-md space-y-2 text-left text-sm text-[var(--color-muted)]">
+        <li>
+          <span className="font-medium text-[var(--color-foreground)]">1. Confirm your email</span>{' '}
+          &mdash; open the link in the message to verify your address. Until
+          then, signing in will ask you to confirm first.
+        </li>
+        <li>
+          <span className="font-medium text-[var(--color-foreground)]">2. Administrator approval</span>{' '}
+          &mdash; once verified, your account waits for activation. Signing in
+          will show an &ldquo;awaiting approval&rdquo; screen until an
+          administrator activates it.
+        </li>
+      </ol>
 
       <div className="mt-6 space-y-3">
         <p className="text-xs text-[var(--color-muted)]">
-          Didn&apos;t receive the email? Check your spam folder or contact
-          support.
+          Need access sooner? Contact your administrator to approve your
+          account.
         </p>
 
         <Link
