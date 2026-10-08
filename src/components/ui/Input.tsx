@@ -6,6 +6,8 @@ import type { InputHTMLAttributes, JSX } from 'react';
 interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
   label?: string;
   error?: string;
+  /** Neutral hint under the field (format rules, examples); hidden when `error` shows. */
+  helper?: string;
   required?: boolean;
   /**
    * Render a show/hide toggle inside the field (applies to type="password"
@@ -18,6 +20,7 @@ interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
 export default function Input({
   label,
   error,
+  helper,
   required = false,
   revealable = false,
   id,
@@ -45,7 +48,11 @@ export default function Input({
       type={inputType}
       required={required}
       aria-invalid={!!error}
-      aria-describedby={error ? `${inputId}-error` : undefined}
+      aria-describedby={
+        [helper && !error ? `${inputId}-helper` : null, error ? `${inputId}-error` : null]
+          .filter(Boolean)
+          .join(' ') || undefined
+      }
       className={inputClassName}
       {...props}
     />
@@ -111,6 +118,11 @@ export default function Input({
         </div>
       ) : (
         field
+      )}
+      {helper && !error && (
+        <p id={`${inputId}-helper`} className="text-xs text-[var(--color-muted)]">
+          {helper}
+        </p>
       )}
       {error && (
         <p id={`${inputId}-error`} className="text-xs text-[var(--color-danger)]" role="alert">

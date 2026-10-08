@@ -1,33 +1,23 @@
+import Skeleton from '@/components/ui/Skeleton';
 import type { JSX } from 'react';
 
 /**
- * Dashboard skeleton: mirrors the real layout (header, four stat cards,
- * upcoming + subjects, performance + quick actions) so the shell never jumps.
+ * Segment fallback while a route streams in. Deliberately NEUTRAL (title +
+ * two generic blocks): this boundary also covers child routes, so guessing
+ * the dashboard's stat-card shape here made every navigation flash a layout
+ * the target screen won't have. Routes that want a shape-matching skeleton
+ * ship their own `loading.tsx` next to `page.tsx`.
  */
-export default function StudentDashboardLoading(): JSX.Element {
+export default function StudentRouteLoading(): JSX.Element {
   return (
-    <div aria-busy="true" aria-label="Loading dashboard">
-      <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <div className="skeleton h-9 w-72 rounded-lg" />
-          <div className="skeleton mt-3 h-4 w-96 max-w-full rounded" />
-        </div>
-        <div className="skeleton h-16 w-56 rounded-[var(--radius-lg)]" />
+    <div aria-busy="true" aria-label="Loading page">
+      <div className="mb-6">
+        <Skeleton className="h-7 w-56" />
+        <Skeleton className="mt-3 h-4 w-80 max-w-full" />
       </div>
-
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {[0, 1, 2, 3].map((index) => (
-          <div key={index} className="skeleton h-40 rounded-[var(--radius-lg)]" />
-        ))}
-      </div>
-
-      <div className="mt-4 grid grid-cols-1 items-start gap-4 lg:grid-cols-3">
-        <div className="skeleton h-96 rounded-[var(--radius-lg)]" />
-        <div className="skeleton h-96 rounded-[var(--radius-lg)]" />
-        <div className="flex flex-col gap-4">
-          <div className="skeleton h-96 rounded-[var(--radius-lg)]" />
-          <div className="skeleton h-44 rounded-[var(--radius-lg)]" />
-        </div>
+      <div className="space-y-4">
+        <Skeleton className="h-32 w-full" />
+        <Skeleton className="h-72 w-full" />
       </div>
     </div>
   );

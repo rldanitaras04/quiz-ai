@@ -11,7 +11,10 @@ import Input from '@/components/ui/Input';
 import Spinner from '@/components/ui/Spinner';
 import EmptyState from '@/components/ui/EmptyState';
 import { Table, THead, TBody, TR, TH, TD } from '@/components/ui/Table';
+import type { BadgeVariant } from '@/components/ui/Badge';
 import { confirmAction, notifyError, notifySuccess } from '@/components/ui/alerts';
+import { statusLabel, statusVariant } from '@/lib/status';
+import { formatDateTime, formatTime, formatRelative } from '@/lib/format';
 import {
   EVENT_TYPE_LABELS,
   SEVERITY_LABELS,
@@ -90,25 +93,6 @@ interface EventRow {
   metadata: Record<string, unknown> | null;
   recorded_at: string;
 }
-
-type BadgeVariant = 'default' | 'success' | 'warning' | 'danger' | 'info' | 'outline';
-
-const ATTEMPT_STATUS: Record<string, { label: string; variant: BadgeVariant }> = {
-  created: { label: 'Not started', variant: 'default' },
-  in_progress: { label: 'In progress', variant: 'info' },
-  submitted: { label: 'Submitted', variant: 'success' },
-  auto_submitted: { label: 'Auto-submitted', variant: 'success' },
-  timed_out: { label: 'Timed out', variant: 'warning' },
-  expired: { label: 'Expired', variant: 'warning' },
-  cancelled: { label: 'Cancelled', variant: 'default' },
-  invalidated: { label: 'Terminated', variant: 'danger' },
-};
-
-const SEVERITY_VARIANT: Record<EventSeverity, BadgeVariant> = {
-  info: 'info',
-  warning: 'warning',
-  critical: 'danger',
-};
 
 const POLL_INTERVAL_MS = 10_000;
 const REALTIME_DEBOUNCE_MS = 400;
@@ -518,7 +502,7 @@ export default function MonitorClient({
       'Extra time granted',
       (v) =>
         v
-          ? `New deadline: ${new Date(v).toLocaleTimeString()}. The student's exam updates within about 20 seconds.`
+          ? `New deadline: ${formatTime(v)}. The student's exam updates within about 20 seconds.`
           : undefined
     );
   };
@@ -647,8 +631,8 @@ export default function MonitorClient({
     if (!row.attempt) return { text: '—', variant: 'default' };
     if (row.attempt.status !== 'in_progress') {
       return {
-        text: ATTEMPT_STATUS[row.attempt.status]?.label ?? row.attempt.status,
-        variant: ATTEMPT_STATUS[row.attempt.status]?.variant ?? 'default',
+        text: statusLabel(row.attempt.status),
+        variant: statusVariant(row.attempt.status),
       };
     }
     if (!row.session || row.session.status !== 'active') {
@@ -742,7 +726,7 @@ export default function MonitorClient({
               >
                 {deployments.map((d) => (
                   <option key={d.id} value={d.id}>
-                    {d.status} · opens {new Date(d.opens_at).toLocaleString()}
+                    {statusLabel(d.status)} · opens {formatDateTime(d.opens_at)}
                   </option>
                 ))}
               </Select>
@@ -890,18 +874,17 @@ export default function MonitorClient({
                   <TH>Item</TH>
                   <TH>Flagged</TH>
                   <TH>Connection</TH>
-                  <TH>Sync</TH>
                   <TH>Security</TH>
-                  <TH>Heartbeat</TH>
                   <TH>Time left</TH>
                   <TH align="right">Actions</TH>
                 </TR>
               </THead>
               <TBody>
                 {filteredRows.map((row) => {
-                    const st = ATTEMPT_STATUS[row.attempt?.status ?? 'created'] ?? {
-                      label: 'Not started',
-                      variant: 'default' as BadgeVariant,
+                    const statusToken = row.attempt?.status ?? 'created';
+                    const st = {
+                      label: statusLabel(statusToken),
+                      variant: statusVariant(statusToken),
                     };
                     const presence = presenceLabel(row);
                     const sec = securityState(row);
@@ -983,28 +966,34 @@ export default function MonitorClient({
                         </TD>
                         <TD label="Connection" className="text-xs">
                           {isActive && row.session ? (
-                            <span
-                              className={
-                                row.session.connection_state === 'offline'
-                                  ? 'font-medium text-[var(--color-warning)]'
-                                  : undefined
-                              }
-                            >
-                              {row.session.connection_state}
-                            </span>
-                          ) : (
-                            <span className="text-[var(--color-muted)]">—</span>
-                          )}
-                        </TD>
-                        <TD label="Sync" className="text-xs">
-                          {isActive && row.session ? (
                             <span className="flex flex-col gap-0.5">
-                              <span>{row.session.sync_state}</span>
-                              {row.session.pending_sync_count > 0 && (
-                                <span className="text-[var(--color-warning)]">
-                                  {row.session.pending_sync_count} pending
-                                </span>
-                              )}
+                              <span
+                                className={
+                                  row.session.connection_state === 'offline'
+                                    ? 'inline-flex items-center gap-1.5 font-medium text-[var(--color-warning)]'
+                                    : 'inline-flex items-center gap-1.5'
+                                }
+                              >
+                                <span
+                                  aria-hidden="true"
+                                  className={`h-2 w-2 shrink-0 rounded-full ${
+                                    row.session.connection_state === 'online'
+                                      ? 'bg-[var(--color-success)]'
+                                      : row.session.connection_state === 'offline'
+                                        ? 'bg-[var(--color-warning)]'
+                                        : 'bg-[var(--color-muted)]'
+                                  }`}
+                                />
+                                {statusLabel(row.session.connection_state)}
+                              </span>
+                              <span className="text-[var(--color-muted)]">
+                                {statusLabel(row.session.sync_state)}
+                                {row.session.pending_sync_count > 0 &&
+                                  ` · ${row.session.pending_sync_count} pending`}
+                              </span>
+                              <span className="tabular-nums text-[var(--color-muted)]">
+                                {formatRelative(row.session.last_heartbeat_at)}
+                              </span>
                             </span>
                           ) : (
                             <span className="text-[var(--color-muted)]">—</span>
@@ -1012,9 +1001,6 @@ export default function MonitorClient({
                         </TD>
                         <TD label="Security">
                           <Badge variant={sec.variant}>{sec.label}</Badge>
-                        </TD>
-                        <TD label="Heartbeat" className="text-xs tabular-nums">
-                          {isActive ? heartbeatAge(row.session) : '—'}
                         </TD>
                         <TD label="Time left" className={`tabular-nums ${remainingClass(row.attempt)}`}>
                           {remaining(row.attempt)}
@@ -1130,7 +1116,7 @@ export default function MonitorClient({
               <span className="text-[var(--color-muted)]">Status</span>
               <span>
                 {selectedRow.attempt
-                  ? ATTEMPT_STATUS[selectedRow.attempt.status]?.label ?? selectedRow.attempt.status
+                  ? statusLabel(selectedRow.attempt.status)
                   : 'Not started'}
               </span>
               <span className="text-[var(--color-muted)]">Student number</span>
@@ -1156,8 +1142,8 @@ export default function MonitorClient({
                 {selectedRow.session
                   ? `${
                       selectedRow.session.connection_state === 'offline'
-                        ? 'offline'
-                        : selectedRow.session.sync_state
+                        ? 'Offline'
+                        : statusLabel(selectedRow.session.sync_state)
                     }${selectedRow.session.pending_sync_count > 0 ? ` (${selectedRow.session.pending_sync_count} pending)` : ''}`
                   : '—'}
               </span>
@@ -1174,7 +1160,7 @@ export default function MonitorClient({
               <span className="text-[var(--color-muted)]">Started</span>
               <span>
                 {selectedRow.attempt?.started_at
-                  ? new Date(selectedRow.attempt.started_at).toLocaleString()
+                  ? formatDateTime(selectedRow.attempt.started_at)
                   : '—'}
               </span>
               <span className="text-[var(--color-muted)]">Elapsed</span>
@@ -1196,7 +1182,7 @@ export default function MonitorClient({
               <span className="text-[var(--color-muted)]">Last successful sync</span>
               <span>
                 {selectedRow.session?.last_sync_at
-                  ? new Date(selectedRow.session.last_sync_at).toLocaleTimeString()
+                  ? formatTime(selectedRow.session.last_sync_at)
                   : '—'}
               </span>
               <span className="text-[var(--color-muted)]">Pending sync</span>
@@ -1206,7 +1192,7 @@ export default function MonitorClient({
               <span className="text-[var(--color-muted)]">Last local save</span>
               <span>
                 {selectedRow.session?.last_local_save_at
-                  ? new Date(selectedRow.session.last_local_save_at).toLocaleTimeString()
+                  ? formatTime(selectedRow.session.last_local_save_at)
                   : '—'}
               </span>
               <span className="text-[var(--color-muted)]">Interruptions</span>
@@ -1216,7 +1202,7 @@ export default function MonitorClient({
               <span className="text-[var(--color-muted)]">Deadline</span>
               <span className="tabular-nums">
                 {selectedRow.attempt?.expires_at
-                  ? `${new Date(selectedRow.attempt.expires_at).toLocaleTimeString()} (${remaining(selectedRow.attempt)} left)`
+                  ? `${formatTime(selectedRow.attempt.expires_at)} (${remaining(selectedRow.attempt)} left)`
                   : '—'}
               </span>
             </div>
@@ -1237,12 +1223,12 @@ export default function MonitorClient({
                             : `Session — ${s.status.replace(/_/g, ' ')}`}
                         </span>
                         <span className="text-[var(--color-muted)]">
-                          started {new Date(s.started_at).toLocaleString()}
+                          started {formatDateTime(s.started_at)}
                         </span>
                       </div>
                       {s.ended_at && (
                         <div className="text-[var(--color-muted)]">
-                          ended {new Date(s.ended_at).toLocaleString()}
+                          ended {formatDateTime(s.ended_at)}
                           {s.close_reason ? ` · ${s.close_reason.replace(/_/g, ' ')}` : ''}
                         </div>
                       )}
@@ -1269,12 +1255,12 @@ export default function MonitorClient({
                         <span className="text-sm font-medium">
                           {EVENT_TYPE_LABELS[e.event_type as keyof typeof EVENT_TYPE_LABELS] ?? e.event_type}
                         </span>
-                        <Badge variant={SEVERITY_VARIANT[e.severity] ?? 'info'}>
+                        <Badge variant={statusVariant(e.severity)}>
                           {SEVERITY_LABELS[e.severity]}
                         </Badge>
                       </div>
                       <div className="mt-1 flex items-center justify-between text-xs text-[var(--color-muted)]">
-                        <span>{new Date(e.recorded_at).toLocaleTimeString()}</span>
+                        <span>{formatTime(e.recorded_at)}</span>
                       </div>
                       {metadataSummary(e.metadata) && (
                         <p className="mt-1 break-words text-xs text-[var(--color-muted)]">

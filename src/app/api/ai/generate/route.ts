@@ -7,6 +7,7 @@ import { getSettings } from '@/lib/settings';
 import { notifyFacultyOfOffering } from '@/lib/notifications';
 import type { GenerateQuestionsParams, QuestionValidation } from '@/lib/ai/types';
 import { parseEmbedding, type ExistingQuestionRef } from '@/lib/ai/duplicate-check';
+import { logger } from '@/lib/logger';
 
 // Simple per-user rate limit: 60 generation requests / 10 minutes.
 const RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
@@ -142,7 +143,7 @@ export async function POST(request: NextRequest) {
         .eq('requested_by', user.id)
         .in('status', ['queued', 'processing']);
       if (jobError) {
-        console.warn('Generation job could not be marked processing:', jobError.message);
+        logger.warn('Generation job could not be marked processing:', jobError.message);
       }
     }
 
@@ -223,7 +224,7 @@ export async function POST(request: NextRequest) {
         content: m.content,
       }));
     } catch (error) {
-      console.warn('Vector retrieval unavailable; falling back to bounded chunk read:', error);
+      logger.warn('Vector retrieval unavailable; falling back to bounded chunk read:', error);
     }
 
     if (sourceChunks.length === 0) {
@@ -303,7 +304,7 @@ export async function POST(request: NextRequest) {
         .eq('status', 'active');
 
       if (bankError) {
-        console.warn('Question bank unavailable for duplicate check:', bankError.message);
+        logger.warn('Question bank unavailable for duplicate check:', bankError.message);
       }
       for (const row of bankRows ?? []) {
         existing.push({
@@ -333,7 +334,7 @@ export async function POST(request: NextRequest) {
           await supabase.from(table).update({ embedding }).eq('id', entry.id);
         }
       } catch (error) {
-        console.warn('Could not backfill question embedding; continuing exact-match only:', error);
+        logger.warn('Could not backfill question embedding; continuing exact-match only:', error);
         break;
       }
     }
@@ -508,7 +509,7 @@ export async function POST(request: NextRequest) {
       },
     });
   } catch (error) {
-    console.error('Question generation error:', error);
+    logger.error('Question generation error:', error);
     // Scope §32: generation failure reaches the requesting faculty too — the
     // wizard page may have been closed while the provider was working.
     if (notifyCtx.userId && notifyCtx.offeringId) {

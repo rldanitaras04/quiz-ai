@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Table, THead, TBody, TR, TH, TD } from '@/components/ui/Table';
 import { notifyError, notifySuccess } from '@/components/ui/alerts';
 import { DIFFICULTY_LABELS, BLOOM_LABELS } from '@/lib/constants';
-import { generateAssessmentTOS } from '@/app/(dashboard)/faculty/subjects/[offeringId]/assessments/actions';
+import { generateAssessmentTOS } from '@/app/(dashboard)/faculty/subjects/[offeringId]/assessments/actions/ai';
 import { tosMarginals, tosPercent, validateTos } from '@/lib/ai/tos';
 import type { WizardState } from '@/app/(dashboard)/faculty/subjects/[offeringId]/assessments/new/page';
 import type {

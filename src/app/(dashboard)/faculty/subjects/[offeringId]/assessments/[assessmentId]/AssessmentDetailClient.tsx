@@ -18,19 +18,10 @@ import {
   DIFFICULTY_LABELS,
   QUESTION_TYPE_LABELS,
 } from '@/lib/constants';
-import {
-  addQuestion,
-  createNewVersion,
-  deleteAssessmentVersion,
-  deleteQuestion,
-  publishAssessment,
-  updateAssessment,
-  updateQuestion,
-  getSourceForQuestion,
-  type AssessmentDetail,
-  type AssessmentDetailQuestion,
-  type QuestionSourceInfo,
-} from '@/app/(dashboard)/faculty/subjects/[offeringId]/assessments/actions';
+import { addQuestion, deleteQuestion, updateQuestion, getSourceForQuestion, type QuestionSourceInfo } from '@/app/(dashboard)/faculty/subjects/[offeringId]/assessments/actions/questions'
+import { createNewVersion, deleteAssessmentVersion } from '@/app/(dashboard)/faculty/subjects/[offeringId]/assessments/actions/versions'
+import { publishAssessment } from '@/app/(dashboard)/faculty/subjects/[offeringId]/assessments/actions/lifecycle'
+import { updateAssessment, type AssessmentDetail, type AssessmentDetailQuestion } from '@/app/(dashboard)/faculty/subjects/[offeringId]/assessments/actions/assessments';
 import { getTopicsForOffering } from '@/app/(dashboard)/faculty/subjects/[offeringId]/topics/actions';
 import { saveAssessmentQuestionToBank } from '@/app/(dashboard)/faculty/subjects/[offeringId]/question-bank/actions';
 import ImportExamModal from '@/components/assessment/ImportExamModal';

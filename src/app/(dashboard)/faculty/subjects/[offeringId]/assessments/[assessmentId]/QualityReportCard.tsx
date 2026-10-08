@@ -10,10 +10,7 @@ import {
   DIFFICULTY_LABELS,
   QUESTION_TYPE_SHORT_LABELS,
 } from '@/lib/constants';
-import {
-  getPreExamQuality,
-  type PreExamQualityReport,
-} from '@/app/(dashboard)/faculty/subjects/[offeringId]/assessments/actions';
+import { getPreExamQuality, type PreExamQualityReport } from '@/app/(dashboard)/faculty/subjects/[offeringId]/assessments/actions/ai';
 
 const DIMENSION_LABELS: Record<string, string> = {
   total: 'Total items',

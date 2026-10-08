@@ -1,4 +1,5 @@
 import { createAdminClient } from '@/lib/supabase/admin';
+import { logger } from '../logger.ts';
 import type {
   GenerateQuestionsParams,
   GenerationResult,
@@ -82,7 +83,7 @@ export async function checkSimilarity(
     embedding = (await generateEmbedding(questionText)).embedding;
   } catch (error) {
     // No embedding provider reachable: degrade to exact matching only.
-    console.warn('Embedding unavailable during similarity check:', error);
+    logger.warn('Embedding unavailable during similarity check:', error);
   }
 
   const score = scoreAgainstExisting(

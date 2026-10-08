@@ -142,23 +142,28 @@ export const EXCEPTION_TYPE_LABELS: Record<ExceptionType, string> = {
 };
 
 // ============================================================================
-// Status Colors (semantic Tailwind classes)
+// Status Colors (design tokens)
+//
+// These class strings resolve through the semantic tokens declared in
+// `globals.css`, so light and dark mode stay coherent without a second
+// hand-written `dark:` pair per status. Prefer `statusVariant()` from
+// `@/lib/status` when rendering a <Badge>; keep these maps for raw chip markup.
 // ============================================================================
 
 export const ASSESSMENT_STATUS_COLORS: Record<AssessmentStatus, string> = {
-  draft: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300',
-  approved: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300',
-  published: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300',
-  closed: 'bg-gray-100 text-gray-800 dark:bg-gray-800/50 dark:text-gray-300',
+  draft: 'bg-[var(--color-warning-light)] text-[var(--color-warning)]',
+  approved: 'bg-[var(--color-info-light)] text-[var(--color-info)]',
+  published: 'bg-[var(--color-success-light)] text-[var(--color-success)]',
+  closed: 'bg-[var(--color-surface-hover)] text-[var(--color-muted)]',
 };
 
 export const ATTEMPT_STATUS_COLORS: Record<AttemptStatus, string> = {
-  created: 'bg-gray-100 text-gray-800 dark:bg-gray-800/50 dark:text-gray-300',
-  in_progress: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300',
-  submitted: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300',
-  auto_submitted: 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300',
-  expired: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300',
-  invalidated: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300',
+  created: 'bg-[var(--color-surface-hover)] text-[var(--color-muted)]',
+  in_progress: 'bg-[var(--color-info-light)] text-[var(--color-info)]',
+  submitted: 'bg-[var(--color-success-light)] text-[var(--color-success)]',
+  auto_submitted: 'bg-[var(--color-warning-light)] text-[var(--color-warning)]',
+  expired: 'bg-[var(--color-danger-light)] text-[var(--color-danger)]',
+  invalidated: 'bg-[var(--color-danger-light)] text-[var(--color-danger)]',
 };
 
 // ============================================================================

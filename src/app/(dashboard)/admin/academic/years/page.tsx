@@ -3,6 +3,7 @@ import PageHeader from '@/components/ui/PageHeader';
 import { Card, CardContent } from '@/components/ui/Card';
 import { getAcademicStructure, getAdminReferenceData } from '../../actions';
 import AcademicManager from '../AcademicManager';
+import AcademicNavSetter from '@/components/admin/AcademicNavSetter';
 
 export default async function AcademicYearsPage(): Promise<JSX.Element> {
   const [structure, reference] = await Promise.all([
@@ -22,6 +23,7 @@ export default async function AcademicYearsPage(): Promise<JSX.Element> {
 
   return (
     <div>
+      <AcademicNavSetter currentPath="/admin/academic/years" />
       <PageHeader
         title="Academic Years"
         description="Create academic years and review their semesters"

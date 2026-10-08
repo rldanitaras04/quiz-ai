@@ -57,7 +57,7 @@ export default function ContextualSidebar({
                 }}
                 className={`flex items-center gap-3 rounded-[var(--radius-md)] px-3 py-2.5 text-sm font-medium transition-colors ${
                   active
-                    ? 'bg-[var(--color-primary-light)] text-[var(--color-primary)]'
+                    ? 'bg-[var(--color-primary-light)] font-semibold text-[var(--color-primary)]'
                     : 'text-[var(--color-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-foreground)]'
                 }`}
                 aria-current={active ? 'page' : undefined}

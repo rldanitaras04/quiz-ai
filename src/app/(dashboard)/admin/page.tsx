@@ -29,16 +29,28 @@ import {
 import { getAdminDashboardData } from './actions';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import Badge from '@/components/ui/Badge';
+import PageHeader from '@/components/ui/PageHeader';
+import { EmptyNote } from '@/components/ui/EmptyState';
 import StatCard from '@/components/admin/dashboard/StatCard';
 import AssessmentTrendsChart from '@/components/admin/dashboard/AssessmentTrendsChart';
 import RoleDistributionChart from '@/components/admin/dashboard/RoleDistributionChart';
+import { statusBadge } from '@/lib/status';
+import { formatDate, formatNumber, formatRelative, formatTime } from '@/lib/format';
 
+/** Icon-tile tones, expressed only through semantic color tokens. */
 const TILE = {
-  blue: 'bg-blue-50 text-blue-600 dark:bg-blue-500/15 dark:text-blue-400',
-  green: 'bg-emerald-50 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-400',
-  violet: 'bg-violet-50 text-violet-600 dark:bg-violet-500/15 dark:text-violet-400',
-  amber: 'bg-amber-50 text-amber-600 dark:bg-amber-500/15 dark:text-amber-400',
-  slate: 'bg-slate-100 text-slate-600 dark:bg-slate-500/15 dark:text-slate-300',
+  info: 'bg-[var(--color-info-light)] text-[var(--color-info)]',
+  success: 'bg-[var(--color-success-light)] text-[var(--color-success)]',
+  primary: 'bg-[var(--color-primary-light)] text-[var(--color-primary)]',
+  warning: 'bg-[var(--color-warning-light)] text-[var(--color-warning)]',
+  neutral: 'bg-[var(--color-surface-hover)] text-[var(--color-muted)]',
+  // Legacy accent keys resolve to the neutral token: the accompanying badge
+  // already carries the status colour, so icon tiles no longer compete with it.
+  blue: 'bg-[var(--color-surface-hover)] text-[var(--color-muted)]',
+  green: 'bg-[var(--color-surface-hover)] text-[var(--color-muted)]',
+  violet: 'bg-[var(--color-surface-hover)] text-[var(--color-muted)]',
+  amber: 'bg-[var(--color-surface-hover)] text-[var(--color-muted)]',
+  slate: 'bg-[var(--color-surface-hover)] text-[var(--color-muted)]',
 } as const;
 
 type BadgeVariant = ComponentProps<typeof Badge>['variant'];
@@ -222,7 +234,7 @@ export default async function AdminDashboardPage(): Promise<JSX.Element> {
       {/* Header */}
       <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight text-[var(--color-foreground)]">
+          <h1 className="text-2xl font-semibold tracking-tight text-[var(--color-foreground)]">
             Dashboard
           </h1>
           <p className="mt-1 text-sm text-[var(--color-muted)]">
@@ -334,7 +346,7 @@ export default async function AdminDashboardPage(): Promise<JSX.Element> {
                       aria-valuemax={topSubjectsMax}
                     >
                       <div
-                        className="h-full rounded-full bg-gradient-to-r from-[var(--color-primary)] to-blue-400"
+                        className="h-full rounded-full bg-[var(--color-primary)]"
                         style={{
                           width: `${Math.max((subject.assessmentCount / topSubjectsMax) * 100, 4)}%`,
                         }}
@@ -457,8 +469,8 @@ export default async function AdminDashboardPage(): Promise<JSX.Element> {
           <p
             className={`text-sm font-semibold ${
               allSystemsOk
-                ? 'text-emerald-600 dark:text-emerald-400'
-                : 'text-amber-600 dark:text-amber-400'
+                ? 'text-[var(--color-success)]'
+                : 'text-[var(--color-warning)]'
             }`}
           >
             {allSystemsOk ? 'All Systems Operational' : 'Some Systems Need Attention'}
@@ -468,13 +480,13 @@ export default async function AdminDashboardPage(): Promise<JSX.Element> {
               <li key={row.label} className="flex items-center gap-2.5 text-sm">
                 {row.ok ? (
                   <CheckCircle
-                    className="h-4 w-4 shrink-0 text-emerald-500"
+                    className="h-4 w-4 shrink-0 text-[var(--color-success)]"
                     weight="fill"
                     aria-hidden="true"
                   />
                 ) : (
                   <WarningCircle
-                    className="h-4 w-4 shrink-0 text-amber-500"
+                    className="h-4 w-4 shrink-0 text-[var(--color-warning)]"
                     weight="fill"
                     aria-hidden="true"
                   />
@@ -483,8 +495,8 @@ export default async function AdminDashboardPage(): Promise<JSX.Element> {
                 <span
                   className={`ml-auto shrink-0 text-xs font-semibold ${
                     row.ok
-                      ? 'text-emerald-600 dark:text-emerald-400'
-                      : 'text-amber-600 dark:text-amber-400'
+                      ? 'text-[var(--color-success)]'
+                      : 'text-[var(--color-warning)]'
                   }`}
                 >
                   {row.state}

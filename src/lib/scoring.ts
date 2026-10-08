@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { StudentResponse, AnswerKey, ScoringStatus } from '@/lib/types';
 import { matchIdentification, normalizeIdentification } from '@/lib/identification-match';
+import { logger } from './logger.ts';
 
 export function scoreMCQ(selectedChoiceId: string | null, correctChoiceId: string | null): number {
   if (!selectedChoiceId || !correctChoiceId) return 0;
@@ -229,7 +230,7 @@ export async function upsertAssessmentResult(
     .eq('id', attemptId)
     .single();
   if (attemptErr || !attempt) {
-    console.error('upsertAssessmentResult: attempt lookup failed:', attemptErr?.message);
+    logger.error('upsertAssessmentResult: attempt lookup failed:', attemptErr?.message);
     return null;
   }
 
@@ -267,7 +268,7 @@ export async function upsertAssessmentResult(
     .eq('attempt_id', attemptId)
     .select('id');
   if (updErr) {
-    console.error('upsertAssessmentResult: update failed:', updErr.message);
+    logger.error('upsertAssessmentResult: update failed:', updErr.message);
     totals.ok = false;
     return totals;
   }
@@ -282,7 +283,7 @@ export async function upsertAssessmentResult(
       status: 'pending',
     });
     if (insErr) {
-      console.error('upsertAssessmentResult: insert failed:', insErr.message);
+      logger.error('upsertAssessmentResult: insert failed:', insErr.message);
       totals.ok = false;
     }
   }

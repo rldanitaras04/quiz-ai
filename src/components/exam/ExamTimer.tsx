@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import { Clock } from '@phosphor-icons/react';
 
 interface ExamTimerProps {
   expiresAt: string;
@@ -71,33 +72,31 @@ export default function ExamTimer({ expiresAt, onTimeUp, clockOffsetMs = 0 }: Ex
   }, [expiresAt]);
 
   const getColor = (): string => {
-    if (remaining <= 60) return 'text-red-600 dark:text-red-400';
-    if (remaining <= 300) return 'text-orange-500 dark:text-orange-400';
-    if (remaining <= 600) return 'text-yellow-500 dark:text-yellow-400';
-    return 'text-foreground';
+    if (remaining <= 60) return 'text-[var(--color-danger)]';
+    if (remaining <= 300) return 'text-[var(--color-warning)]';
+    return 'text-[var(--color-foreground)]';
   };
 
   const getBgColor = (): string => {
-    if (remaining <= 60) return 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800';
-    if (remaining <= 300) return 'bg-orange-50 dark:bg-orange-900/20 border-orange-200 dark:border-orange-800';
-    if (remaining <= 600) return 'bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-800';
-    return 'bg-surface border-border';
+    if (remaining <= 60)
+      return 'bg-[var(--color-danger-light)] border-[var(--color-danger)]/30';
+    if (remaining <= 300)
+      return 'bg-[var(--color-warning-light)] border-[var(--color-warning)]/30';
+    return 'bg-[var(--color-surface)] border-[var(--color-border)]';
   };
 
   return (
     <div
-      className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border font-mono text-sm font-semibold transition-colors ${getBgColor()} ${getColor()}`}
+      className={`flex items-center gap-2 px-3 py-1.5 rounded-[var(--radius-md)] border font-mono text-sm font-semibold transition-colors ${getBgColor()} ${getColor()}`}
       role="timer"
       aria-live="polite"
       aria-label={`Time remaining: ${formatTime(remaining)}`}
     >
-      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
-      </svg>
+      <Clock className="h-4 w-4" weight="regular" aria-hidden="true" />
       <span>{formatTime(remaining)}</span>
-      {remaining <= 300 && (
-        <span className="text-xs font-normal opacity-75">
-          {remaining <= 60 ? 'Submit now!' : 'Remaining'}
+      {remaining <= 60 && (
+        <span className="hidden text-xs font-normal opacity-75 sm:inline">
+          Submit now
         </span>
       )}
     </div>

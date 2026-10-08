@@ -44,6 +44,7 @@ import {
   type CapturingIdentityVerificationAdapter,
 } from '@/lib/identity-verification';
 import '@/lib/identity/register';
+import { logger } from '@/lib/logger';
 
 export interface StartVerificationResult {
   ok?: true;
@@ -136,7 +137,7 @@ export async function startIdentityVerification(): Promise<StartVerificationResu
       .select('user_id')
       .maybeSingle();
     if (error) {
-      console.error('verification consent write failed', error.message);
+      logger.error('verification consent write failed', error.message);
       return { error: 'Could not record your consent. Please try again.' };
     }
     if (!data) return { error: 'No student profile is linked to this account.' };
@@ -144,7 +145,7 @@ export async function startIdentityVerification(): Promise<StartVerificationResu
     const capture = await adapter.prepareCapture({ studentUserId: userId });
     return { ok: true, token: capture.token, challenges: capture.challenges };
   } catch (err) {
-    console.error('startIdentityVerification failed', err);
+    logger.error('startIdentityVerification failed', err);
     return { error: 'Could not start verification. Please try again.' };
   }
 }
@@ -179,7 +180,7 @@ export async function completeIdentityVerification(
       .eq('user_id', userId)
       .maybeSingle();
     if (readError) {
-      console.error('verification read failed', readError.message);
+      logger.error('verification read failed', readError.message);
       return { error: 'Could not read your verification status. Please try again.' };
     }
     if (profile?.verification_status === 'verified') return { ok: true, alreadyVerified: true };
@@ -211,7 +212,7 @@ export async function completeIdentityVerification(
       if (writeError) {
         // The checks passed but the save didn't — do NOT report success;
         // the student can settle again (the token stays valid).
-        console.error('verification write failed', writeError.message);
+        logger.error('verification write failed', writeError.message);
         return { error: 'Verification passed but could not be saved. Please try again.' };
       }
 
@@ -256,7 +257,7 @@ export async function completeIdentityVerification(
 
     return { error: friendlyRefusal(reason), reason };
   } catch (err) {
-    console.error('completeIdentityVerification failed', err);
+    logger.error('completeIdentityVerification failed', err);
     return { error: 'Verification failed unexpectedly. Please try again.' };
   }
 }
@@ -295,7 +296,7 @@ export async function requestManualVerification(): Promise<RequestVerificationRe
       .eq('user_id', userId)
       .maybeSingle();
     if (readError || !profile) {
-      console.error('verification request read failed', readError?.message ?? 'no profile');
+      logger.error('verification request read failed', readError?.message ?? 'no profile');
       return { error: 'No student profile is linked to this account.' };
     }
 
@@ -314,7 +315,7 @@ export async function requestManualVerification(): Promise<RequestVerificationRe
       .eq('student_id', userId)
       .eq('status', 'enrolled');
     if (enrollError) {
-      console.error('verification request enrollments failed', enrollError.message);
+      logger.error('verification request enrollments failed', enrollError.message);
       return { error: 'Could not resolve your subjects. Please try again.' };
     }
     const offeringIds = [...new Set((enrollments ?? []).map((e) => String(e.subject_offering_id)))];
@@ -348,7 +349,7 @@ export async function requestManualVerification(): Promise<RequestVerificationRe
       .select('faculty_id, subject_offering_id')
       .in('subject_offering_id', offeringIds);
     if (assignError) {
-      console.error('verification request assignments failed', assignError.message);
+      logger.error('verification request assignments failed', assignError.message);
       return { error: 'Could not resolve your instructors. Please try again.' };
     }
     const targetByFaculty = new Map<string, { offeringId: string; label: string }>();
@@ -394,7 +395,7 @@ export async function requestManualVerification(): Promise<RequestVerificationRe
     );
     if (insertError) {
       // Do not record the request when nothing was delivered.
-      console.error('verification request notification failed', insertError.message);
+      logger.error('verification request notification failed', insertError.message);
       return { error: 'Could not notify your instructors. Please try again.' };
     }
 
@@ -405,7 +406,7 @@ export async function requestManualVerification(): Promise<RequestVerificationRe
     if (writeError) {
       // Notifications are already out; the UI can still reflect the request
       // from the timestamp we return.
-      console.error('verification request write failed', writeError.message);
+      logger.error('verification request write failed', writeError.message);
     }
 
     await recordAuditLog({
@@ -419,7 +420,7 @@ export async function requestManualVerification(): Promise<RequestVerificationRe
 
     return { ok: true, notified: targetByFaculty.size, requestedAt: nowIso };
   } catch (err) {
-    console.error('requestManualVerification failed', err);
+    logger.error('requestManualVerification failed', err);
     return { error: 'Could not send the request. Please try again.' };
   }
 }

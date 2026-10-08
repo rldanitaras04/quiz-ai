@@ -3,6 +3,7 @@
 import { createAdminClient } from '@/lib/supabase/admin';
 import { validateEmail, validatePassword, validateMinLength, validateRequired, validateStudentNumber, validatePattern } from '@/lib/validators';
 import { LOGIN_PATH, appOrigin } from '@/lib/constants';
+import { logger } from '@/lib/logger';
 
 /**
  * Registration runs server-side with the service-role client so the whole
@@ -221,7 +222,7 @@ export async function registerUser(input: RegisterInput): Promise<RegisterResult
   });
 
   if (confirmError) {
-    console.error('Confirmation email not dispatched:', confirmError.message);
+    logger.error('Confirmation email not dispatched:', confirmError.message);
     await rollback();
     return {
       success: false,

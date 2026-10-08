@@ -6,11 +6,8 @@ import Badge from '@/components/ui/Badge';
 import Modal from '@/components/ui/Modal';
 import { notifyError, notifySuccess } from '@/components/ui/alerts';
 import { DIFFICULTY_LABELS, BLOOM_LABELS } from '@/lib/constants';
-import {
-  applyAssessmentModifications,
-  proposeAssessmentModifications,
-  type AssessmentDetail,
-} from '@/app/(dashboard)/faculty/subjects/[offeringId]/assessments/actions';
+import { applyAssessmentModifications, proposeAssessmentModifications } from '@/app/(dashboard)/faculty/subjects/[offeringId]/assessments/actions/ai'
+import { type AssessmentDetail } from '@/app/(dashboard)/faculty/subjects/[offeringId]/assessments/actions/assessments';
 import type { DroppedProposal, ModifyProposal } from '@/lib/ai/modify';
 
 interface AiModifyModalProps {

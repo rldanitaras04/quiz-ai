@@ -1,15 +1,30 @@
 import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { createClient } from '@/lib/supabase/server';
+import {
+  checkRequiredEnv,
+  isBootstrapWindowAction,
+  isPublicAction,
+  parseCreateAdminInput,
+  parseUserId,
+} from '@/lib/bootstrap-policy';
 
 /**
  * SECURITY MODEL
  * --------------
+ * - `check_env` is public: the /setup wizard calls it before any account
+ *   exists. It reports only whether the required Supabase env vars are set —
+ *   never their values, and nothing about the deployment beyond that.
  * - `create_admin` is only permitted while NO super_admin exists yet
  *   (initial self-host bootstrap window). Once an admin exists, this
- *   endpoint can no longer mint new ones.
+ *   endpoint can no longer mint new ones. Credentials always come from the
+ *   request body; this file must never carry a default account.
  * - `promote_to_admin` and `diagnose` require an authenticated, active
  *   super_admin session.
+ *
+ * The set of actions handled above the auth gate is asserted by
+ * `tests/bootstrap-auth.test.mjs` against src/lib/bootstrap-policy.ts — adding
+ * an action there without updating the policy fails the unit suite.
  *
  * There is deliberately no SQL-execution action: schema changes are applied
  * with `supabase db push`, not through an HTTP endpoint.
@@ -66,35 +81,23 @@ export async function POST(request: Request) {
     const action = body?.action;
 
     // ------------------------------------------------------------------
-    // check_env: report which env vars are configured (no secrets)
+    // check_env: report which required env vars are missing (no values, no
+    // secrets, no AI-provider recon). Public: the setup wizard needs it
+    // before the first admin account exists.
     // ------------------------------------------------------------------
-    if (action === 'check_env') {
-      const missing: string[] = [];
-      if (!process.env.NEXT_PUBLIC_SUPABASE_URL) missing.push('NEXT_PUBLIC_SUPABASE_URL');
-      if (!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) missing.push('NEXT_PUBLIC_SUPABASE_ANON_KEY');
-      if (!process.env.SUPABASE_SERVICE_ROLE_KEY) missing.push('SUPABASE_SERVICE_ROLE_KEY');
-      return NextResponse.json({
-        success: missing.length === 0,
-        missing,
-        ai: {
-          openai: !!process.env.OPENAI_API_KEY,
-          groq: !!process.env.GROQ_API_KEY,
-        },
-      });
+    if (isPublicAction(action)) {
+      return NextResponse.json(checkRequiredEnv());
     }
 
     // ------------------------------------------------------------------
     // create_admin: ONLY during bootstrap (no super_admin exists yet)
     // ------------------------------------------------------------------
-    if (action === 'create_admin') {
-      const { email, password, fullName } = body ?? {};
-
-      if (typeof email !== 'string' || typeof password !== 'string' || typeof fullName !== 'string') {
-        return NextResponse.json({ error: 'email, password and fullName are required' }, { status: 400 });
+    if (isBootstrapWindowAction(action)) {
+      const parsed = parseCreateAdminInput(body);
+      if (!parsed.ok) {
+        return NextResponse.json({ error: parsed.error }, { status: 400 });
       }
-      if (password.length < 8) {
-        return NextResponse.json({ error: 'Password must be at least 8 characters' }, { status: 400 });
-      }
+      const { email, password, fullName } = parsed.value;
 
       if (await anySuperAdminExists()) {
         return NextResponse.json(
@@ -163,193 +166,6 @@ export async function POST(request: Request) {
     }
 
     // ------------------------------------------------------------------
-    // create_test_student: fixed ready-to-use student for local testing.
-    // Allowed without a session (same setup-wizard surface as check_env):
-    // credentials are fixed and shown on /setup, and the role is not
-    // privileged. Always leaves email confirmed + verification_status verified.
-    // ------------------------------------------------------------------
-    if (action === 'create_test_student') {
-      const supabase = createAdminClient();
-      const email = 'student@test.com';
-      const password = 'Student123!';
-      const fullName = 'Test Student';
-
-      const ensureVerifiedStudent = async (userId: string): Promise<void> => {
-        // Confirm email so password login works without a confirmation click.
-        const { data: authUser } = await supabase.auth.admin.getUserById(userId);
-        if (authUser?.user && !authUser.user.email_confirmed_at) {
-          await supabase.auth.admin.updateUserById(userId, { email_confirm: true });
-        }
-
-        await supabase.from('profiles').upsert(
-          { id: userId, email, full_name: fullName, status: 'active' },
-          { onConflict: 'id' }
-        );
-
-        const { data: roles } = await supabase
-          .from('user_roles')
-          .select('id')
-          .eq('user_id', userId)
-          .eq('role', 'student')
-          .maybeSingle();
-        if (!roles) {
-          await supabase.from('user_roles').insert({ user_id: userId, role: 'student' });
-        }
-
-        const [{ data: program }, { data: yearLevel }] = await Promise.all([
-          supabase.from('programs').select('id').eq('code', 'BSIT').maybeSingle(),
-          supabase.from('year_levels').select('id').eq('name', '2nd Year').maybeSingle(),
-        ]);
-
-        let sectionId: string | null = null;
-        if (program && yearLevel) {
-          // Deterministic pick: BSIT/2nd Year normally has several sections
-          // (AI/NT/WM) and a bare maybeSingle() errors on >1 row, which
-          // silently left section_id null. Order by name so re-runs agree.
-          const { data: section } = await supabase
-            .from('sections')
-            .select('id')
-            .eq('program_id', program.id)
-            .eq('year_level_id', yearLevel.id)
-            .order('name', { ascending: true })
-            .limit(1)
-            .maybeSingle();
-          sectionId = section?.id ?? null;
-        }
-
-        const { data: existingProfile } = await supabase
-          .from('student_profiles')
-          .select('user_id')
-          .eq('user_id', userId)
-          .maybeSingle();
-
-        if (existingProfile) {
-          await supabase
-            .from('student_profiles')
-            .update({
-              verification_status: 'verified',
-              program_id: program?.id ?? null,
-              year_level_id: yearLevel?.id ?? null,
-              section_id: sectionId,
-              updated_at: new Date().toISOString(),
-            })
-            .eq('user_id', userId);
-        } else {
-          await supabase.from('student_profiles').insert({
-            user_id: userId,
-            student_number: '2024-TEST-001',
-            program_id: program?.id ?? null,
-            year_level_id: yearLevel?.id ?? null,
-            section_id: sectionId,
-            verification_status: 'verified',
-          });
-        }
-
-        // Section-scoped enrollment: the test student sees exactly their
-        // section's offerings. The old version enrolled into EVERY active
-        // offering, so one subject showed up once per section on My Subjects.
-        // This also normalizes previously-created rows on each re-run.
-        if (sectionId) {
-          const { data: offerings } = await supabase
-            .from('subject_offerings')
-            .select('id')
-            .eq('section_id', sectionId)
-            .eq('status', 'active');
-          const sectionOfferingIds = new Set((offerings ?? []).map((o) => o.id));
-
-          const { data: existingEnrollments } = await supabase
-            .from('enrollments')
-            .select('id, subject_offering_id, status')
-            .eq('student_id', userId);
-          const existing = existingEnrollments ?? [];
-          const byOffering = new Map(
-            existing.map((e) => [e.subject_offering_id, e] as const)
-          );
-          const now = new Date().toISOString();
-
-          const toInsert = [...sectionOfferingIds]
-            .filter((id) => !byOffering.has(id))
-            .map((id) => ({
-              subject_offering_id: id,
-              student_id: userId,
-              status: 'enrolled' as const,
-              enrolled_at: now,
-            }));
-          const toReenroll = existing
-            .filter((e) => sectionOfferingIds.has(e.subject_offering_id) && e.status !== 'enrolled')
-            .map((e) => e.id);
-          const toWithdraw = existing
-            .filter((e) => !sectionOfferingIds.has(e.subject_offering_id) && e.status === 'enrolled')
-            .map((e) => e.id);
-
-          if (toInsert.length > 0) {
-            await supabase.from('enrollments').insert(toInsert);
-          }
-          if (toReenroll.length > 0) {
-            await supabase
-              .from('enrollments')
-              .update({ status: 'enrolled', enrolled_at: now, updated_at: now })
-              .in('id', toReenroll);
-          }
-          if (toWithdraw.length > 0) {
-            await supabase
-              .from('enrollments')
-              .update({ status: 'withdrawn', updated_at: now })
-              .in('id', toWithdraw);
-          }
-        }
-      };
-
-      // Reuse an existing account and force it into a verified, usable state.
-      const { data: existingUsers } = await supabase.auth.admin.listUsers();
-      const existing = existingUsers?.users?.find(
-        (u) => u.email?.toLowerCase() === email
-      );
-      if (existing) {
-        await ensureVerifiedStudent(existing.id);
-        return NextResponse.json({
-          success: true,
-          message: 'Test student already exists (verified and ready to use)',
-          credentials: { email, password },
-          userId: existing.id,
-        });
-      }
-
-      const { data: userData, error: createError } = await supabase.auth.admin.createUser({
-        email,
-        password,
-        email_confirm: true,
-        user_metadata: { full_name: fullName },
-      });
-
-      if (createError || !userData.user) {
-        return NextResponse.json(
-          { error: createError?.message || 'User creation failed' },
-          { status: 500 }
-        );
-      }
-
-      const userId = userData.user.id;
-      const { error: profileError } = await supabase
-        .from('profiles')
-        .insert({ id: userId, email, full_name: fullName, status: 'active' });
-
-      if (profileError) {
-        await supabase.auth.admin.deleteUser(userId);
-        return NextResponse.json({ error: profileError.message }, { status: 500 });
-      }
-
-      await ensureVerifiedStudent(userId);
-
-      return NextResponse.json({
-        success: true,
-        message: 'Test student created successfully (verified)',
-        credentials: { email, password },
-        userId,
-      });
-    }
-
-    // ------------------------------------------------------------------
     // All remaining actions require an authenticated super_admin
     // ------------------------------------------------------------------
     const auth = await requireSuperAdmin();
@@ -361,17 +177,16 @@ export async function POST(request: Request) {
     }
 
     if (action === 'promote_to_admin') {
-      const { userId } = body ?? {};
-
-      if (typeof userId !== 'string' || !userId) {
-        return NextResponse.json({ error: 'userId is required' }, { status: 400 });
+      const parsed = parseUserId(body);
+      if (!parsed.ok) {
+        return NextResponse.json({ error: parsed.error }, { status: 400 });
       }
 
       const supabase = createAdminClient();
       const { data: existing } = await supabase
         .from('user_roles')
         .select('id')
-        .eq('user_id', userId)
+        .eq('user_id', parsed.value)
         .eq('role', 'super_admin')
         .maybeSingle();
 
@@ -381,7 +196,7 @@ export async function POST(request: Request) {
 
       const { error } = await supabase
         .from('user_roles')
-        .insert({ user_id: userId, role: 'super_admin' });
+        .insert({ user_id: parsed.value, role: 'super_admin' });
 
       if (error) {
         return NextResponse.json(
@@ -394,16 +209,15 @@ export async function POST(request: Request) {
     }
 
     if (action === 'diagnose') {
-      const { userId } = body ?? {};
-
-      if (typeof userId !== 'string' || !userId) {
-        return NextResponse.json({ error: 'userId is required' }, { status: 400 });
+      const parsed = parseUserId(body);
+      if (!parsed.ok) {
+        return NextResponse.json({ error: parsed.error }, { status: 400 });
       }
 
       const supabase = createAdminClient();
       const [profileResult, rolesResult] = await Promise.all([
-        supabase.from('profiles').select('*').eq('id', userId).maybeSingle(),
-        supabase.from('user_roles').select('*').eq('user_id', userId),
+        supabase.from('profiles').select('id, email, full_name, status').eq('id', parsed.value).maybeSingle(),
+        supabase.from('user_roles').select('id, user_id, role').eq('user_id', parsed.value),
       ]);
 
       return NextResponse.json({

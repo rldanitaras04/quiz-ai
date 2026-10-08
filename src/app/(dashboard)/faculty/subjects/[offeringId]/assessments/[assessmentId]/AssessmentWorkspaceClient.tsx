@@ -10,7 +10,7 @@ import { getAssessmentWorkspaceNav, type NavigationItem } from '@/config/navigat
 interface Props {
   offeringId: string;
   assessmentId: string;
-  detail: NonNullable<Awaited<ReturnType<typeof import('../actions').getAssessmentDetail>>>;
+  detail: NonNullable<Awaited<ReturnType<typeof import('../actions/assessments').getAssessmentDetail>>>;
   subjectName: string;
   statusLabel: string;
   heading: {

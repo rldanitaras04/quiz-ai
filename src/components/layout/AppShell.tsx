@@ -193,10 +193,10 @@ export default function AppShell({
                       className={`flex-shrink-0 px-4 py-2 text-sm font-medium whitespace-nowrap rounded-[var(--radius-md)] transition-colors ${
                         item.exact
                           ? contextualNavPath === item.href
-                            ? 'bg-[var(--color-primary)] text-white'
+                            ? 'bg-[var(--color-primary-light)] font-semibold text-[var(--color-primary)]'
                             : 'text-[var(--color-muted)] hover:bg-[var(--color-surface-hover)]'
                           : contextualNavPath.startsWith(item.href ?? '')
-                            ? 'bg-[var(--color-primary)] text-white'
+                            ? 'bg-[var(--color-primary-light)] font-semibold text-[var(--color-primary)]'
                             : 'text-[var(--color-muted)] hover:bg-[var(--color-surface-hover)]'
                       }`}
                       aria-current={item.exact ? contextualNavPath === item.href : contextualNavPath.startsWith(item.href ?? '') ? 'page' : undefined}

@@ -21,6 +21,7 @@ import type {
   ExamManifest,
   QuestionWithChoices,
 } from '@/lib/types';
+import { logger } from '@/lib/logger';
 
 interface AttemptDetails {
   attempt: ExamAttempt;
@@ -565,7 +566,7 @@ export async function submitExam(
 
     return { success: true, scored: true, pendingApplied, pendingSkipped };
   } catch (scoringError) {
-    console.error('Scoring failed after submission:', scoringError);
+    logger.error('Scoring failed after submission:', scoringError);
     return {
       success: true,
       scored: false,

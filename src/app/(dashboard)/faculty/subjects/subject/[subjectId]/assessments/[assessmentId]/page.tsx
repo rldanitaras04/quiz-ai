@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
 import PageHeader from '@/components/ui/PageHeader';
 import Button from '@/components/ui/Button';
-import { getAssessmentDetail } from '@/app/(dashboard)/faculty/subjects/[offeringId]/assessments/actions';
+import { getAssessmentDetail } from '@/app/(dashboard)/faculty/subjects/[offeringId]/assessments/actions/assessments';
 import AssessmentDetailClient from '@/app/(dashboard)/faculty/subjects/[offeringId]/assessments/[assessmentId]/AssessmentDetailClient';
 import DeleteAssessmentButton from '@/app/(dashboard)/faculty/subjects/[offeringId]/assessments/[assessmentId]/DeleteAssessmentButton';
 import DownloadTosButton from '@/app/(dashboard)/faculty/subjects/[offeringId]/assessments/[assessmentId]/DownloadTosButton';

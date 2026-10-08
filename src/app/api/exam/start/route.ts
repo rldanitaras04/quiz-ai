@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { startExamAttempt, isStartExamSuccess } from '@/lib/exam';
+import { logger } from '@/lib/logger';
 
 export async function POST(request: Request) {
   try {
@@ -54,7 +55,7 @@ export async function POST(request: Request) {
       questions: questionsForStudent,
     });
   } catch (error) {
-    console.error('Exam start error:', error);
+    logger.error('Exam start error:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

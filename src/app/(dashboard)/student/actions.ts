@@ -2,6 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { getDeploymentStatus, type DeploymentStatusResult } from '@/lib/deployment-status';
+import { logger } from '@/lib/logger';
 
 const MONTH_SHORT = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
 const UPCOMING_LIST_LIMIT = 6;
@@ -116,7 +117,7 @@ export async function getStudentDashboardData(): Promise<StudentDashboardData | 
   if (failures.length > 0) {
     // Full detail in the server log; only labels+codes in the client-visible
     // message so the error boundary stays actionable without leaking query text.
-    console.error('[student-dashboard] academic context load failed:', JSON.stringify(failures));
+    logger.error('[student-dashboard] academic context load failed:', JSON.stringify(failures));
     const suffix = failures.map((f) => `${f.label}:${f.code ?? 'unknown'}`).join(', ');
     throw new Error(`Failed to load your academic context. [${suffix}]`);
   }

@@ -1,3 +1,5 @@
+import { logger } from './logger.ts';
+
 /**
  * Replaceable identity-verification adapter (scope §5 "Exam identity
  * verification").
@@ -155,7 +157,7 @@ export function getIdentityVerificationAdapter(): IdentityVerificationAdapter | 
   const factory = registry.get(id);
   if (!factory) {
     const known = [...registry.keys()].join(', ') || 'none';
-    console.warn(
+    logger.warn(
       `IDENTITY_ADAPTER="${id}" has no registered adapter (known: ${known}); using manual verification only.`
     );
     return null;

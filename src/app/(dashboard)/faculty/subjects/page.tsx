@@ -6,6 +6,7 @@ import { Card } from '@/components/ui/Card';
 import Badge from '@/components/ui/Badge';
 import EmptyState from '@/components/ui/EmptyState';
 import { Table, THead, TBody, TR, TH, TD } from '@/components/ui/Table';
+import { routes } from '@/config/routes';
 
 interface SubjectOfferingSummary {
   id: string;
@@ -135,7 +136,7 @@ export default async function FacultySubjectsPage() {
               <div className="p-4">
                 <div className="flex items-center justify-between mb-3">
                   <Link
-                    href={`/faculty/subjects/subject/${subject.subjectId}`}
+                    href={routes.faculty.subjectWorkspace(subject.subjectId)}
                     className="text-lg font-semibold text-[var(--color-primary)] hover:underline"
                   >
                     {subject.code} - {subject.title}

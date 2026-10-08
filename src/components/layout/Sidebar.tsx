@@ -238,7 +238,7 @@ function NavItem({
           collapsed ? 'justify-center p-2.5' : 'px-3 py-2'
         } ${
           active
-            ? 'bg-[var(--color-primary)] text-white shadow-sm shadow-[var(--color-primary)]/30'
+            ? 'bg-[var(--color-primary-light)] font-semibold text-[var(--color-primary)]'
             : 'text-[var(--color-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-foreground)]'
         }`}
         aria-current={active ? 'page' : undefined}

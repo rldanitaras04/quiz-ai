@@ -3,6 +3,7 @@ import PageHeader from '@/components/ui/PageHeader';
 import { Card, CardContent } from '@/components/ui/Card';
 import { getAcademicStructure, getAdminReferenceData } from '../../actions';
 import AcademicManager from '../AcademicManager';
+import AcademicNavSetter from '@/components/admin/AcademicNavSetter';
 
 export default async function SectionsPage(): Promise<JSX.Element> {
   const [structure, reference] = await Promise.all([
@@ -24,6 +25,7 @@ export default async function SectionsPage(): Promise<JSX.Element> {
 
   return (
     <div>
+      <AcademicNavSetter currentPath="/admin/academic/sections" />
       <PageHeader
         title="Sections"
         description="Create and manage sections within each program and year level"

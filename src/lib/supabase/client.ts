@@ -1,3 +1,5 @@
+import { logger } from '../logger.ts';
+
 import { createBrowserClient } from "@supabase/ssr";
 
 // Client components are statically prerendered at build time, which constructs
@@ -22,7 +24,7 @@ export function createClient() {
   const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
   if (!url || !key || !isValidHttpUrl(url)) {
-    console.warn(
+    logger.warn(
       "NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY are missing or invalid " +
         "(NEXT_PUBLIC_SUPABASE_URL must be a full https://... URL). " +
         "Using a placeholder browser client — authentication will not work until .env.local is fixed."

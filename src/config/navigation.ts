@@ -9,7 +9,6 @@ import {
   Bell,
   Users,
   GraduationCap,
-  Brain,
   ListMagnifyingGlass,
   Pulse,
   Gear,
@@ -31,6 +30,7 @@ import {
   Stack,
   Binoculars,
 } from '@phosphor-icons/react';
+import { ROUTES, routes } from "./routes.ts";
 
 // ============================================================================
 // Types
@@ -81,129 +81,16 @@ export interface BreadcrumbItem {
 }
 
 // ============================================================================
-// Route Constants (canonical paths)
+// Routes
 // ============================================================================
+//
+// Re-exported from `config/routes.ts` so existing client callers keep working.
+// Server components must import from `@/config/routes` directly: importing
+// THIS module pulls in the phosphor icon set below, whose `createContext`
+// calls are illegal in the React Server Components graph (see the same note
+// in `config/role-paths.ts`).
 
-export const ROUTES = {
-  // Public
-  login: '/login',
-  register: '/register',
-  setup: '/setup',
-  home: '/',
-
-  // Admin
-  adminDashboard: '/admin',
-  adminMonitoring: '/admin/monitoring',
-  adminAcademic: '/admin/academic',
-  adminAcademicYears: '/admin/academic/years',
-  adminAcademicSemesters: '/admin/academic/semesters',
-  adminAcademicPrograms: '/admin/academic/programs',
-  adminAcademicYearLevels: '/admin/academic/year-levels',
-  adminAcademicSections: '/admin/academic/sections',
-  adminSubjects: '/admin/subjects',
-  adminOfferings: '/admin/subjects/offerings',
-  adminUsers: '/admin/users',
-  adminUsersFaculty: '/admin/users/faculty',
-  adminUsersStudents: '/admin/users/students',
-  adminAuditLogs: '/admin/audit-logs',
-  adminSettings: '/admin/settings',
-  adminAiConfig: '/admin/ai-config',
-  adminAiUsage: '/admin/ai-usage',
-
-  // Faculty
-  facultyDashboard: '/faculty',
-  facultySubjects: '/faculty/subjects',
-  facultyProctoring: '/faculty/proctoring',
-
-  // Student
-  studentDashboard: '/student',
-  studentSubjects: '/student/subjects',
-  studentAssessments: '/student/assessments',
-  studentResults: '/student/results',
-
-  // Shared
-  notifications: '/notifications',
-  profile: '/profile',
-} as const;
-
-// ============================================================================
-// Route Helpers
-// ============================================================================
-
-export const routes = {
-  // Public
-  login: () => ROUTES.login,
-  register: () => ROUTES.register,
-  home: () => ROUTES.home,
-
-  // Admin
-  admin: {
-    dashboard: () => ROUTES.adminDashboard,
-    monitoring: () => ROUTES.adminMonitoring,
-    academic: () => ROUTES.adminAcademic,
-    academicYears: () => ROUTES.adminAcademicYears,
-    academicSemesters: () => ROUTES.adminAcademicSemesters,
-    academicPrograms: () => ROUTES.adminAcademicPrograms,
-    academicYearLevels: () => ROUTES.adminAcademicYearLevels,
-    academicSections: () => ROUTES.adminAcademicSections,
-    subjects: () => ROUTES.adminSubjects,
-    offerings: () => ROUTES.adminOfferings,
-    users: () => ROUTES.adminUsers,
-    usersFaculty: () => ROUTES.adminUsersFaculty,
-    usersStudents: () => ROUTES.adminUsersStudents,
-    auditLogs: () => ROUTES.adminAuditLogs,
-    settings: () => ROUTES.adminSettings,
-    aiConfig: () => ROUTES.adminAiConfig,
-    aiUsage: () => ROUTES.adminAiUsage,
-  },
-
-  // Faculty
-  faculty: {
-    dashboard: () => ROUTES.facultyDashboard,
-    subjects: () => ROUTES.facultySubjects,
-    proctoring: () => ROUTES.facultyProctoring,
-    subject: (offeringId: string) => `/faculty/subjects/${offeringId}` as const,
-    subjectStudents: (offeringId: string) => `/faculty/subjects/${offeringId}/students` as const,
-    subjectAssessments: (offeringId: string) => `/faculty/subjects/${offeringId}/assessments` as const,
-    subjectSources: (offeringId: string) => `/faculty/subjects/${offeringId}/sources` as const,
-    subjectTopics: (offeringId: string) => `/faculty/subjects/${offeringId}/topics` as const,
-    subjectQuestionBank: (offeringId: string) => `/faculty/subjects/${offeringId}/question-bank` as const,
-    subjectDeployments: (offeringId: string) => `/faculty/subjects/${offeringId}/deployments` as const,
-    subjectResults: (offeringId: string) => `/faculty/subjects/${offeringId}/results` as const,
-    assessment: (offeringId: string, assessmentId: string) =>
-      `/faculty/subjects/${offeringId}/assessments/${assessmentId}` as const,
-    assessmentReview: (offeringId: string, assessmentId: string) =>
-      `/faculty/subjects/${offeringId}/assessments/${assessmentId}/review` as const,
-    assessmentExceptions: (offeringId: string, assessmentId: string) =>
-      `/faculty/subjects/${offeringId}/assessments/${assessmentId}/exceptions` as const,
-    assessmentDeploy: (offeringId: string, assessmentId: string) =>
-      `/faculty/subjects/${offeringId}/assessments/${assessmentId}/deploy` as const,
-    assessmentAnalytics: (offeringId: string, assessmentId: string) =>
-      `/faculty/subjects/${offeringId}/assessments/${assessmentId}/analytics` as const,
-    assessmentMonitor: (offeringId: string, assessmentId: string) =>
-      `/faculty/subjects/${offeringId}/assessments/${assessmentId}/monitor` as const,
-    newAssessment: (offeringId: string) =>
-      `/faculty/subjects/${offeringId}/assessments/new` as const,
-  },
-
-  // Student
-  student: {
-    dashboard: () => ROUTES.studentDashboard,
-    subjects: () => ROUTES.studentSubjects,
-    subject: (offeringId: string) => `/student/subjects/${offeringId}` as const,
-    assessments: () => ROUTES.studentAssessments,
-    assessment: (assessmentId: string) => `/student/assessments/${assessmentId}` as const,
-    exam: (assessmentId: string, attemptId: string) =>
-      `/student/assessments/${assessmentId}/exam/${attemptId}` as const,
-    examResults: (assessmentId: string, attemptId: string) =>
-      `/student/assessments/${assessmentId}/exam/${attemptId}/results` as const,
-    results: () => ROUTES.studentResults,
-  },
-
-  // Shared
-  notifications: () => ROUTES.notifications,
-  profile: () => ROUTES.profile,
-} as const;
+export { ROUTES, routes } from "./routes.ts";
 
 // ============================================================================
 // Global Navigation Configuration
@@ -212,74 +99,55 @@ export const routes = {
 export const GLOBAL_NAVIGATION: Record<UserRole, NavigationGroup[]> = {
   super_admin: [
     {
+      // "What is happening right now" leads: system health sits beside the
+      // dashboard rather than buried under System.
       label: 'Overview',
       items: [
         { id: 'admin-dashboard', label: 'Dashboard', href: ROUTES.adminDashboard, icon: SquaresFour, exact: true },
+        { id: 'admin-monitoring', label: 'System Monitoring', href: ROUTES.adminMonitoring, icon: Pulse, exact: true },
         // Assignment administration for a role that has no faculty workspace:
         // admins reach proctoring through this shared page (scope §42).
         { id: 'admin-proctoring', label: 'Proctoring', href: ROUTES.facultyProctoring, icon: Binoculars },
       ],
     },
     {
-      label: 'User & Access',
+      // Flat rather than a nested accordion: three related lists read faster
+      // when visible at once, and the collapsed rail no longer has to expand
+      // itself just to reveal a child.
+      label: 'People',
       items: [
-        {
-          id: 'admin-users-group',
-          label: 'User Management',
-          icon: Users,
-          children: [
-            { id: 'admin-users', label: 'All Users', href: ROUTES.adminUsers, icon: Users, exact: true },
-            { id: 'admin-users-faculty', label: 'Faculty', href: ROUTES.adminUsersFaculty, icon: ChalkboardTeacher },
-            { id: 'admin-users-students', label: 'Students', href: ROUTES.adminUsersStudents, icon: Student },
-          ],
-        },
+        { id: 'admin-users', label: 'All Users', href: ROUTES.adminUsers, icon: Users, exact: true },
+        { id: 'admin-users-faculty', label: 'Faculty', href: ROUTES.adminUsersFaculty, icon: ChalkboardTeacher },
+        { id: 'admin-users-students', label: 'Students', href: ROUTES.adminUsersStudents, icon: Student },
       ],
     },
     {
-      label: 'Academic Setup',
+      // The five academic-type pages live behind the Academic Structure hub
+      // (contextual rail via getAcademicWorkspaceNav), so the global sidebar
+      // stays one line instead of a permanent six-item accordion.
+      label: 'Academics',
       items: [
-        {
-          id: 'admin-academic-group',
-          label: 'Academic Management',
-          icon: GraduationCap,
-          children: [
-            { id: 'admin-academic-years', label: 'Academic Years', href: ROUTES.adminAcademicYears, icon: CalendarBlank },
-            { id: 'admin-academic-semesters', label: 'Semesters', href: ROUTES.adminAcademicSemesters, icon: CalendarCheck },
-            { id: 'admin-academic-programs', label: 'Programs', href: ROUTES.adminAcademicPrograms, icon: Buildings },
-            { id: 'admin-academic-year-levels', label: 'Year Levels', href: ROUTES.adminAcademicYearLevels, icon: TreeStructure },
-            { id: 'admin-academic-sections', label: 'Sections', href: ROUTES.adminAcademicSections, icon: UsersThree },
-            { id: 'admin-subjects', label: 'Subjects', href: ROUTES.adminSubjects, icon: Books },
-            { id: 'admin-offerings', label: 'Subject Offerings', href: ROUTES.adminOfferings, icon: ClipboardText },
-          ],
-        },
+        { id: 'admin-academic', label: 'Academic Structure', href: ROUTES.adminAcademic, icon: GraduationCap, exact: true },
+        { id: 'admin-subjects', label: 'Subjects', href: ROUTES.adminSubjects, icon: Books, exact: true },
+        { id: 'admin-offerings', label: 'Subject Offerings', href: ROUTES.adminOfferings, icon: ClipboardText, exact: true },
       ],
     },
     {
-      label: 'AI & Automation',
+      // AI is configuration, not a product area of its own, so its parent
+      // accordion is gone and the two pages sit with the rest of System.
+      label: 'System',
       items: [
-        {
-          id: 'admin-ai-group',
-          label: 'AI Management',
-          icon: Brain,
-          children: [
-            { id: 'admin-ai-config', label: 'AI Configuration', href: ROUTES.adminAiConfig, icon: Wrench },
-            { id: 'admin-ai-usage', label: 'AI Usage', href: ROUTES.adminAiUsage, icon: ChartLineUp },
-          ],
-        },
-      ],
-    },
-    {
-      label: 'System & Security',
-      items: [
+        { id: 'admin-ai-config', label: 'AI Configuration', href: ROUTES.adminAiConfig, icon: Wrench },
+        { id: 'admin-ai-usage', label: 'AI Usage', href: ROUTES.adminAiUsage, icon: ChartLineUp },
         { id: 'admin-audit', label: 'Audit Logs', href: ROUTES.adminAuditLogs, icon: ListMagnifyingGlass, exact: true },
-        { id: 'admin-monitoring', label: 'System Monitoring', href: ROUTES.adminMonitoring, icon: Pulse, exact: true },
         { id: 'admin-settings', label: 'Settings', href: ROUTES.adminSettings, icon: Gear, exact: true },
       ],
     },
     {
-      label: 'Communication',
+      label: 'Account',
       items: [
         { id: 'notifications', label: 'Notifications', href: ROUTES.notifications, icon: Bell },
+        { id: 'profile', label: 'Profile', href: ROUTES.profile, icon: UserCircle, hideOnBottom: true },
       ],
     },
   ],
@@ -331,6 +199,26 @@ export const GLOBAL_NAVIGATION: Record<UserRole, NavigationGroup[]> = {
     },
   ],
 };
+
+// ============================================================================
+// Admin Academic Structure Workspace Navigation
+// ============================================================================
+
+/**
+ * Contextual rail for `/admin/academic/**`: the global sidebar carries a
+ * single "Academic Structure" entry, and these six views (hub + one per
+ * academic type) surface inside the workspace rail while you are there.
+ */
+export function getAcademicWorkspaceNav(): NavigationItem[] {
+  return [
+    { id: 'academic-overview', label: 'Overview', href: ROUTES.adminAcademic, icon: SquaresFour, exact: true },
+    { id: 'academic-years', label: 'Academic Years', href: ROUTES.adminAcademicYears, icon: CalendarBlank, exact: true },
+    { id: 'academic-semesters', label: 'Semesters', href: ROUTES.adminAcademicSemesters, icon: CalendarCheck, exact: true },
+    { id: 'academic-programs', label: 'Programs', href: ROUTES.adminAcademicPrograms, icon: Buildings, exact: true },
+    { id: 'academic-year-levels', label: 'Year Levels', href: ROUTES.adminAcademicYearLevels, icon: TreeStructure, exact: true },
+    { id: 'academic-sections', label: 'Sections', href: ROUTES.adminAcademicSections, icon: UsersThree, exact: true },
+  ];
+}
 
 // ============================================================================
 // Faculty Subject Workspace Navigation

@@ -1,4 +1,5 @@
 import { createAdminClient } from '@/lib/supabase/admin';
+import { logger } from './logger.ts';
 
 export interface MaintenanceResult {
   closed: number;
@@ -28,7 +29,7 @@ export async function runScheduledMaintenance(): Promise<MaintenanceResult | nul
     const admin = createAdminClient();
     const { data, error } = await admin.rpc('run_scheduled_maintenance');
     if (error) {
-      console.error('Scheduled maintenance failed:', error.message);
+      logger.error('Scheduled maintenance failed:', error.message);
       return null;
     }
 
@@ -39,12 +40,12 @@ export async function runScheduledMaintenance(): Promise<MaintenanceResult | nul
     // the sweep itself: a failure here never breaks the page or the sweep.
     const { error: stallError } = await admin.rpc('fail_stalled_generation_jobs');
     if (stallError) {
-      console.error('Stalled generation-job cleanup failed:', stallError.message);
+      logger.error('Stalled generation-job cleanup failed:', stallError.message);
     }
 
     return data as MaintenanceResult;
   } catch (error) {
-    console.error('Scheduled maintenance failed:', error);
+    logger.error('Scheduled maintenance failed:', error);
     return null;
   }
 }

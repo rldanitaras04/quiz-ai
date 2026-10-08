@@ -4,7 +4,8 @@ import { useState, useCallback, type JSX } from 'react';
 import Button from '@/components/ui/Button';
 import Spinner from '@/components/ui/Spinner';
 import { notifyError, notifySuccess } from '@/components/ui/alerts';
-import { createAssessment, updateGenerationConfig, triggerGeneration, completeGenerationJob, failGenerationJob } from '@/app/(dashboard)/faculty/subjects/[offeringId]/assessments/actions';
+import { createAssessment, updateGenerationConfig } from '@/app/(dashboard)/faculty/subjects/[offeringId]/assessments/actions/assessments'
+import { triggerGeneration, completeGenerationJob, failGenerationJob } from '@/app/(dashboard)/faculty/subjects/[offeringId]/assessments/actions/ai';
 import { useSupabase } from '@/lib/hooks';
 import type {
   QuestionType,
@@ -12,6 +13,7 @@ import type {
   BloomLevel,
   DraftQuestion,
 } from '@/lib/types';
+import { logger } from '@/lib/logger';
 
 /** A choice as returned by /api/ai/generate (accepts either field naming). */
 interface GeneratedChoicePayload {
@@ -272,7 +274,7 @@ export default function StepGenerate({
             requested: totalQ,
           });
         } catch (finalizeErr) {
-          console.warn('Could not finalize generation job:', finalizeErr);
+          logger.warn('Could not finalize generation job:', finalizeErr);
         }
       }
 

@@ -5,7 +5,7 @@ import PageHeader from '@/components/ui/PageHeader';
 import { Card, CardContent } from '@/components/ui/Card';
 import Badge from '@/components/ui/Badge';
 import EmptyState from '@/components/ui/EmptyState';
-import StatCard, { type StatCardTone } from '@/components/ui/StatCard';
+import StatCard, { STAT_TILE_ACCENT, type StatCardTone } from '@/components/ui/StatCard';
 import {
   Bell,
   Books,
@@ -16,52 +16,35 @@ import {
   type Icon,
 } from '@/components/ui/icons';
 import PerformanceChart from '@/components/student/dashboard/PerformanceChart';
+import { statusBadge } from '@/lib/status';
 import {
   getStudentDashboardData,
   type StudentSubjectItem,
   type StudentUpcomingItem,
 } from './actions';
 
+/** One shared accent tile: the summary reads as a strip, not four colours. */
 const TONES: Record<'subjects' | 'upcoming' | 'completed' | 'average', StatCardTone> = {
-  subjects: {
-    icon: Books,
-    tile: 'bg-blue-50 text-blue-600 dark:bg-blue-500/15 dark:text-blue-400',
-    spark: '#2563eb',
-  },
-  upcoming: {
-    icon: ClipboardText,
-    tile: 'bg-amber-50 text-amber-600 dark:bg-amber-500/15 dark:text-amber-400',
-    spark: '#f59e0b',
-  },
-  completed: {
-    icon: CheckCircle,
-    tile: 'bg-emerald-50 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-400',
-    spark: '#16a34a',
-  },
-  average: {
-    icon: ChartBar,
-    tile: 'bg-violet-50 text-violet-600 dark:bg-violet-500/15 dark:text-violet-400',
-    spark: '#7c3aed',
-  },
+  subjects: { icon: Books, tile: STAT_TILE_ACCENT },
+  upcoming: { icon: ClipboardText, tile: STAT_TILE_ACCENT },
+  completed: { icon: CheckCircle, tile: STAT_TILE_ACCENT },
+  average: { icon: ChartBar, tile: STAT_TILE_ACCENT },
 };
 
 /** Date-tile colors keyed by the deployment's real status variant. */
 const DATE_TILES: Record<'success' | 'warning' | 'danger' | 'info' | 'default', string> = {
-  info: 'bg-blue-50 text-blue-700 dark:bg-blue-500/15 dark:text-blue-400',
-  success: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400',
-  warning: 'bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400',
-  danger: 'bg-red-50 text-red-700 dark:bg-red-500/15 dark:text-red-400',
-  default: 'bg-slate-100 text-slate-600 dark:bg-slate-500/15 dark:text-slate-400',
+  info: 'bg-[var(--color-info-light)] text-[var(--color-info)]',
+  success: 'bg-[var(--color-success-light)] text-[var(--color-success)]',
+  warning: 'bg-[var(--color-warning-light)] text-[var(--color-warning)]',
+  danger: 'bg-[var(--color-danger-light)] text-[var(--color-danger)]',
+  default: 'bg-[var(--color-surface-hover)] text-[var(--color-muted)]',
 };
 
-const SUBJECT_TILES = [
-  'bg-blue-50 text-blue-600 dark:bg-blue-500/15 dark:text-blue-400',
-  'bg-violet-50 text-violet-600 dark:bg-violet-500/15 dark:text-violet-400',
-  'bg-emerald-50 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-400',
-  'bg-amber-50 text-amber-600 dark:bg-amber-500/15 dark:text-amber-400',
-  'bg-rose-50 text-rose-600 dark:bg-rose-500/15 dark:text-rose-400',
-  'bg-cyan-50 text-cyan-600 dark:bg-cyan-500/15 dark:text-cyan-400',
-];
+/** One restrained tile for every subject row — no per-subject color coding. */
+const SUBJECT_TILE = 'bg-[var(--color-primary-light)] text-[var(--color-primary)]';
+
+/** Enrollment badge copy comes from the shared status map, not a local one. */
+const enrolledBadge = statusBadge('enrolled');
 
 const QUICK_ACTIONS: Array<{
   label: string;
@@ -73,35 +56,35 @@ const QUICK_ACTIONS: Array<{
     label: 'My Subjects',
     href: '/student/subjects',
     icon: Books,
-    tile: 'bg-blue-50 text-blue-600 dark:bg-blue-500/15 dark:text-blue-400',
+    tile: 'bg-[var(--color-primary-light)] text-[var(--color-primary)]',
   },
   {
     label: 'Take Assessment',
     href: '/student/assessments',
     icon: ClipboardText,
-    tile: 'bg-amber-50 text-amber-600 dark:bg-amber-500/15 dark:text-amber-400',
+    tile: 'bg-[var(--color-info-light)] text-[var(--color-info)]',
   },
   {
     label: 'View Results',
     href: '/student/results',
     icon: ChartBar,
-    tile: 'bg-violet-50 text-violet-600 dark:bg-violet-500/15 dark:text-violet-400',
+    tile: 'bg-[var(--color-success-light)] text-[var(--color-success)]',
   },
   {
     label: 'Notifications',
     href: '/notifications',
     icon: Bell,
-    tile: 'bg-rose-50 text-rose-600 dark:bg-rose-500/15 dark:text-rose-400',
+    tile: 'bg-[var(--color-warning-light)] text-[var(--color-warning)]',
   },
 ];
 
 function greetingFor(firstName: string): string {
   const hour = new Date().getHours();
   const who = firstName ? `, ${firstName}` : '';
-  if (hour < 12) return `Good morning${who}!`;
-  if (hour < 17) return `Good afternoon${who}!`;
-  if (hour < 22) return `Good evening${who}!`;
-  return `Good day${who}!`;
+  if (hour < 12) return `Good morning${who}`;
+  if (hour < 17) return `Good afternoon${who}`;
+  if (hour < 22) return `Good evening${who}`;
+  return `Good day${who}`;
 }
 
 function UpcomingRow({ item }: { item: StudentUpcomingItem }): JSX.Element {
@@ -132,14 +115,14 @@ function UpcomingRow({ item }: { item: StudentUpcomingItem }): JSX.Element {
   );
 }
 
-function SubjectRow({ item, index }: { item: StudentSubjectItem; index: number }): JSX.Element {
+function SubjectRow({ item }: { item: StudentSubjectItem }): JSX.Element {
   return (
     <Link
       href={`/student/subjects/${item.offeringId}`}
       className="flex items-center gap-3 rounded-[var(--radius-md)] px-2 py-2.5 transition-colors hover:bg-[var(--color-surface-hover)]"
     >
       <div
-        className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-[var(--radius-md)] ${SUBJECT_TILES[index % SUBJECT_TILES.length]}`}
+        className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-[var(--radius-md)] ${SUBJECT_TILE}`}
         aria-hidden="true"
       >
         <Books className="h-5 w-5" />
@@ -151,7 +134,7 @@ function SubjectRow({ item, index }: { item: StudentSubjectItem; index: number }
           {item.sectionLabel ? ` · ${item.sectionLabel}` : ''}
         </p>
       </div>
-      <Badge variant="info">Enrolled</Badge>
+      <Badge variant={enrolledBadge.variant}>{enrolledBadge.label}</Badge>
     </Link>
   );
 }
@@ -212,8 +195,8 @@ export default async function StudentDashboardPage(): Promise<JSX.Element> {
   return (
     <div>
       <PageHeader
-        title={greetingFor(data.firstName)}
-        description="Stay on track with your classes and upcoming assessments."
+        title="Dashboard"
+        description={`${greetingFor(data.firstName)} — stay on track with your classes and upcoming assessments.`}
         actions={contextActions}
       />
 
@@ -276,8 +259,8 @@ export default async function StudentDashboardPage(): Promise<JSX.Element> {
             <SectionHeader title="My Subjects" href="/student/subjects" linkLabel="View All" />
             {data.subjects.length > 0 ? (
               <div className="mt-3 space-y-1">
-                {data.subjects.map((item, index) => (
-                  <SubjectRow key={item.offeringId} item={item} index={index} />
+                {data.subjects.map((item) => (
+                  <SubjectRow key={item.offeringId} item={item} />
                 ))}
               </div>
             ) : (

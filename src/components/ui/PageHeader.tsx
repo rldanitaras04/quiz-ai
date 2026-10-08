@@ -58,7 +58,7 @@ export default function PageHeader({
 
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-[var(--color-foreground)]">{title}</h1>
+          <h1 className="text-2xl font-semibold tracking-tight text-[var(--color-foreground)]">{title}</h1>
           {description && (
             <p className="mt-1 text-sm text-[var(--color-muted)]">{description}</p>
           )}

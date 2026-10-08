@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { SUPPORTED_QUESTION_IMAGE_TYPES } from '@/lib/constants';
+import { logger } from '@/lib/logger';
 
 export async function POST(request: NextRequest) {
   const supabase = createAdminClient();
@@ -81,7 +82,7 @@ export async function POST(request: NextRequest) {
       });
 
     if (uploadError) {
-      console.error('Question image upload error:', uploadError);
+      logger.error('Question image upload error:', uploadError);
       // Bucket missing → create once and retry (migration may not have run yet).
       if (
         uploadError.message?.toLowerCase().includes('bucket not found') ||
@@ -123,7 +124,7 @@ export async function POST(request: NextRequest) {
       { status: 201 }
     );
   } catch (error) {
-    console.error('Question image upload error:', error);
+    logger.error('Question image upload error:', error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Internal server error' },
       { status: 500 }

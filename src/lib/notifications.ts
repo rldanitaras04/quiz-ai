@@ -1,5 +1,6 @@
 import { createAdminClient } from '@/lib/supabase/admin';
 import type { NotificationType } from '@/lib/types';
+import { logger } from './logger.ts';
 
 interface NotifyOfferingInput {
   offeringId: string;
@@ -114,7 +115,7 @@ export async function notifyOfferingStudents({
   );
 
   if (error) {
-    console.error('Failed to create notifications:', error.message);
+    logger.error('Failed to create notifications:', error.message);
     return 0;
   }
 
@@ -183,7 +184,7 @@ export async function notifyFacultyOfOffering({
   );
 
   if (error) {
-    console.error('Failed to create faculty notifications:', error.message);
+    logger.error('Failed to create faculty notifications:', error.message);
     return 0;
   }
 
@@ -223,7 +224,7 @@ export async function notifyUser({
   });
 
   if (error) {
-    console.error('Failed to create user notification:', error.message);
+    logger.error('Failed to create user notification:', error.message);
     return false;
   }
 

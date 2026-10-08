@@ -3,6 +3,7 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { extractAndStoreSource } from '@/lib/ai';
 import { SUPPORTED_SOURCE_FILE_TYPES } from '@/lib/constants';
 import { getSettings } from '@/lib/settings';
+import { logger } from '@/lib/logger';
 
 export async function POST(request: NextRequest) {
   // Service-role client is created per-request (never at module scope) so
@@ -122,7 +123,7 @@ export async function POST(request: NextRequest) {
       });
 
     if (uploadError) {
-      console.error('Storage upload error:', uploadError);
+      logger.error('Storage upload error:', uploadError);
       return NextResponse.json({ error: 'Failed to upload file' }, { status: 500 });
     }
 
@@ -146,13 +147,13 @@ export async function POST(request: NextRequest) {
       .single();
 
     if (insertError) {
-      console.error('Database insert error:', insertError);
+      logger.error('Database insert error:', insertError);
       return NextResponse.json({ error: 'Failed to create source record' }, { status: 500 });
     }
 
     // Process file asynchronously (extract text, chunk, embed)
     extractAndStoreSource(sourceMaterial.id, buffer, mimeType).catch((error) => {
-      console.error('Background processing error:', error);
+      logger.error('Background processing error:', error);
     });
 
     return NextResponse.json({
@@ -166,7 +167,7 @@ export async function POST(request: NextRequest) {
       },
     }, { status: 201 });
   } catch (error) {
-    console.error('Source upload error:', error);
+    logger.error('Source upload error:', error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Internal server error' },
       { status: 500 }

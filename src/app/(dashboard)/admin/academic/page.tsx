@@ -3,6 +3,7 @@ import PageHeader from '@/components/ui/PageHeader';
 import { Card, CardContent } from '@/components/ui/Card';
 import { getAcademicStructure, getAdminReferenceData } from '../actions';
 import AcademicManager from './AcademicManager';
+import AcademicNavSetter from '@/components/admin/AcademicNavSetter';
 
 /**
  * Access is gated by the admin layout (`requireRole(['super_admin'])`) and again
@@ -31,6 +32,7 @@ export default async function AcademicPage(): Promise<JSX.Element> {
 
   return (
     <div>
+      <AcademicNavSetter currentPath="/admin/academic" />
       <PageHeader
         title="Academic Structure"
         description="Manage academic years, semesters, programs, and sections"

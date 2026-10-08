@@ -9,7 +9,7 @@ import {
   extractExamFile,
   importExamToBank,
 } from '@/app/(dashboard)/faculty/subjects/[offeringId]/question-bank/actions';
-import { importExamIntoVersion } from '@/app/(dashboard)/faculty/subjects/[offeringId]/assessments/actions';
+import { importExamIntoVersion } from '@/app/(dashboard)/faculty/subjects/[offeringId]/assessments/actions/versions';
 import { parseExamText, type ParsedExamItem } from '@/lib/import/exam-parse';
 import type { Topic } from '@/lib/types';
 

@@ -4,7 +4,7 @@ import { useState, type JSX } from 'react';
 import { useRouter } from 'next/navigation';
 import Button from '@/components/ui/Button';
 import { confirmAction, notifyError, notifySuccess } from '@/components/ui/alerts';
-import { deleteAssessment } from '@/app/(dashboard)/faculty/subjects/[offeringId]/assessments/actions';
+import { deleteAssessment } from '@/app/(dashboard)/faculty/subjects/[offeringId]/assessments/actions/assessments';
 
 interface DeleteAssessmentButtonProps {
   assessmentId: string;

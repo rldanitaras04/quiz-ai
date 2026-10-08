@@ -2,7 +2,7 @@ import { redirect, notFound } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import { assessmentSharesSubjectWithOffering } from '@/lib/auth';
 import { ASSESSMENT_STATUS_LABELS } from '@/lib/constants';
-import { getAssessmentDetail } from '../actions';
+import { getAssessmentDetail } from '../actions/assessments';
 import AssessmentWorkspaceClient from './AssessmentWorkspaceClient';
 
 interface Props {

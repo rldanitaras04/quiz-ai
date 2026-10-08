@@ -1,6 +1,6 @@
 import type { JSX, ReactNode } from 'react';
 
-type BadgeVariant = 'default' | 'success' | 'warning' | 'danger' | 'info' | 'outline';
+export type BadgeVariant = 'default' | 'success' | 'warning' | 'danger' | 'info' | 'outline';
 
 interface BadgeProps {
   children: ReactNode;

@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
-import { useSupabase } from '@/lib/hooks';
+import { useImplicitAuthLink, useSupabase } from '@/lib/hooks';
 import { APP_DESCRIPTION } from '@/lib/constants';
 import { resendConfirmationEmail } from '@/app/actions/auth';
 import { Brand } from '@/components/brand';
@@ -15,7 +15,7 @@ export default function LoginPage(): JSX.Element {
   const supabase = useSupabase();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
+  const [formError, setFormError] = useState('');
   const [loading, setLoading] = useState(false);
   // GoTrue refuses to sign an unconfirmed address in ("Email not
   // confirmed"). Instead of showing that raw string, surface a panel with
@@ -27,57 +27,29 @@ export default function LoginPage(): JSX.Element {
   // Approval and confirmation emails link to this page (see
   // dispatchApprovalNotice in admin/users/actions and resendConfirmationEmail
   // in app/actions/auth): Supabase Auth verifies the link and redirects here
-  // with the session tokens in the URL FRAGMENT. The shared browser client is
-  // PKCE-only and refuses implicit-grant callbacks, so the tokens are consumed
-  // explicitly below — once saved to the auth cookies, this is an ordinary
-  // signed-in visit.
+  // with the session tokens in the URL FRAGMENT. useImplicitAuthLink consumes
+  // them — once saved to the auth cookies, this is an ordinary signed-in visit.
+  const linkState = useImplicitAuthLink();
+
   useEffect(() => {
-    let cancelled = false;
-
-    const consumeMagicLink = async () => {
-      const hash = window.location.hash.replace(/^#/, '');
-      if (!hash.includes('access_token') && !hash.includes('error')) return;
-
-      const params = new URLSearchParams(hash);
-      const accessToken = params.get('access_token');
-      const refreshToken = params.get('refresh_token');
-
-      // Strip the tokens (or the failure) from the address bar first.
-      window.history.replaceState(null, '', window.location.pathname);
-
-      // Expired or already-used link: GoTrue reports it in the fragment.
-      if (params.get('error')) {
-        setError('That sign-in link has expired or was already used. Please sign in with your password.');
-        return;
-      }
-
-      if (!accessToken || !refreshToken) return;
-
-      const { error: sessionError } = await supabase.auth.setSession({
-        access_token: accessToken,
-        refresh_token: refreshToken,
-      });
-
-      if (cancelled) return;
-
-      if (sessionError) {
-        setError('That sign-in link has expired or was already used. Please sign in with your password.');
-        return;
-      }
-
+    if (linkState === 'authenticated') {
       router.replace('/');
       router.refresh();
-    };
+    }
+  }, [linkState, router]);
 
-    void consumeMagicLink();
-    return () => {
-      cancelled = true;
-    };
-  }, [supabase, router]);
+  // Derived, not copied into state: an expired link is a fact about the URL,
+  // and syncing it through setState inside the effect would add a second render
+  // (and trip react-hooks/set-state-in-effect).
+  const error =
+    formError ||
+    (linkState === 'expired'
+      ? 'That sign-in link has expired or was already used. Please sign in with your password.'
+      : '');
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    setError('');
+    setFormError('');
     setLoading(true);
 
     const { error: authError } = await supabase.auth.signInWithPassword({
@@ -90,9 +62,9 @@ export default function LoginPage(): JSX.Element {
     if (authError) {
       if (/email not confirmed|not confirmed/i.test(authError.message)) {
         setNeedsConfirmation(true);
-        setError('Confirm your email address before signing in.');
+        setFormError('Confirm your email address before signing in.');
       } else {
-        setError(authError.message);
+        setFormError(authError.message);
       }
       return;
     }

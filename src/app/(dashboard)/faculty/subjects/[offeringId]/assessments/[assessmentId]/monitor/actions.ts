@@ -9,6 +9,7 @@ import { closeActiveSession, recordExamEvent } from '@/lib/exam-session';
 import { conclusionPlanFor } from '@/lib/conclude';
 import { closeDeploymentWindow, finalizeAttemptScoring } from '@/lib/submission';
 import { notifyOfferingStudents } from '@/lib/notifications';
+import { logger } from '@/lib/logger';
 
 /**
  * Faculty (and proctor) controls for the Live Exam Monitor.
@@ -533,7 +534,7 @@ async function concludeAttemptInternal(
     });
     return { ok: true, scored: true };
   } catch (scoringError) {
-    console.error('Scoring failed after conclude:', scoringError);
+    logger.error('Scoring failed after conclude:', scoringError);
     return { ok: true, scored: false };
   }
 }

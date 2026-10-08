@@ -1,6 +1,7 @@
 'use client';
 
 import type { JSX } from 'react';
+import { Flag } from '@phosphor-icons/react';
 import type { QuestionWithChoices } from '@/lib/types';
 
 interface ExamQuestionProps {
@@ -50,13 +51,15 @@ export default function ExamQuestion({
               {question.points} {question.points === 1 ? 'point' : 'points'}
             </span>
           </div>
-          <p className="text-foreground whitespace-pre-wrap">{question.question_text}</p>
+          <p className="text-base leading-relaxed text-[var(--color-foreground)] whitespace-pre-wrap">
+            {question.question_text}
+          </p>
           {(question as any).image_url && (
             <div className="mt-3">
               <img
                 src={(question as any).image_url as string}
                 alt="Question illustration"
-                className="max-h-80 w-auto mx-auto rounded border border-[var(--color-border)] object-contain bg-white"
+                className="max-h-80 w-auto mx-auto rounded border border-[var(--color-border)] object-contain bg-[var(--color-surface)]"
                 loading="lazy"
               />
             </div>
@@ -64,18 +67,17 @@ export default function ExamQuestion({
         </div>
 
         <button
+          type="button"
           onClick={onFlagToggle}
-          className={`flex-shrink-0 p-2 rounded-lg transition-colors ${
+          className={`flex-shrink-0 rounded-[var(--radius-md)] p-2 transition-colors ${
             flagged
-              ? 'text-warning bg-warning-light'
-              : 'text-muted hover:text-foreground hover:bg-surface-hover'
+              ? 'text-[var(--color-warning)] bg-[var(--color-warning-light)]'
+              : 'text-[var(--color-muted)] hover:text-[var(--color-foreground)] hover:bg-[var(--color-surface-hover)]'
           }`}
           aria-label={flagged ? 'Remove flag' : 'Flag for review'}
           aria-pressed={flagged}
         >
-          <svg className="h-5 w-5" fill={flagged ? 'currentColor' : 'none'} viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M3 3v1.5M3 21v-6m0 0l2.77-.693a9 9 0 016.208.682l.108.054a9 9 0 006.086.71l3.114-.732a48.524 48.524 0 01-.005-10.499l-3.11.732a9 9 0 01-6.085-.711l-.108-.054a9 9 0 00-6.208-.682L3 4.5M3 15V4.5" />
-          </svg>
+          <Flag className="h-5 w-5" weight={flagged ? 'fill' : 'regular'} aria-hidden="true" />
         </button>
       </div>
 
@@ -118,7 +120,7 @@ export default function ExamQuestion({
             type="text"
             value={textAnswer}
             onChange={(e) => onTextChange(e.target.value)}
-            placeholder="Type your answer here..."
+            placeholder="Type your answer"
             className="w-full rounded-lg border border-border bg-surface px-4 py-3 text-foreground placeholder:text-muted-light focus:border-primary focus:ring-2 focus:ring-focus-ring focus:outline-none transition-colors"
             autoComplete="off"
             spellCheck={false}

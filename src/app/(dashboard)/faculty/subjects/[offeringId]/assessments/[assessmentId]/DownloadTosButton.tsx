@@ -5,7 +5,7 @@ import Button from '@/components/ui/Button';
 import { notifyError, notifySuccess } from '@/components/ui/alerts';
 import { downloadDocx, safeDocxFilename } from '@/lib/export/docx';
 import { buildTosDocument } from '@/lib/export/tos-doc';
-import { getAssessmentTosExport } from '@/app/(dashboard)/faculty/subjects/[offeringId]/assessments/actions';
+import { getAssessmentTosExport } from '@/app/(dashboard)/faculty/subjects/[offeringId]/assessments/actions/export-tos';
 
 interface DownloadTosButtonProps {
   assessmentId: string;

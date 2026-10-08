@@ -5,6 +5,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "sweetalert2/dist/sweetalert2.min.css";
 import "./globals.css";
 import type { JSX, ReactNode } from 'react';
+import { PREPAINT_THEME_SCRIPT } from '@/lib/ui-preferences';
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -53,12 +54,9 @@ export default function RootLayout({ children }: { children: ReactNode }): JSX.E
       <head>
         {/* Apply the stored (or system) theme before first paint to avoid a flash.
             `data-theme` records the raw preference so an explicit Light choice is
-            never overridden by a dark OS setting. */}
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `(function(){try{var t=localStorage.getItem('mimo:theme');if(t!=='light'&&t!=='dark'){t='system';}var dark=t==='dark'||(t==='system'&&window.matchMedia('(prefers-color-scheme: dark)').matches);document.documentElement.classList.toggle('dark',dark);document.documentElement.dataset.theme=t;}catch(e){}})();`,
-          }}
-        />
+            never overridden by a dark OS setting. The script is shared with
+            app/global-error.tsx's fallback (see src/lib/ui-preferences.ts). */}
+        <script dangerouslySetInnerHTML={{ __html: PREPAINT_THEME_SCRIPT }} />
       </head>
       <body className="min-h-full flex flex-col">{children}</body>
     </html>

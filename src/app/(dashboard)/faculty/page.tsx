@@ -1,7 +1,7 @@
 import type { JSX } from 'react';
 import PageHeader from '@/components/ui/PageHeader';
 import EmptyState from '@/components/ui/EmptyState';
-import StatCard, { type StatCardTone } from '@/components/ui/StatCard';
+import StatCard, { STAT_TILE_ACCENT, type StatCardTone } from '@/components/ui/StatCard';
 import { Books, ClipboardText, Clock, Users } from '@/components/ui/icons';
 import AssessmentTrendsChart from '@/components/admin/dashboard/AssessmentTrendsChart';
 import { getFacultyDashboardData, type FacultyStatCard } from './actions';
@@ -12,27 +12,13 @@ import RecentActivityPanel from '@/components/faculty/dashboard/RecentActivityPa
 import QuickActionsPanel from '@/components/faculty/dashboard/QuickActionsPanel';
 import { Panel, PanelNote } from '@/components/faculty/dashboard/Panel';
 
+// One shared accent for every figure: no metric should outrank another by
+// colour alone, and semantic colours stay reserved for real status.
 const TONES: Record<FacultyStatCard['key'], StatCardTone> = {
-  subjects: {
-    icon: Books,
-    tile: 'bg-blue-50 text-blue-600 dark:bg-blue-500/15 dark:text-blue-400',
-    spark: '#2563eb',
-  },
-  assessments: {
-    icon: ClipboardText,
-    tile: 'bg-violet-50 text-violet-600 dark:bg-violet-500/15 dark:text-violet-400',
-    spark: '#7c3aed',
-  },
-  students: {
-    icon: Users,
-    tile: 'bg-emerald-50 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-400',
-    spark: '#16a34a',
-  },
-  toCheck: {
-    icon: Clock,
-    tile: 'bg-amber-50 text-amber-600 dark:bg-amber-500/15 dark:text-amber-400',
-    spark: '#d97706',
-  },
+  subjects: { icon: Books, tile: STAT_TILE_ACCENT },
+  assessments: { icon: ClipboardText, tile: STAT_TILE_ACCENT },
+  students: { icon: Users, tile: STAT_TILE_ACCENT },
+  toCheck: { icon: Clock, tile: STAT_TILE_ACCENT },
 };
 
 /**
@@ -62,8 +48,8 @@ export default async function FacultyDashboardPage({
   return (
     <div>
       <PageHeader
-        title={welcome}
-        description="Here's what's happening across your subjects."
+        title="Dashboard"
+        description={`${welcome} — here's what's happening across your subjects.`}
         actions={
           <DashboardControls
             semesters={data.semesterOptions}
@@ -91,7 +77,6 @@ export default async function FacultyDashboardPage({
                 caption={card.caption}
                 deltaPct={card.deltaPct}
                 deltaNote={card.deltaNote}
-                series={card.series}
               />
             ))}
           </div>

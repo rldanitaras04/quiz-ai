@@ -3,6 +3,7 @@ import PageHeader from '@/components/ui/PageHeader';
 import { Card, CardContent } from '@/components/ui/Card';
 import { getAcademicStructure, getAdminReferenceData } from '../../actions';
 import AcademicManager from '../AcademicManager';
+import AcademicNavSetter from '@/components/admin/AcademicNavSetter';
 
 export default async function ProgramsPage(): Promise<JSX.Element> {
   const [structure, reference] = await Promise.all([
@@ -25,6 +26,7 @@ export default async function ProgramsPage(): Promise<JSX.Element> {
 
   return (
     <div>
+      <AcademicNavSetter currentPath="/admin/academic/programs" />
       <PageHeader
         title="Programs"
         description="Create degree programs and review their sections"

@@ -4,8 +4,17 @@ import { TrendUp, TrendDown, type Icon } from '@/components/ui/icons';
 export interface StatCardTone {
   icon: Icon;
   tile: string;
-  spark: string;
+  /** Sparkline stroke; only used when a `series` is supplied. */
+  spark?: string;
 }
+
+/**
+ * Single institutional accent for metric tiles. Dashboards share it so no
+ * figure outranks another merely by colour; semantic tokens stay reserved for
+ * real status.
+ */
+export const STAT_TILE_ACCENT =
+  'bg-[var(--color-primary-light)] text-[var(--color-primary)]';
 
 function Sparkline({ data, color }: { data: number[]; color: string }): JSX.Element {
   const width = 88;
@@ -124,7 +133,9 @@ export default function StatCard({
 
       <div className="mt-3 flex items-end justify-between gap-3">
         <Delta deltaPct={deltaPct} deltaNote={deltaNote} />
-        {series && series.length > 1 && <Sparkline data={series} color={tone.spark} />}
+        {series && series.length > 1 && (
+          <Sparkline data={series} color={tone.spark ?? 'currentColor'} />
+        )}
       </div>
     </div>
   );

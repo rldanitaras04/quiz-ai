@@ -1,4 +1,5 @@
 import { createAdminClient } from '@/lib/supabase/admin';
+import { logger } from '../logger.ts';
 
 interface LogAiUsageParams {
   userId: string;
@@ -32,6 +33,6 @@ export async function logAiUsage(params: LogAiUsageParams): Promise<void> {
       error_code: params.errorCode || null,
     });
   } catch (error) {
-    console.error('Failed to log AI usage:', error);
+    logger.error('Failed to log AI usage:', error);
   }
 }

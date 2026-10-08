@@ -8,10 +8,10 @@
 #
 # `e2e` runs the real-stack suites (enrollment + identity verification, exam
 # integrity, scheduled-maintenance sweep) against a local Supabase stack
-# started on the runner. It is gated to manual dispatch: the suites themselves
-# are verified, but the docker/CLI plumbing on hosted runners has not been
-# exercised from here. Lift the `if:` on the e2e job once it has passed a
-# manual run to make it a required gate too.
+# started on the runner, and is a full gate: it runs on every push and pull
+# request alongside `verify`. The suites pass locally via `npm run test:e2e*`.
+# If hosted-runner docker/CLI plumbing proves flaky, scope it back with
+# `if: github.event_name == 'workflow_dispatch'` on the e2e job.
 name: CI
 
 on:
@@ -64,8 +64,7 @@ jobs:
           SUPABASE_DB_URL: postgres://placeholder@localhost:54322/postgres
 
   e2e:
-    name: E2E (local Supabase, manual)
-    if: github.event_name == 'workflow_dispatch'
+    name: E2E (local Supabase)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:

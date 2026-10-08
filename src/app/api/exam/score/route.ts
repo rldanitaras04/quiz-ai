@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { scoreAttempt, upsertAssessmentResult } from '@/lib/scoring';
+import { logger } from '@/lib/logger';
 
 export async function POST(request: Request) {
   try {
@@ -123,7 +124,7 @@ export async function POST(request: Request) {
       percentage,
     });
   } catch (error) {
-    console.error('Score error:', error);
+    logger.error('Score error:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

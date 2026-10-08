@@ -3,6 +3,7 @@ import PageHeader from '@/components/ui/PageHeader';
 import { Card, CardContent } from '@/components/ui/Card';
 import { getAcademicStructure, getAdminReferenceData } from '../../actions';
 import AcademicManager from '../AcademicManager';
+import AcademicNavSetter from '@/components/admin/AcademicNavSetter';
 
 export default async function YearLevelsPage(): Promise<JSX.Element> {
   const [structure, reference] = await Promise.all([
@@ -24,6 +25,7 @@ export default async function YearLevelsPage(): Promise<JSX.Element> {
 
   return (
     <div>
+      <AcademicNavSetter currentPath="/admin/academic/year-levels" />
       <PageHeader
         title="Year Levels"
         description="The global year levels every program is listed against"

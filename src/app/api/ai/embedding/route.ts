@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { generateEmbedding } from '@/lib/ai';
+import { logger } from '@/lib/logger';
 
 const MAX_EMBEDDING_CHARS = 24_000; // ~6k tokens of input per request
 const RATE_LIMIT_REQUESTS = 30;
@@ -120,7 +121,7 @@ export async function POST(request: NextRequest) {
       });
 
       if (insertError) {
-        console.error('Failed to store embedding:', insertError);
+        logger.error('Failed to store embedding:', insertError);
       }
     }
 
@@ -129,7 +130,7 @@ export async function POST(request: NextRequest) {
       tokensUsed: result.tokensUsed,
     });
   } catch (error) {
-    console.error('Embedding generation error:', error);
+    logger.error('Embedding generation error:', error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Internal server error' },
       { status: 500 }

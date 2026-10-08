@@ -18,8 +18,10 @@ async function queryHF(text: string, attempt = 0): Promise<number[]> {
   });
 
   if (res.status === 503 && attempt < 3) {
-    const body = await res.json().catch(() => ({}));
-    const waitMs = (body as any)?.estimated_time ?? 10;
+    // A cold model answers 503 with { estimated_time } (seconds) to wait.
+    const body: unknown = await res.json().catch(() => null);
+    const estimated = (body as { estimated_time?: unknown } | null)?.estimated_time;
+    const waitMs = typeof estimated === 'number' && estimated > 0 ? estimated : 10;
     await new Promise((r) => setTimeout(r, Math.min(waitMs * 1000, 10000)));
     return queryHF(text, attempt + 1);
   }

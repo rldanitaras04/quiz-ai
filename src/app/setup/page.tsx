@@ -40,7 +40,6 @@ export default function SetupPage() {
   const [adminPassword, setAdminPassword] = useState('');
   const [adminName, setAdminName] = useState('');
   const [adminResult, setAdminResult] = useState<string | null>(null);
-  const [studentResult, setStudentResult] = useState<string | null>(null);
 
   const checkEnv = async () => {
     setEnvStatus('checking');
@@ -81,33 +80,6 @@ export default function SetupPage() {
       }
     } catch (err) {
       setAdminResult(`Error: ${err instanceof Error ? err.message : 'Unknown error'}`);
-    }
-  };
-
-  const createTestStudent = async () => {
-    try {
-      const res = await fetch('/api/admin/bootstrap', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'create_test_student' }),
-      });
-      const contentType = res.headers.get('content-type') ?? '';
-      if (!contentType.includes('application/json')) {
-        const preview = (await res.text()).slice(0, 80);
-        throw new Error(
-          `Server returned non-JSON (${res.status}): ${preview}… — is the dev server running the latest code?`
-        );
-      }
-      const data = await res.json();
-      if (data.success) {
-        setStudentResult(
-          `Test student ready (verified)! Email: ${data.credentials.email} | Password: ${data.credentials.password}`
-        );
-      } else {
-        setStudentResult(`Error: ${data.error}`);
-      }
-    } catch (err) {
-      setStudentResult(`Error: ${err instanceof Error ? err.message : 'Unknown error'}`);
     }
   };
 
@@ -261,29 +233,24 @@ export default function SetupPage() {
           </CardContent>
         </Card>
 
-        {/* Step 5: Test Student Account */}
+        {/* Step 5 used to mint a fixed-credential test student through the
+            service-role bootstrap endpoint, with no session required. That was
+            an unauthenticated path to an active account on any deployment, so
+            it is gone: create accounts through /register and activate them in
+            Admin → Users. */}
         <Card>
           <CardHeader>
-            <span className="font-semibold">5. Create Test Student Account</span>
+            <span className="font-semibold">5. Create Accounts Through the App</span>
           </CardHeader>
-          <CardContent className="space-y-3">
+          <CardContent>
             <p className="text-sm text-[var(--color-muted)]">
-              Creates a ready-to-use student account for testing. Email is confirmed and{' '}
-              <strong>verification_status is set to verified</strong>, enrolled in all active
-              subject offerings. Safe to re-run: an existing account is upgraded to verified.
+              Sign in as the administrator, then invite or approve accounts in{' '}
+              <strong>Admin → Users</strong>. Anyone can self-register at{' '}
+              <a href="/register" className="text-[var(--color-primary)] hover:underline">
+                /register
+              </a>
+              ; new accounts stay pending until an administrator approves them.
             </p>
-            <div className="p-3 rounded-[var(--radius-md)] bg-[var(--color-surface-hover)] text-sm">
-              <p><strong>Email:</strong> student@test.com</p>
-              <p><strong>Password:</strong> Student123!</p>
-            </div>
-            <Button onClick={createTestStudent} variant="primary" size="sm">
-              Create Test Student
-            </Button>
-            {studentResult && (
-              <p className={`text-sm ${studentResult.startsWith('Error') ? 'text-[var(--color-danger)]' : 'text-[var(--color-success)]'}`}>
-                {studentResult}
-              </p>
-            )}
           </CardContent>
         </Card>
 

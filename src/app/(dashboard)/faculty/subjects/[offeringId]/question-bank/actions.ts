@@ -11,6 +11,7 @@ import { extractFromDOCX, extractFromPDF, extractFromTXT } from '@/lib/ai/text-e
 import { generateEmbedding } from '@/lib/ai';
 import { getSettings } from '@/lib/settings';
 import { summarizeItemStats, type ItemStatsSnapshot } from '@/lib/item-analysis';
+import { logger } from '@/lib/logger';
 
 /** How many rows of a bulk bank save we embed up front; the rest rely on the
  * generate route's bounded backfill so a big approve can't stall on serial
@@ -35,12 +36,12 @@ async function embedBankItem(
       .update({ embedding })
       .eq('id', bankItemId);
     if (error) {
-      console.warn('Could not store bank item embedding; backfill will retry:', error.message);
+      logger.warn('Could not store bank item embedding; backfill will retry:', error.message);
       return false;
     }
     return true;
   } catch (error) {
-    console.warn('Could not generate bank item embedding; backfill will retry:', error);
+    logger.warn('Could not generate bank item embedding; backfill will retry:', error);
     return false;
   }
 }

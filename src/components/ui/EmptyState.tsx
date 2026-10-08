@@ -42,3 +42,16 @@ export default function EmptyState({
     </div>
   );
 }
+
+/**
+ * Compact inline empty/unavailable note for the inside of a panel or table
+ * where the full centered `EmptyState` would be too heavy:
+ * "No activity recorded yet."
+ */
+export function EmptyNote({ children, className = '' }: { children: ReactNode; className?: string }): JSX.Element {
+  return (
+    <p className={`py-6 text-center text-sm text-[var(--color-muted)] ${className}`}>
+      {children}
+    </p>
+  );
+}

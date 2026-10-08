@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
 import { recordAuditLog } from '@/lib/audit';
 import { isFacultyOfOffering } from '@/lib/auth';
+import { logger } from '@/lib/logger';
 
 const SOURCE_BUCKET = 'source-materials';
 
@@ -77,7 +78,7 @@ export async function deleteSourceMaterial(
     // The row is what users see; a storage failure leaves an unreferenced
     // object rather than a source material that cannot be removed.
     if (storageError) {
-      console.error('Failed to remove stored source object:', storageError.message);
+      logger.error('Failed to remove stored source object:', storageError.message);
     }
   }
 

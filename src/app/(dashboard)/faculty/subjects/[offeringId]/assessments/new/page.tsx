@@ -15,6 +15,7 @@ import StepManualEntry from '@/components/assessment/StepManualEntry';
 import StepQuestionBank from '@/components/assessment/StepQuestionBank';
 import StepImportExam from '@/components/assessment/StepImportExam';
 import StepTos from '@/components/assessment/StepTos';
+import { confirmAction } from '@/components/ui/alerts';
 import { STEP_CONFIG, type StepId } from '@/components/assessment/wizard-steps';
 import type {
   QuestionType,
@@ -99,6 +100,72 @@ const INITIAL_STATE: WizardState = {
   tos: null,
 };
 
+// ---------------------------------------------------------------------------
+// sessionStorage autosave
+// ---------------------------------------------------------------------------
+// A refresh used to wipe the whole wizard. The serializable slice of wizard
+// state (plus the current step) is autosaved debounced under
+// `seams:wizard:${offeringId}` and restored once on mount.
+//
+// Only JSON-safe values belong here: source uploads are already server-side
+// rows by the time they reach wizard state, but any stray File/Blob (an
+// un-uploaded pick, a pasted blob) cannot survive a string-only store, so the
+// replacer below drops those keys rather than throwing.
+
+function wizardStorageKey(offeringId: string): string {
+  return `seams:wizard:${offeringId}`;
+}
+
+function persistable(value: unknown): unknown {
+  if (typeof File !== 'undefined' && value instanceof File) return undefined;
+  if (typeof Blob !== 'undefined' && value instanceof Blob) return undefined;
+  return value;
+}
+
+function saveWizardProgress(
+  offeringId: string,
+  snapshot: { state: WizardState; step: number }
+): void {
+  try {
+    window.sessionStorage.setItem(
+      wizardStorageKey(offeringId),
+      JSON.stringify(snapshot, (_key, value) => persistable(value))
+    );
+  } catch {
+    // Storage unavailable or full — autosave is best-effort.
+  }
+}
+
+function readWizardProgress(
+  offeringId: string
+): { state: WizardState; step: number } | null {
+  try {
+    const raw = window.sessionStorage.getItem(wizardStorageKey(offeringId));
+    if (!raw) return null;
+    const saved = JSON.parse(raw) as { state?: Partial<WizardState>; step?: number };
+    if (!saved?.state || typeof saved.state !== 'object') return null;
+    return {
+      state: {
+        ...INITIAL_STATE,
+        ...saved.state,
+        // Never trust a persisted in-flight flag: generation cannot survive a reload.
+        isGenerating: false,
+      },
+      step: Number.isInteger(saved.step) ? (saved.step as number) : 0,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function clearWizardProgress(offeringId: string): void {
+  try {
+    window.sessionStorage.removeItem(wizardStorageKey(offeringId));
+  } catch {
+    // Storage unavailable — nothing to clear.
+  }
+}
+
 interface StepProps {
   state: WizardState;
   onUpdate: (updates: Partial<WizardState>) => void;
@@ -115,12 +182,58 @@ export default function NewAssessmentPage({
   const [state, setState] = useState<WizardState>(INITIAL_STATE);
   const [stepErrors, setStepErrors] = useState<Record<string, string>>({});
   const [topics, setTopics] = useState<Topic[]>([]);
+  // sessionStorage is client-only; restore runs after hydration so the
+  // server HTML and the first client render match.
+  const [hydrated, setHydrated] = useState(false);
   const { offeringId } = use(params);
 
   const updateState = useCallback((updates: Partial<WizardState>) => {
     setState((prev) => ({ ...prev, ...updates }));
     setStepErrors({});
   }, []);
+
+  // Restore autosaved progress once on mount (see saveWizardProgress above).
+  useEffect(() => {
+    const saved = readWizardProgress(offeringId);
+    if (saved) {
+      setState(saved.state);
+      setCurrentStep(saved.step);
+      setStepErrors({});
+    }
+    setHydrated(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [offeringId]);
+
+  // Debounced autosave of the serializable wizard state + current step.
+  useEffect(() => {
+    if (!hydrated) return;
+    // Once an assessment exists, creation already succeeded — keep the store
+    // clean instead of persisting a finished wizard.
+    if (state.assessmentId) return;
+    const timer = setTimeout(() => {
+      saveWizardProgress(offeringId, { state, step: currentStep });
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [hydrated, state, currentStep, offeringId]);
+
+  // Successful creation clears the autosave (the wizard is done).
+  useEffect(() => {
+    if (state.assessmentId) clearWizardProgress(offeringId);
+  }, [state.assessmentId, offeringId]);
+
+  const handleStartOver = useCallback(async () => {
+    const confirmed = await confirmAction({
+      title: 'Start over?',
+      text: 'This clears your saved progress for this assessment and returns you to step 1.',
+      confirmText: 'Start over',
+      destructive: true,
+    });
+    if (!confirmed) return;
+    clearWizardProgress(offeringId);
+    setState(INITIAL_STATE);
+    setCurrentStep(0);
+    setStepErrors({});
+  }, [offeringId]);
 
   // Load topics for this subject/offering
   useEffect(() => {

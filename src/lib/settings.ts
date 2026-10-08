@@ -7,6 +7,7 @@ import {
   type AppSettings,
   type SettingKey,
 } from '@/lib/constants';
+import { logger } from './logger.ts';
 
 /**
  * Runtime configuration stored in `system_settings` and edited by a super
@@ -64,7 +65,7 @@ export const getSettings = cache(async (): Promise<AppSettings> => {
       .eq('is_sensitive', false);
 
     if (error) {
-      console.warn('system_settings read failed; using defaults:', error.message);
+      logger.warn('system_settings read failed; using defaults:', error.message);
       return { ...DEFAULT_SETTINGS };
     }
 
@@ -72,7 +73,7 @@ export const getSettings = cache(async (): Promise<AppSettings> => {
   } catch (error) {
     // Also covers non-request contexts (scripts, build) where no session client
     // can be created.
-    console.warn('system_settings unavailable; using defaults:', error);
+    logger.warn('system_settings unavailable; using defaults:', error);
     return { ...DEFAULT_SETTINGS };
   }
 });

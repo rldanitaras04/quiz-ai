@@ -6,6 +6,7 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { recordAuditLog } from '@/lib/audit';
 import { validatePassword } from '@/lib/validators';
 import { MAX_AVATAR_BYTES, MAX_AVATAR_SIZE_MB } from '@/lib/constants';
+import { logger } from '@/lib/logger';
 
 export interface ProfileActionResult {
   error?: string;
@@ -204,7 +205,7 @@ export async function changePassword(
     if (status === 429 || /rate limit/i.test(message)) {
       return { error: 'Too many attempts — wait a minute and try again.' };
     }
-    console.error('Password verification failed:', message);
+    logger.error('Password verification failed:', message);
     return { error: 'Could not verify your current password right now. Please try again.' };
   }
 
@@ -215,7 +216,7 @@ export async function changePassword(
       await createAdminClient().auth.admin.signOut(throwaway.access_token, 'local');
     } catch (err) {
       // Best-effort: an orphaned session still expires on its own.
-      console.warn(
+      logger.warn(
         'Could not revoke password-verification session:',
         err instanceof Error ? err.message : err
       );
@@ -233,7 +234,7 @@ export async function changePassword(
     if (/password/i.test(message)) {
       return { error: message };
     }
-    console.error('Password update failed:', message);
+    logger.error('Password update failed:', message);
     return { error: 'Failed to update the password. Please try again.' };
   }
 

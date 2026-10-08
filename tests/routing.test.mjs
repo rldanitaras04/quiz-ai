@@ -27,6 +27,7 @@ import {
   walkSources,
 } from '../scripts/lib/route-tree.mjs';
 import { GLOBAL_NAVIGATION } from '../src/config/navigation.ts';
+import { routes } from '../src/config/routes.ts';
 import { homePathForRole } from '../src/config/role-paths.ts';
 
 const ROUTES = buildRouteTree();
@@ -92,13 +93,28 @@ function flattenNav(items, out = []) {
 const ROLES = ['super_admin', 'faculty', 'student'];
 
 // Pages that exist but are deliberately not linked from anywhere:
-//  - /admin/debug: URL-only diagnostics utility, self-gated to super_admin
 //  - /student/{notifications,profile}: redirect stubs kept for old links
 const ORPHAN_ALLOWLIST = new Set([
-  '/admin/debug',
   '/student/notifications',
   '/student/profile',
 ]);
+
+// Every `routes.*` helper, flattened to { name, fn }. Leaf values are
+// functions; nested objects are namespaces (`routes.admin.users()`, ...).
+function flattenBuilders(node, prefix, out = []) {
+  for (const [key, value] of Object.entries(node)) {
+    const name = prefix ? `${prefix}.${key}` : key;
+    if (typeof value === 'function') out.push({ name, fn: value });
+    else if (value && typeof value === 'object') flattenBuilders(value, name, out);
+  }
+  return out;
+}
+
+const BUILDERS = flattenBuilders(routes, '');
+
+// Concrete stand-ins for dynamic segments. Values only need to be non-empty:
+// matchRoute fills any `[param]` route segment with a concrete segment.
+const BUILDER_ARGS = ['placeholder-a', 'placeholder-b', 'placeholder-c'];
 
 // ---------------------------------------------------------------------------
 // 1. Dead links
@@ -231,6 +247,38 @@ test('every role nav item resolves to a route that role may access', () => {
     }
   }
   assert.deepEqual(failures, [], `role nav wiring failures:\n${failures.join('\n')}`);
+});
+
+// ---------------------------------------------------------------------------
+// 5. Route builders
+// ---------------------------------------------------------------------------
+
+test('every routes.* builder resolves to a real route', () => {
+  // Guards against the flattening itself silently matching nothing (e.g. a
+  // refactor that moves builders out of the `routes` object).
+  assert.ok(BUILDERS.length > 40, `expected the full builder set, got ${BUILDERS.length}`);
+
+  const failures = [];
+  for (const { name, fn } of BUILDERS) {
+    const args = BUILDER_ARGS.slice(0, fn.length);
+    let href;
+    try {
+      href = fn(...args);
+    } catch (err) {
+      failures.push(`routes.${name}() threw: ${err.message}`);
+      continue;
+    }
+    if (typeof href !== 'string' || !href.startsWith('/')) {
+      failures.push(`routes.${name}() returned ${JSON.stringify(href)}, not an internal path`);
+      continue;
+    }
+    const target = normalizeTarget(href);
+    const route = target === null ? null : matchRoute(target, ROUTES);
+    if (route === null) {
+      failures.push(`routes.${name}() -> ${href}  [normalized: ${target}] resolves to no route`);
+    }
+  }
+  assert.deepEqual(failures, [], `unresolved route builders:\n${failures.join('\n')}`);
 });
 
 // ---------------------------------------------------------------------------

@@ -7,6 +7,7 @@ import { enrollStudents } from '@/lib/enrollment';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { notifyUser } from '@/lib/notifications';
 import { LOGIN_PATH, RESET_PASSWORD_PATH, appOrigin } from '@/lib/constants';
+import { logger } from '@/lib/logger';
 
 /**
  * User and role administration (spec §2.1: "manage users and role
@@ -218,9 +219,9 @@ async function dispatchApprovalNotice(userId: string, email: string): Promise<st
     });
 
     if (!error) return 'email';
-    console.error('Approval email not dispatched:', error.message);
+    logger.error('Approval email not dispatched:', error.message);
   } catch (err) {
-    console.error('Approval email not dispatched:', err instanceof Error ? err.message : err);
+    logger.error('Approval email not dispatched:', err instanceof Error ? err.message : err);
   }
 
   const notified = await notifyUser({
@@ -324,7 +325,7 @@ export async function sendUserPasswordReset(userId: string): Promise<ActionResul
   if (error) {
     const status = (error as { status?: number }).status;
     if (status !== 429) {
-      console.error('Password reset email not dispatched:', error.message);
+      logger.error('Password reset email not dispatched:', error.message);
     }
     return {
       error: /rate limit/i.test(error.message)

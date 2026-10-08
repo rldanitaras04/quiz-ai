@@ -9,7 +9,7 @@ import { Table, THead, TBody, TR, TH, TD } from '@/components/ui/Table';
 import { confirmAction, notifyError, notifySuccess } from '@/components/ui/alerts';
 import { ASSESSMENT_STATUS_LABELS, QUESTION_TYPE_SHORT_LABELS, QUESTION_TYPE_GROUP_ORDER } from '@/lib/constants';
 import type { QuestionType } from '@/lib/types';
-import { deleteAssessments } from '@/app/(dashboard)/faculty/subjects/[offeringId]/assessments/actions';
+import { deleteAssessments } from '@/app/(dashboard)/faculty/subjects/[offeringId]/assessments/actions/assessments';
 import DeleteAssessmentButton from '@/app/(dashboard)/faculty/subjects/[offeringId]/assessments/[assessmentId]/DeleteAssessmentButton';
 
 export interface AssessmentListRow {

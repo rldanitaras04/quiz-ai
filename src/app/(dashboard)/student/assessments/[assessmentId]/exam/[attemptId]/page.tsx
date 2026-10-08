@@ -9,6 +9,17 @@ import Button from '@/components/ui/Button';
 import Modal from '@/components/ui/Modal';
 import Spinner from '@/components/ui/Spinner';
 import Input from '@/components/ui/Input';
+import Alert from '@/components/ui/Alert';
+import { notifyInfo } from '@/components/ui/alerts';
+import { formatTime } from '@/lib/format';
+import {
+  ArrowLeft,
+  CaretLeft,
+  CaretRight,
+  ListChecks,
+  WarningCircle,
+  WifiSlash,
+} from '@phosphor-icons/react';
 import { getAttemptDetails, submitExam } from '../actions';
 import {
   clearLocalAnswers,
@@ -22,7 +33,7 @@ import {
 import { useExamSession, type HeartbeatStateInput } from '@/components/exam/useExamSession';
 import { useSecurityListeners } from '@/components/exam/useSecurityListeners';
 import ExamShell from '@/components/layout/ExamShell';
-import { QUESTION_TYPE_LABELS, QUESTION_TYPE_SHORT_LABELS } from '@/lib/constants';
+import { QUESTION_TYPE_LABELS } from '@/lib/constants';
 import type {
   ExamAttempt,
   ExamManifest,
@@ -41,9 +52,9 @@ const PENDING_RETRY_INTERVAL = 10_000;
 
 type SyncBadge =
   | { kind: 'saving'; label: 'Saving' }
-  | { kind: 'local'; label: 'Saved Locally'; at: string }
+  | { kind: 'local'; label: 'Saved Locally'; at: Date }
   | { kind: 'syncing'; label: 'Syncing' }
-  | { kind: 'synced'; label: 'Synced'; at: string }
+  | { kind: 'synced'; label: 'Synced'; at: Date }
   | { kind: 'offline'; label: 'Offline — Saved on this Device'; pending: number }
   | { kind: 'pending'; label: 'Sync Pending'; pending: number }
   | { kind: 'error'; label: 'Sync Error' };
@@ -88,6 +99,24 @@ export default function ExamPage({
   const [reverificationPassword, setReverificationPassword] = useState('');
   const [reverificationError, setReverificationError] = useState<string | null>(null);
   const [reverificationBusy, setReverificationBusy] = useState(false);
+
+  // --- navigator layout ----------------------------------------------------
+  /** Desktop: the side rail is collapsible; mobile: the same grid opens as a sheet. */
+  const [navRailOpen, setNavRailOpen] = useState(true);
+  const [navSheetOpen, setNavSheetOpen] = useState(false);
+
+  // --- one-time proctoring transparency notice ------------------------------
+  const [proctoringDismissed, setProctoringDismissed] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    try {
+      return (
+        window.sessionStorage.getItem(`seams:proctoring-notice:${attemptId}`) !== null
+      );
+    } catch {
+      return false;
+    }
+  });
+  const proctoringHintShownRef = useRef(false);
 
   const answersRef = useRef(answers);
   const flaggedRef = useRef(flagged);
@@ -542,6 +571,31 @@ export default function ExamPage({
     }
   }, []);
 
+  // One-time, non-accusatory feedback when the context menu is suppressed:
+  // silently swallowing the gesture looks like a broken page.
+  useEffect(() => {
+    if (!sessionReady || !policy.detectContextMenu) return;
+    const onContextMenu = () => {
+      if (proctoringHintShownRef.current) return;
+      proctoringHintShownRef.current = true;
+      notifyInfo(
+        'Right-click is disabled',
+        'This gesture is recorded with your examination session.'
+      );
+    };
+    document.addEventListener('contextmenu', onContextMenu);
+    return () => document.removeEventListener('contextmenu', onContextMenu);
+  }, [sessionReady, policy.detectContextMenu]);
+
+  const dismissProctoringNotice = useCallback(() => {
+    try {
+      window.sessionStorage.setItem(`seams:proctoring-notice:${attemptId}`, '1');
+    } catch {
+      // Storage unavailable (private mode) — the notice simply reappears.
+    }
+    setProctoringDismissed(true);
+  }, [attemptId]);
+
   // Question change is an important state-change heartbeat.
   useEffect(() => {
     if (sessionReady && attempt && !loading) void sendHeartbeat();
@@ -647,9 +701,9 @@ export default function ExamPage({
     if (syncing) return { kind: 'syncing', label: 'Syncing' };
     if (pendingSync > 0) return { kind: 'pending', label: 'Sync Pending', pending: pendingSync };
     if (lastSyncedAt)
-      return { kind: 'synced', label: 'Synced', at: lastSyncedAt.toLocaleTimeString() };
+      return { kind: 'synced', label: 'Synced', at: lastSyncedAt };
     if (lastSavedAt)
-      return { kind: 'local', label: 'Saved Locally', at: lastSavedAt.toLocaleTimeString() };
+      return { kind: 'local', label: 'Saved Locally', at: lastSavedAt };
     return null;
   })();
 
@@ -711,21 +765,35 @@ export default function ExamPage({
   const canGoPrev = currentIndex > 0;
   const canGoNext = currentIndex < questions.length - 1;
 
-  // Group items by question type (MCQ / ID / TF) for the section navigator.
-  const navigatorSections: {
-    label: string;
-    items: { q: (typeof questions)[number]; index: number }[];
-  }[] = [];
-  questions.forEach((q, index) => {
-    const shortLabel = QUESTION_TYPE_SHORT_LABELS[q.question_type] ?? q.question_type;
-    const sectionLabel = `${shortLabel} Section`;
-    const last = navigatorSections[navigatorSections.length - 1];
-    if (last && last.label === sectionLabel) {
-      last.items.push({ q, index });
-    } else {
-      navigatorSections.push({ label: sectionLabel, items: [{ q, index }] });
+  // Navigator model: consecutive runs of the same question type form a
+  // section, so the in-page navigator can label groups without re-deriving
+  // the manifest order or the display numbering.
+  const navigatorSections = questions.reduce<
+    Array<{ label: string; items: Array<{ q: (typeof questions)[number]; index: number }> }>
+  >((sections, q, index) => {
+    const meta = displayById.get(q.id);
+    if (sections.length === 0 || meta?.isFirstInGroup) {
+      sections.push({ label: meta?.groupLabel ?? q.question_type, items: [] });
     }
-  });
+    sections[sections.length - 1].items.push({ q, index });
+    return sections;
+  }, []);
+
+  // Honest, policy-derived transparency line: list only what is actually on.
+  const proctoringEvents: string[] = [];
+  if (policy.requireFullscreen || policy.detectFullscreenExit)
+    proctoringEvents.push('full-screen exits');
+  if (policy.detectTabVisibility) proctoringEvents.push('tab switches');
+  if (policy.detectFocusLoss) proctoringEvents.push('window focus changes');
+  if (policy.detectCopyAttempts) proctoringEvents.push('copy attempts');
+  if (policy.detectPasteAttempts) proctoringEvents.push('paste attempts');
+  if (policy.detectContextMenu) proctoringEvents.push('right-click attempts');
+  const proctoringNotice =
+    proctoringEvents.length === 0
+      ? null
+      : `This session is proctored: ${proctoringEvents
+          .join(', ')
+          .replace(/, ([^,]*)$/, ', and $1')} are recorded with timestamps.`;
 
   const remainingQuestions = questions.length - answeredCount;
 
@@ -733,70 +801,94 @@ export default function ExamPage({
     <ExamShell
       backHref={`/student/assessments/${assessmentId}`}
       backLabel="Back to Assessment"
-    >
-      <div className="flex flex-col h-screen">
-        {/* Minimal exam header bar */}
-        <header className="flex items-center justify-between h-12 px-4 border-b border-[var(--color-border)] bg-[var(--color-surface)] shrink-0">
-          <div className="flex items-center gap-4">
-            <div className="hidden sm:block text-sm font-medium text-[var(--color-foreground)]">
-              {questions.length} questions &middot; {answeredCount} answered
-            </div>
-          </div>
+      status={
+        <>
+          {/* Compact sync pill for short states; offline/error/pending get a
+              full-width strip below so long text never crowds the header. */}
+          {(syncBadge?.kind === 'saving' ||
+            syncBadge?.kind === 'syncing' ||
+            syncBadge?.kind === 'synced' ||
+            syncBadge?.kind === 'local') && (
+            <span
+              className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-1 text-xs font-medium ${
+                syncBadge.kind === 'saving' || syncBadge.kind === 'syncing'
+                  ? 'border-[var(--color-border)] bg-[var(--color-surface-hover)] text-[var(--color-muted)]'
+                  : 'border-[var(--color-success)]/30 bg-[var(--color-success-light)] text-[var(--color-success-dark)]'
+              }`}
+              role="status"
+            >
+              {(syncBadge.kind === 'saving' || syncBadge.kind === 'syncing') && (
+                <Spinner size="sm" />
+              )}
+              {syncBadge.kind === 'saving' && 'Saving'}
+              {syncBadge.kind === 'syncing' && 'Syncing'}
+              {syncBadge.kind === 'synced' && <>Synced {formatTime(syncBadge.at)}</>}
+              {syncBadge.kind === 'local' && <>Saved locally {formatTime(syncBadge.at)}</>}
+            </span>
+          )}
 
-          <div className="flex items-center gap-3">
-            {syncBadge?.kind === 'offline' && (
-              <span
-                className="text-xs text-warning font-medium flex items-center gap-1"
-                role="status"
-                aria-live="polite"
-              >
-                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 5.636a9 9 0 010 12.728m0 0l-2.829-2.829m2.829 2.829L21 21M15.536 8.464a5 5 0 010 7.072m0 0l-2.829-2.829m-4.242 2.829a5 5 0 01-1.414-2.83m-1.414 5.658a9 9 0 01-2.167-9.238m7.824 2.167a1 1 0 111.414 1.414m-1.414-1.414L3 3" />
-                </svg>
-                Offline — Saved on this Device ({syncBadge.pending})
-              </span>
-            )}
-            {syncBadge?.kind === 'error' && (
-              <button
-                type="button"
-                onClick={() => void flushPendingOperations()}
-                className="text-xs text-danger font-medium flex items-center gap-1 hover:underline"
-              >
-                Sync Error — tap to retry
-              </button>
-            )}
-            {syncBadge?.kind === 'syncing' && (
-              <span className="text-xs text-warning flex items-center gap-1" role="status">
-                <Spinner size="sm" /> Syncing
-              </span>
-            )}
-            {syncBadge?.kind === 'pending' && (
-              <span className="text-xs text-warning flex items-center gap-1" role="status">
-                <Spinner size="sm" /> Sync Pending ({syncBadge.pending})
-              </span>
-            )}
-            {syncBadge?.kind === 'saving' && (
-              <span className="text-xs text-muted flex items-center gap-1" role="status">
-                <Spinner size="sm" /> Saving
-              </span>
-            )}
-            {syncBadge?.kind === 'synced' && (
-              <span className="text-xs text-success" role="status">
-                Synced {syncBadge.at}
-              </span>
-            )}
-            {syncBadge?.kind === 'local' && (
-              <span className="text-xs text-success" role="status">
-                Saved Locally {syncBadge.at}
-              </span>
-            )}
-            <ExamTimer
-              expiresAt={attemptExpiresAt ?? attempt.expires_at}
-              clockOffsetMs={serverNowOffset}
-              onTimeUp={handleTimeUp}
+          {/* Desktop: submit lives in the header; mobile keeps the fixed
+              thumb-reachable bottom bar. */}
+          <Button
+            variant="primary"
+            size="sm"
+            className="hidden md:inline-flex"
+            onClick={() => setShowSubmitDialog(true)}
+          >
+            Submit exam
+          </Button>
+
+          <ExamTimer
+            expiresAt={attemptExpiresAt ?? attempt.expires_at}
+            clockOffsetMs={serverNowOffset}
+            onTimeUp={handleTimeUp}
+          />
+        </>
+      }
+    >
+      <div className="flex h-full flex-col">
+        {/* Attention strips: long status text gets the full width. */}
+        {syncBadge?.kind === 'offline' && (
+          <div
+            className="flex items-center gap-2 border-b border-[var(--color-border)] bg-[var(--color-warning-light)] px-4 py-2 text-xs font-medium text-[var(--color-foreground)]"
+            role="status"
+            aria-live="polite"
+          >
+            <WifiSlash
+              className="h-4 w-4 shrink-0 text-[var(--color-warning)]"
+              aria-hidden="true"
             />
+            Offline — Saved on this Device ({syncBadge.pending})
           </div>
-        </header>
+        )}
+        {syncBadge?.kind === 'error' && (
+          <div
+            className="flex items-center gap-2 border-b border-[var(--color-border)] bg-[var(--color-danger-light)] px-4 py-2 text-xs font-medium text-[var(--color-foreground)]"
+            role="alert"
+          >
+            <WarningCircle
+              className="h-4 w-4 shrink-0 text-[var(--color-danger)]"
+              aria-hidden="true"
+            />
+            <button
+              type="button"
+              onClick={() => void flushPendingOperations()}
+              className="underline-offset-2 hover:underline"
+            >
+              Sync error — tap to retry
+            </button>
+          </div>
+        )}
+        {syncBadge?.kind === 'pending' && (
+          <div
+            className="flex items-center gap-2 border-b border-[var(--color-border)] bg-[var(--color-warning-light)] px-4 py-2 text-xs font-medium text-[var(--color-foreground)]"
+            role="status"
+            aria-live="polite"
+          >
+            <Spinner size="sm" />
+            Sync pending ({syncBadge.pending})
+          </div>
+        )}
 
         {sessionTransferred && (
           <div className="px-4 py-2 text-xs bg-[var(--color-info-light)] border-b border-[var(--color-border)] text-[var(--color-foreground)]" role="status">

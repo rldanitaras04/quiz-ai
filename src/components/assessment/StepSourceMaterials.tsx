@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useCallback, type JSX } from 'react';
 import Spinner from '@/components/ui/Spinner';
 import Badge from '@/components/ui/Badge';
 import Button from '@/components/ui/Button';
-import { getSourceMaterials, deleteSourceMaterial, retrySourceMaterial } from '@/app/(dashboard)/faculty/subjects/[offeringId]/assessments/actions';
+import { getSourceMaterials, deleteSourceMaterial, retrySourceMaterial } from '@/app/(dashboard)/faculty/subjects/[offeringId]/assessments/actions/sources';
 import { notifySuccess, notifyError } from '@/components/ui/alerts';
 import { confirmAction } from '@/components/ui/alerts';
 import { useSupabase } from '@/lib/hooks';

@@ -6,7 +6,9 @@ import Button from '@/components/ui/Button';
 import Badge from '@/components/ui/Badge';
 import Input from '@/components/ui/Input';
 import { notifyError, notifySuccess } from '@/components/ui/alerts';
-import { approveAssessment, createAssessment, saveGeneratedQuestions } from '@/app/(dashboard)/faculty/subjects/[offeringId]/assessments/actions';
+import { approveAssessment } from '@/app/(dashboard)/faculty/subjects/[offeringId]/assessments/actions/lifecycle'
+import { createAssessment } from '@/app/(dashboard)/faculty/subjects/[offeringId]/assessments/actions/assessments'
+import { saveGeneratedQuestions } from '@/app/(dashboard)/faculty/subjects/[offeringId]/assessments/actions/questions';
 import { saveAssessmentQuestionsToBank } from '@/app/(dashboard)/faculty/subjects/[offeringId]/question-bank/actions';
 import type { WizardState } from '@/app/(dashboard)/faculty/subjects/[offeringId]/assessments/new/page';
 import type { Topic } from '@/lib/types';
