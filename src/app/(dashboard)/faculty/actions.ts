@@ -223,6 +223,11 @@ export async function getFacultyDashboardData(params?: {
       ownOfferings.map((offering) => offering.subject?.id).filter((id): id is string => Boolean(id))
     ),
   ];
+  // A subject taught across several sections yields several offerings but only
+  // one distinct subject, so the "My Subjects" figure must not be the offering
+  // count. Offerings map 1:1 to the sections this faculty member handles, so
+  // that number is surfaced as the caption instead.
+  const ownSectionCount = ownOfferings.length;
 
   // Subject-level scope: every section of the caller's subjects in the
   // selected semester (assessments became subject-level in 20260929).
@@ -526,8 +531,11 @@ export async function getFacultyDashboardData(params?: {
     {
       key: 'subjects',
       label: 'My Subjects',
-      value: ownOfferings.length,
-      caption: 'This semester',
+      value: subjectIds.length,
+      caption:
+        ownSectionCount > 0
+          ? `${ownSectionCount} section${ownSectionCount === 1 ? '' : 's'}`
+          : 'This semester',
       deltaPct: null,
       deltaNote: null,
       series: null,
