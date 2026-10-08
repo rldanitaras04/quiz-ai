@@ -138,7 +138,7 @@ export default function MultiSectionDeployClient({
           show_raw_score: true,
           show_percentage: true,
           show_item_correctness: true,
-          show_correct_answers: false,
+          show_correct_answers: true,
           show_explanations: false,
           requires_identity_verification: false,
         });

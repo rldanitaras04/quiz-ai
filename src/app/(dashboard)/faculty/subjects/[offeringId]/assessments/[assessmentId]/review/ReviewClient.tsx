@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { CaretDown } from '@phosphor-icons/react';
 import Button from '@/components/ui/Button';
 import Badge from '@/components/ui/Badge';
 import EmptyState from '@/components/ui/EmptyState';
@@ -79,6 +80,45 @@ export default function ReviewClient({ assessmentId }: ReviewClientProps) {
     loadItems();
   }, [loadItems]);
 
+  // One block per student: a student with several identification responses is
+  // reviewed in one place instead of as separate cards scattered down the page.
+  const groups = useMemo(() => {
+    const byStudent = new Map<
+      string,
+      { studentId: string; name: string; email: string; items: IdentificationReviewItem[] }
+    >();
+    for (const item of items) {
+      const existing = byStudent.get(item.student_id);
+      if (existing) {
+        existing.items.push(item);
+      } else {
+        byStudent.set(item.student_id, {
+          studentId: item.student_id,
+          name: item.student_name,
+          email: item.student_email,
+          items: [item],
+        });
+      }
+    }
+    return [...byStudent.values()].sort((a, b) => a.name.localeCompare(b.name));
+  }, [items]);
+
+  // Which student groups the reviewer has collapsed. Expanded by default so no
+  // response is hidden until they choose to collapse it.
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+
+  const toggleGroup = (studentId: string) => {
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(studentId)) {
+        next.delete(studentId);
+      } else {
+        next.add(studentId);
+      }
+      return next;
+    });
+  };
+
   const openScoringModal = (item: IdentificationReviewItem) => {
     setScoringModal(item);
     setScoreInput(String(item.earned_points ?? 0));
@@ -127,7 +167,7 @@ export default function ReviewClient({ assessmentId }: ReviewClientProps) {
     <Card>
       <CardHeader>
         <h3 className="text-lg font-semibold text-foreground">Identification Question Review</h3>
-        <p className="text-sm text-muted">Review and manually score identification responses</p>
+        <p className="text-sm text-muted">Review and manually score identification responses, grouped by student</p>
       </CardHeader>
       <CardContent>
         {loading ? (
@@ -138,56 +178,84 @@ export default function ReviewClient({ assessmentId }: ReviewClientProps) {
             description="All identification responses have been scored or there are no identification questions."
           />
         ) : (
-          <div className="space-y-4">
-            {items.map((item) => (
+          <div className="space-y-6">
+            {groups.map((group) => {
+              const isCollapsed = collapsed.has(group.studentId);
+              return (
               <div
-                key={item.response_id}
-                className="p-4 rounded-[var(--radius-md)] border border-[var(--color-border)]"
+                key={group.studentId}
+                className="rounded-[var(--radius-md)] border border-[var(--color-border)] overflow-hidden"
               >
-                <div className="flex items-start justify-between gap-4 mb-2">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="font-medium text-foreground">{item.student_name}</span>
-                      <span className="text-xs text-muted">{item.student_email}</span>
-                    </div>
-                    <p className="text-sm text-muted line-clamp-2">{item.question_text}</p>
-                  </div>
-                  <Badge variant={item.earned_points === 0 ? 'danger' : 'success'}>
-                    {item.earned_points ?? 0}/{item.max_points}
-                  </Badge>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3 text-sm mb-3">
-                  <div>
-                    <span className="text-muted">Student answer:</span>
-                    <p className="font-medium text-foreground">{item.text_answer}</p>
-                  </div>
-                  <div>
-                    <span className="text-muted">Expected answer:</span>
-                    <p className="font-medium text-foreground">{item.canonical_answer}</p>
-                  </div>
-                </div>
-
-                {item.accepted_answers.length > 0 && (
-                  <div className="text-sm mb-3">
-                    <span className="text-muted">Also accepted:</span>
-                    <p className="text-foreground">{item.accepted_answers.join(', ')}</p>
-                  </div>
-                )}
-
-                <div className="flex items-center gap-2">
-                  <Button variant="primary" size="sm" onClick={() => openScoringModal(item)}>
-                    Score This Response
-                  </Button>
-                  <span className="text-xs text-muted">
-                    Status: {STATUS_LABELS[item.scoring_status] ?? item.scoring_status}
-                    {describeAutoVerdict(item.scoring_metadata)
-                      ? ` — ${describeAutoVerdict(item.scoring_metadata)}`
-                      : ''}
+                <button
+                  type="button"
+                  onClick={() => toggleGroup(group.studentId)}
+                  aria-expanded={!isCollapsed}
+                  aria-controls={`review-group-${group.studentId}`}
+                  className={`flex w-full flex-wrap items-center justify-between gap-2 bg-[var(--color-surface-hover)] px-4 py-3 text-left transition-colors hover:bg-[var(--color-surface)]${
+                    isCollapsed ? '' : ' border-b border-[var(--color-border)]'
+                  }`}
+                >
+                  <span className="flex items-center gap-2 min-w-0">
+                    <CaretDown
+                      className={`h-4 w-4 shrink-0 text-muted transition-transform ${
+                        isCollapsed ? '-rotate-90' : ''
+                      }`}
+                    />
+                    <span className="font-medium text-foreground">{group.name}</span>
+                    <span className="text-xs text-muted">{group.email}</span>
                   </span>
+                  <Badge variant="default">
+                    {group.items.length} {group.items.length === 1 ? 'response' : 'responses'}
+                  </Badge>
+                </button>
+
+                {!isCollapsed && (
+                <div id={`review-group-${group.studentId}`} className="divide-y divide-[var(--color-border)]">
+                  {group.items.map((item) => (
+                    <div key={item.response_id} className="p-4">
+                      <div className="flex items-start justify-between gap-4 mb-2">
+                        <p className="flex-1 min-w-0 text-sm text-muted">{item.question_text}</p>
+                        <Badge variant={item.earned_points === 0 ? 'danger' : 'success'}>
+                          {item.earned_points ?? 0}/{item.max_points}
+                        </Badge>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3 text-sm mb-3">
+                        <div>
+                          <span className="text-muted">Student answer:</span>
+                          <p className="font-medium text-foreground">{item.text_answer}</p>
+                        </div>
+                        <div>
+                          <span className="text-muted">Expected answer:</span>
+                          <p className="font-medium text-foreground">{item.canonical_answer}</p>
+                        </div>
+                      </div>
+
+                      {item.accepted_answers.length > 0 && (
+                        <div className="text-sm mb-3">
+                          <span className="text-muted">Also accepted:</span>
+                          <p className="text-foreground">{item.accepted_answers.join(', ')}</p>
+                        </div>
+                      )}
+
+                      <div className="flex items-center gap-2">
+                        <Button variant="primary" size="sm" onClick={() => openScoringModal(item)}>
+                          Score This Response
+                        </Button>
+                        <span className="text-xs text-muted">
+                          Status: {STATUS_LABELS[item.scoring_status] ?? item.scoring_status}
+                          {describeAutoVerdict(item.scoring_metadata)
+                            ? ` — ${describeAutoVerdict(item.scoring_metadata)}`
+                            : ''}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
                 </div>
+                )}
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </CardContent>

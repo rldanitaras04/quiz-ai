@@ -585,3 +585,268 @@ export async function getSecuritySummary(
     },
   };
 }
+
+// ---------------------------------------------------------------------------
+// Per-student answer review
+// ---------------------------------------------------------------------------
+// Faculty read a submitted attempt item by item, including the correct answer
+// and the accepted alternatives. Faculty visibility is deliberately independent
+// of the student-facing display flags (`show_correct_answers`,
+// `show_item_correctness`): those govern what a *student* may see, never what an
+// instructor may inspect. The gate is the same faculty-of-offering check as the
+// rest of this module; score columns and the answer key are then read with the
+// service-role client (gates-then-admin), because the session role cannot see
+// earned_points (migration 20261005000000).
+
+export interface ReviewableAttempt {
+  attempt_id: string;
+  student_id: string;
+  student_name: string;
+  student_email: string;
+  attempt_number: number;
+  status: string;
+  submitted_at: string | null;
+  raw_score: number | null;
+  possible_score: number | null;
+  percentage: number | null;
+  released: boolean;
+}
+
+/** Submitted attempts in a deployment, newest first, ready for per-student review. */
+export async function getAttemptsForAnswerReview(
+  deploymentId: string
+): Promise<{ data: ReviewableAttempt[] | null; error?: string }> {
+  const { supabase, userId } = await requireUser();
+
+  const { data: deployment } = await supabase
+    .from('assessment_deployments')
+    .select('id, subject_offering_id')
+    .eq('id', deploymentId)
+    .maybeSingle();
+
+  if (!deployment) return { data: null, error: 'Deployment not found' };
+  if (!(await isFacultyOfOfferingOrSubject(supabase, userId, deployment.subject_offering_id))) {
+    return { data: null, error: 'Not authorized' };
+  }
+
+  const { data: attempts } = await supabase
+    .from('exam_attempts')
+    .select('id, student_id, attempt_number, status, submitted_at, created_at')
+    .eq('deployment_id', deploymentId)
+    .in('status', ['submitted', 'auto_submitted', 'expired'])
+    .order('created_at', { ascending: true });
+
+  if (!attempts || attempts.length === 0) return { data: [] };
+
+  const studentIds = [...new Set(attempts.map((a) => a.student_id))];
+  const attemptIds = attempts.map((a) => a.id);
+
+  const { data: profiles } = await supabase
+    .from('profiles')
+    .select('id, full_name, email')
+    .in('id', studentIds);
+
+  const { data: results } = await supabase
+    .from('assessment_results')
+    .select('attempt_id, raw_score, possible_score, percentage, status')
+    .in('attempt_id', attemptIds);
+
+  const profileMap = new Map((profiles ?? []).map((p) => [p.id, p]));
+  const resultMap = new Map((results ?? []).map((r) => [r.attempt_id, r]));
+
+  const toNumber = (value: unknown): number | null => {
+    if (value == null) return null;
+    const n = Number(value);
+    return Number.isNaN(n) ? null : n;
+  };
+
+  const data: ReviewableAttempt[] = attempts.map((a) => {
+    const profile = profileMap.get(a.student_id);
+    const result = resultMap.get(a.id);
+    return {
+      attempt_id: a.id,
+      student_id: a.student_id,
+      student_name: profile?.full_name ?? 'Unknown student',
+      student_email: profile?.email ?? '',
+      attempt_number: a.attempt_number,
+      status: a.status,
+      submitted_at: a.submitted_at,
+      raw_score: toNumber(result?.raw_score),
+      possible_score: toNumber(result?.possible_score),
+      percentage: toNumber(result?.percentage),
+      released: result?.status === 'released',
+    };
+  });
+
+  data.sort(
+    (a, b) =>
+      a.student_name.localeCompare(b.student_name) || a.attempt_number - b.attempt_number
+  );
+
+  return { data };
+}
+
+export interface FacultyAnswerReviewItem {
+  question_id: string;
+  position: number | null;
+  question_text: string;
+  question_type: string;
+  points: number;
+  image_url: string | null;
+  /** The student's answer, rendered as text (choice key + text, or free text). */
+  student_answer: string | null;
+  /** The key's answer, rendered the same way; null when no key is on file. */
+  correct_answer: string | null;
+  accepted_answers: string[];
+  earned_points: number | null;
+  /** null when the response carries no score yet. */
+  is_correct: boolean | null;
+}
+
+export interface FacultyAnswerReview {
+  attempt_id: string;
+  student_name: string;
+  student_email: string;
+  attempt_number: number;
+  status: string;
+  submitted_at: string | null;
+  items: FacultyAnswerReviewItem[];
+}
+
+/** One attempt, item by item: the student's answer next to the correct one. */
+export async function getAttemptAnswersForReview(
+  attemptId: string
+): Promise<{ data: FacultyAnswerReview | null; error?: string }> {
+  const { supabase, userId } = await requireUser();
+
+  const { data: attempt } = await supabase
+    .from('exam_attempts')
+    .select('id, student_id, deployment_id, attempt_number, status, submitted_at')
+    .eq('id', attemptId)
+    .maybeSingle();
+
+  if (!attempt) return { data: null, error: 'Attempt not found' };
+  // An attempt in flight has not settled; its answers must not be read out
+  // mid-exam (loadAttemptBreakdown applies the same rule for students).
+  if (attempt.status === 'in_progress') {
+    return { data: null, error: 'Attempt is still in progress' };
+  }
+
+  const { data: deployment } = await supabase
+    .from('assessment_deployments')
+    .select('id, assessment_version_id, subject_offering_id')
+    .eq('id', attempt.deployment_id)
+    .maybeSingle();
+
+  if (!deployment) return { data: null, error: 'Deployment not found' };
+  if (!(await isFacultyOfOfferingOrSubject(supabase, userId, deployment.subject_offering_id))) {
+    return { data: null, error: 'Not authorized' };
+  }
+
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('id, full_name, email')
+    .eq('id', attempt.student_id)
+    .maybeSingle();
+
+  const { data: questions } = await supabase
+    .from('questions')
+    .select('id, question_text, question_type, points, position, image_url')
+    .eq('assessment_version_id', deployment.assessment_version_id)
+    .order('position', { ascending: true });
+
+  const questionIds = (questions ?? []).map((q) => q.id);
+
+  const { data: choices } =
+    questionIds.length > 0
+      ? await supabase
+          .from('question_choices')
+          .select('id, question_id, choice_key, choice_text')
+          .in('question_id', questionIds)
+      : { data: [] };
+
+  const { data: answerKeys } =
+    questionIds.length > 0
+      ? await supabase
+          .from('answer_keys')
+          .select('question_id, correct_choice_id, canonical_answer, accepted_answers')
+          .in('question_id', questionIds)
+      : { data: [] };
+
+  // earned_points is withheld from the session role (20261005000000), so the
+  // responses read uses the service-role client after the gate above.
+  const admin = createAdminClient();
+  const { data: responses } = await admin
+    .from('student_responses')
+    .select('question_id, selected_choice_id, text_answer, earned_points')
+    .eq('attempt_id', attemptId);
+
+  const choicesByQuestion = new Map<
+    string,
+    { id: string; choice_key: string; choice_text: string }[]
+  >();
+  for (const choice of choices ?? []) {
+    const list = choicesByQuestion.get(choice.question_id) ?? [];
+    list.push({ id: choice.id, choice_key: choice.choice_key, choice_text: choice.choice_text });
+    choicesByQuestion.set(choice.question_id, list);
+  }
+
+  const answerKeyMap = new Map((answerKeys ?? []).map((ak) => [ak.question_id, ak]));
+  const responseMap = new Map((responses ?? []).map((r) => [r.question_id, r]));
+
+  const items: FacultyAnswerReviewItem[] = (questions ?? []).map((q) => {
+    const isChoiceBased = q.question_type === 'multiple_choice' || q.question_type === 'true_false';
+    const answerKey = answerKeyMap.get(q.id);
+    const response = responseMap.get(q.id);
+    const questionChoices = choicesByQuestion.get(q.id) ?? [];
+
+    const selected = response?.selected_choice_id
+      ? questionChoices.find((c) => c.id === response.selected_choice_id)
+      : undefined;
+    const correct = answerKey?.correct_choice_id
+      ? questionChoices.find((c) => c.id === answerKey.correct_choice_id)
+      : undefined;
+
+    const earned = response?.earned_points ?? null;
+    let isCorrect: boolean | null = null;
+    if (earned !== null) {
+      isCorrect = isChoiceBased
+        ? Boolean(answerKey?.correct_choice_id) && response?.selected_choice_id === answerKey?.correct_choice_id
+        : earned > 0;
+    }
+
+    return {
+      question_id: q.id,
+      position: q.position,
+      question_text: q.question_text,
+      question_type: q.question_type,
+      points: q.points,
+      image_url: q.image_url ?? null,
+      student_answer: isChoiceBased
+        ? selected
+          ? `${selected.choice_key}. ${selected.choice_text}`
+          : null
+        : response?.text_answer ?? null,
+      correct_answer: isChoiceBased
+        ? correct
+          ? `${correct.choice_key}. ${correct.choice_text}`
+          : null
+        : answerKey?.canonical_answer ?? null,
+      accepted_answers: (answerKey?.accepted_answers as string[] | null) ?? [],
+      earned_points: earned,
+      is_correct: isCorrect,
+    };
+  });
+
+  return {
+    data: {
+      attempt_id: attempt.id,
+      student_name: profile?.full_name ?? 'Unknown student',
+      student_email: profile?.email ?? '',
+      attempt_number: attempt.attempt_number,
+      status: attempt.status,
+      submitted_at: attempt.submitted_at,
+      items,
+    },
+  };
+}

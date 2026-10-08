@@ -75,7 +75,7 @@ export default function DeployClient({
   const [showRawScore, setShowRawScore] = useState(true);
   const [showPercentage, setShowPercentage] = useState(true);
   const [showItemCorrectness, setShowItemCorrectness] = useState(true);
-  const [showCorrectAnswers, setShowCorrectAnswers] = useState(false);
+  const [showCorrectAnswers, setShowCorrectAnswers] = useState(true);
   const [showExplanations, setShowExplanations] = useState(false);
   const [securityPolicy, setSecurityPolicy] = useState<DeploymentSecurityPolicy>(() =>
     normalizeSecurityPolicy(null)

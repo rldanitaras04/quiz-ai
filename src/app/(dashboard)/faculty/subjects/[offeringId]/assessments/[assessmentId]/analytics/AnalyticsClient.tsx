@@ -32,6 +32,7 @@ import {
   type ItemAnalysis,
 } from './actions';
 import SecuritySummaryCard from './SecuritySummaryCard';
+import StudentAnswersReview from './StudentAnswersReview';
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend, ArcElement);
 
@@ -491,6 +492,9 @@ export default function AnalyticsClient({ deploymentId }: AnalyticsClientProps):
           )}
         </CardContent>
       </Card>
+
+      {/* Per-student answer review (correct answer shown to faculty) */}
+      <StudentAnswersReview deploymentId={deploymentId} />
 
       {/* Post-exam security summary (factual session events) */}
       <SecuritySummaryCard deploymentId={deploymentId} />
