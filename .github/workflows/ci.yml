@@ -81,7 +81,21 @@ jobs:
         run: npm ci
 
       - name: Start local Supabase
-        run: npx supabase start
+        # Docker Hub / public.ecr.aws throttle anonymous pulls ("toomanyrequests:
+        # Rate exceeded") on shared runners, which intermittently aborts the
+        # stack bring-up before any migration runs. Layers pulled before the
+        # throttle are cached, so a bounded retry clears it.
+        run: |
+          for attempt in 1 2 3; do
+            if npx supabase start; then
+              exit 0
+            fi
+            echo "::warning::supabase start failed (attempt $attempt) — retrying"
+            npx supabase stop --no-backup >/dev/null 2>&1 || true
+            sleep $((attempt * 15))
+          done
+          echo "::error::supabase start failed after 3 attempts"
+          exit 1
 
       - name: Apply migrations to the local stack
         # Fails the job if any migration is not idempotent or breaks.

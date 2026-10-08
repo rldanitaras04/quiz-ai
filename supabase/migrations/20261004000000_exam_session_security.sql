@@ -208,6 +208,50 @@ CREATE TABLE IF NOT EXISTS exam_events (
   created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Drift reconciliation: on a fresh database the 20260921 migration creates
+-- exam_events first, so the CREATE TABLE above is a no-op and this table lacks
+-- the columns/indexes/vocabulary the session layer depends on. Make the schema
+-- here authoritative regardless of whether the table already existed.
+ALTER TABLE exam_events
+  ADD COLUMN IF NOT EXISTS exam_session_id UUID REFERENCES exam_sessions(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS deployment_id UUID REFERENCES assessment_deployments(id) ON DELETE CASCADE;
+
+ALTER TABLE exam_events ALTER COLUMN metadata SET NOT NULL;
+
+-- Replace the 20260921 vocabulary with the extended factual event set.
+ALTER TABLE exam_events DROP CONSTRAINT IF EXISTS exam_events_event_type_check;
+ALTER TABLE exam_events
+  ADD CONSTRAINT exam_events_event_type_check CHECK (event_type IN (
+    'exam_started',
+    'session_created',
+    'session_recovered',
+    'session_terminated',
+    'fullscreen_entered',
+    'fullscreen_exited',
+    'tab_hidden',
+    'tab_visible',
+    'window_blurred',
+    'window_focused',
+    'page_reloaded',
+    'connection_lost',
+    'connection_restored',
+    'copy_attempt',
+    'paste_attempt',
+    'context_menu_attempt',
+    'concurrent_session_attempt',
+    'invalid_session',
+    'identity_verified',
+    'identity_reverification_required',
+    'identity_reverification_failed',
+    'pending_sync_started',
+    'pending_sync_completed',
+    'submission_started',
+    'submission_completed',
+    'attempt_terminated',
+    'faculty_intervention',
+    'custom'
+  ));
+
 ALTER TABLE exam_events ENABLE ROW LEVEL SECURITY;
 
 CREATE INDEX IF NOT EXISTS idx_exam_events_attempt_id ON exam_events(attempt_id);
@@ -263,6 +307,14 @@ CREATE TABLE IF NOT EXISTS review_notes (
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Drift reconciliation: on a fresh database the 20260921 migration creates
+-- review_notes first, so tighten it to match the definition above.
+ALTER TABLE review_notes ALTER COLUMN is_internal SET NOT NULL;
+ALTER TABLE review_notes DROP CONSTRAINT IF EXISTS review_notes_author_id_fkey;
+ALTER TABLE review_notes
+  ADD CONSTRAINT review_notes_author_id_fkey
+  FOREIGN KEY (author_id) REFERENCES profiles(id) ON DELETE CASCADE;
 
 ALTER TABLE review_notes ENABLE ROW LEVEL SECURITY;
 CREATE INDEX IF NOT EXISTS idx_review_notes_attempt_id ON review_notes(attempt_id);

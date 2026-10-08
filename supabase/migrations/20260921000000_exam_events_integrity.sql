@@ -50,7 +50,7 @@ CREATE POLICY "Faculty can read exam events for their deployments"
       JOIN assessment_deployments ad ON ad.id = ea.deployment_id
       JOIN faculty_assignments fa ON fa.subject_offering_id = ad.subject_offering_id
       WHERE ea.id = exam_events.attempt_id
-        AND fa.user_id = auth.uid()
+        AND fa.faculty_id = auth.uid()
     )
   );
 
@@ -90,7 +90,7 @@ CREATE POLICY "Faculty can manage review notes for their deployments"
       JOIN assessment_deployments ad ON ad.id = ea.deployment_id
       JOIN faculty_assignments fa ON fa.subject_offering_id = ad.subject_offering_id
       WHERE ea.id = review_notes.attempt_id
-        AND fa.user_id = auth.uid()
+        AND fa.faculty_id = auth.uid()
     )
   )
   WITH CHECK (
