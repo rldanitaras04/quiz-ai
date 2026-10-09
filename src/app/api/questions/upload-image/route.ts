@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { toInternalError } from '@/lib/api-error';
+import { validateUuid } from '@/lib/validators';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { SUPPORTED_QUESTION_IMAGE_TYPES } from '@/lib/constants';
-import { logger } from '@/lib/logger';
 
 export async function POST(request: NextRequest) {
   const supabase = createAdminClient();
@@ -51,7 +52,18 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // If offeringId provided, verify faculty assignment (super_admin bypasses)
+    // `offeringId` is optional: the question-bank editor has no offering
+    // context. When it is absent the object is stored under the caller's own
+    // user id — the one folder the bucket policy explicitly allows any faculty
+    // member to write to — so an unscoped upload can never reach another
+    // offering's folder. When it IS present it must name an offering the caller
+    // is assigned to. The shape is checked first because the service-role
+    // client used here bypasses the bucket policy, so a malformed value would
+    // otherwise be pasted straight into a storage key.
+    if (offeringId !== null && !validateUuid(offeringId, 'offeringId').success) {
+      return NextResponse.json({ error: 'offeringId must be a valid UUID' }, { status: 400 });
+    }
+
     if (offeringId && !roles?.some((r) => r.role === 'super_admin')) {
       const { data: assignment } = await supabase
         .from('faculty_assignments')
@@ -70,7 +82,7 @@ export async function POST(request: NextRequest) {
     const arrayBuffer = await file.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
     const ext = file.name.split('.').pop()?.toLowerCase() || file.type.split('/')[1] || 'png';
-    // Store under question-images/<offeringIdOrUserId>/<timestamp>-<rand>.<ext>
+    // question-images/<offeringId | callerUserId>/<timestamp>-<rand>.<ext>
     const folder = offeringId ?? user.id;
     const storagePath = `${folder}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
 
@@ -82,7 +94,6 @@ export async function POST(request: NextRequest) {
       });
 
     if (uploadError) {
-      logger.error('Question image upload error:', uploadError);
       // Bucket missing → create once and retry (migration may not have run yet).
       if (
         uploadError.message?.toLowerCase().includes('bucket not found') ||
@@ -106,10 +117,9 @@ export async function POST(request: NextRequest) {
           }
         }
       }
-      return NextResponse.json(
-        { error: `Failed to upload image: ${uploadError.message ?? 'unknown storage error'}` },
-        { status: 500 }
-      );
+      return NextResponse.json(toInternalError(uploadError, 'Question image storage upload'), {
+        status: 500,
+      });
     }
 
     const { data: pub } = supabase.storage.from('question-images').getPublicUrl(storagePath);
@@ -124,10 +134,6 @@ export async function POST(request: NextRequest) {
       { status: 201 }
     );
   } catch (error) {
-    logger.error('Question image upload error:', error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Internal server error' },
-      { status: 500 }
-    );
+    return NextResponse.json(toInternalError(error, 'Question image upload'), { status: 500 });
   }
 }

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { toInternalError } from '@/lib/api-error';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { checkSimilarity, generateEmbedding, generateQuestions } from '@/lib/ai';
@@ -8,19 +9,11 @@ import { notifyFacultyOfOffering } from '@/lib/notifications';
 import type { GenerateQuestionsParams, QuestionValidation } from '@/lib/ai/types';
 import { parseEmbedding, type ExistingQuestionRef } from '@/lib/ai/duplicate-check';
 import { logger } from '@/lib/logger';
+import { createRateLimiter } from '@/lib/rate-limit';
 
-// Simple per-user rate limit: 60 generation requests / 10 minutes.
-const RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
-const RATE_LIMIT_MAX = 60;
-const rateBuckets = new Map<string, number[]>();
-
-function isRateLimited(userId: string): boolean {
-  const now = Date.now();
-  const bucket = (rateBuckets.get(userId) ?? []).filter((t) => now - t < RATE_LIMIT_WINDOW_MS);
-  bucket.push(now);
-  rateBuckets.set(userId, bucket);
-  return bucket.length > RATE_LIMIT_MAX;
-}
+// Per-user generation limit: 60 requests / 10 minutes. Best-effort and
+// per-instance — src/lib/rate-limit.ts documents the honest scope of that.
+const generateLimiter = createRateLimiter({ windowMs: 10 * 60 * 1000, max: 60 });
 
 /** How many chunks the prompt gets: vector top-k for large materials. */
 const RETRIEVAL_CHUNK_LIMIT = 10;
@@ -106,7 +99,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Count must be between 1 and 50' }, { status: 400 });
     }
 
-    if (isRateLimited(user.id)) {
+    if (!generateLimiter.check(user.id)) {
       return NextResponse.json({ error: 'Rate limit exceeded. Try again later.' }, { status: 429 });
     }
 
@@ -509,7 +502,6 @@ export async function POST(request: NextRequest) {
       },
     });
   } catch (error) {
-    logger.error('Question generation error:', error);
     // Scope §32: generation failure reaches the requesting faculty too — the
     // wizard page may have been closed while the provider was working.
     if (notifyCtx.userId && notifyCtx.offeringId) {
@@ -526,9 +518,6 @@ export async function POST(request: NextRequest) {
         },
       });
     }
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Internal server error' },
-      { status: 500 }
-    );
+    return NextResponse.json(toInternalError(error, 'Question generation'), { status: 500 });
   }
 }

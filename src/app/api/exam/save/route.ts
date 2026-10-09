@@ -1,10 +1,10 @@
 import { NextResponse } from 'next/server';
+import { toInternalError } from '@/lib/api-error';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { applyResponseOperations, normalizeOperation } from '@/lib/exam-sync';
 import { recordExamEvent } from '@/lib/exam-session';
 import { isRateLimitAuthError, withAuthRetry } from '@/lib/auth-errors';
-import { logger } from '@/lib/logger';
 
 /**
  * Synchronize queued examination response operations.
@@ -162,7 +162,6 @@ export async function POST(request: Request) {
       syncedAt,
     });
   } catch (error) {
-    logger.error('Save error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return NextResponse.json(toInternalError(error, 'Exam save'), { status: 500 });
   }
 }

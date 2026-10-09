@@ -3,7 +3,6 @@
 import { useState, useEffect, Fragment, type JSX } from 'react';
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend, ArcElement } from 'chart.js';
 import { Bar, Pie } from 'react-chartjs-2';
-import { HeadingLevel } from 'docx';
 import Badge from '@/components/ui/Badge';
 import Button from '@/components/ui/Button';
 import Spinner from '@/components/ui/Spinner';
@@ -17,14 +16,10 @@ import {
   QUESTION_TYPE_SHORT_LABELS,
 } from '@/lib/constants';
 import { ITEM_FLAG_LABELS, type ItemFlag } from '@/lib/item-analysis';
-import {
-  downloadDocx,
-  safeDocxFilename,
-  heading,
-  paragraph,
-  simpleTable,
-  buildDocument,
-} from '@/lib/export/docx';
+// Type-only: the DOCX helpers (and the `docx` library behind them, ~370 KB
+// minified) are imported on demand in `handleDownload`, never at module scope,
+// so they stay out of this route's initial client bundle.
+type Docx = typeof import('@/lib/export/docx');
 import type { BloomLevel, Difficulty, QuestionType } from '@/lib/types';
 import {
   getDeploymentAnalytics,
@@ -70,8 +65,12 @@ function flagBadges(flags: ItemFlag[]): JSX.Element {
   );
 }
 
-function buildItemAnalysisDocument(analytics: DeploymentAnalytics): ReturnType<typeof buildDocument> {
-  const children: Parameters<typeof buildDocument>[0] = [
+function buildItemAnalysisDocument(
+  analytics: DeploymentAnalytics,
+  docx: Docx
+): ReturnType<Docx['buildDocument']> {
+  const { heading, paragraph, simpleTable, buildDocument, HeadingLevel } = docx;
+  const children: Parameters<Docx['buildDocument']>[0] = [
     heading('Item Analysis', HeadingLevel.HEADING_1),
     paragraph(analytics.assessment_title, { bold: true, spacing: { after: 60 } }),
     paragraph(
@@ -155,9 +154,10 @@ export default function AnalyticsClient({ deploymentId }: AnalyticsClientProps):
     if (!analytics) return;
     setDownloading(true);
     try {
-      await downloadDocx(
-        buildItemAnalysisDocument(analytics),
-        safeDocxFilename(analytics.assessment_title, 'item-analysis')
+      const docx = await import('@/lib/export/docx');
+      await docx.downloadDocx(
+        buildItemAnalysisDocument(analytics, docx),
+        docx.safeDocxFilename(analytics.assessment_title, 'item-analysis')
       );
       notifySuccess('Item analysis downloaded');
     } catch (error) {

@@ -1,24 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { toInternalError } from '@/lib/api-error';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { generateEmbedding } from '@/lib/ai';
 import { logger } from '@/lib/logger';
+import { createRateLimiter } from '@/lib/rate-limit';
 
 const MAX_EMBEDDING_CHARS = 24_000; // ~6k tokens of input per request
-const RATE_LIMIT_REQUESTS = 30;
-const RATE_LIMIT_WINDOW_MS = 60_000;
 
-const rateBuckets = new Map<string, { count: number; resetAt: number }>();
-
-function checkRateLimit(key: string): boolean {
-  const now = Date.now();
-  const bucket = rateBuckets.get(key);
-  if (!bucket || now > bucket.resetAt) {
-    rateBuckets.set(key, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
-    return true;
-  }
-  bucket.count += 1;
-  return bucket.count <= RATE_LIMIT_REQUESTS;
-}
+// Per-user embedding limit: 30 requests / minute. Best-effort and
+// per-instance — src/lib/rate-limit.ts documents the honest scope of that.
+const embeddingLimiter = createRateLimiter({ windowMs: 60_000, max: 30 });
 
 export async function POST(request: NextRequest) {
   // Service-role client is created per-request (never at module scope) so
@@ -39,7 +30,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    if (!checkRateLimit(user.id)) {
+    if (!embeddingLimiter.check(user.id)) {
       return NextResponse.json({ error: 'Too many requests. Try again shortly.' }, { status: 429 });
     }
 
@@ -130,10 +121,6 @@ export async function POST(request: NextRequest) {
       tokensUsed: result.tokensUsed,
     });
   } catch (error) {
-    logger.error('Embedding generation error:', error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Internal server error' },
-      { status: 500 }
-    );
+    return NextResponse.json(toInternalError(error, 'Embedding generation'), { status: 500 });
   }
 }

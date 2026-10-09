@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { toInternalError } from '@/lib/api-error';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { createClient } from '@/lib/supabase/server';
 import {
@@ -77,8 +78,17 @@ async function anySuperAdminExists(): Promise<boolean> {
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json();
-    const action = body?.action;
+    // A malformed body is the caller's mistake, not a server failure. Answering
+    // 400 keeps this unauthenticated endpoint from being able to manufacture 5xx
+    // responses (and the error-log noise that comes with them) with junk input,
+    // and leaves the catch below for genuinely unexpected faults.
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json({ error: 'Request body must be valid JSON' }, { status: 400 });
+    }
+    const action = (body as Record<string, unknown> | null)?.action;
 
     // ------------------------------------------------------------------
     // check_env: report which required env vars are missing (no values, no
@@ -140,10 +150,9 @@ export async function POST(request: Request) {
 
       if (profileError) {
         await supabase.auth.admin.deleteUser(adminUserId);
-        return NextResponse.json(
-          { error: profileError.message, details: 'Failed to create admin profile' },
-          { status: 500 }
-        );
+        return NextResponse.json(toInternalError(profileError, 'Admin profile creation'), {
+          status: 500,
+        });
       }
 
       const { error: roleError } = await supabase
@@ -152,7 +161,7 @@ export async function POST(request: Request) {
 
       if (roleError) {
         await supabase.auth.admin.deleteUser(adminUserId);
-        return NextResponse.json({ error: roleError.message }, { status: 500 });
+        return NextResponse.json(toInternalError(roleError, 'super_admin role insert'), { status: 500 });
       }
 
       // Optional: admins may also be assigned to offerings, so give them the
@@ -199,10 +208,7 @@ export async function POST(request: Request) {
         .insert({ user_id: parsed.value, role: 'super_admin' });
 
       if (error) {
-        return NextResponse.json(
-          { error: error.message, details: 'Failed to insert super_admin role' },
-          { status: 500 }
-        );
+        return NextResponse.json(toInternalError(error, 'super_admin promotion'), { status: 500 });
       }
 
       return NextResponse.json({ success: true });
@@ -231,9 +237,6 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ error: 'Unknown action' }, { status: 400 });
   } catch (error) {
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Internal server error' },
-      { status: 500 }
-    );
+    return NextResponse.json(toInternalError(error, 'Bootstrap request'), { status: 500 });
   }
 }

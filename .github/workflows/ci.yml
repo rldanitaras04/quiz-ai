@@ -9,9 +9,18 @@
 # `e2e` runs the real-stack suites (enrollment + identity verification, exam
 # integrity, scheduled-maintenance sweep) against a local Supabase stack
 # started on the runner, and is a full gate: it runs on every push and pull
-# request alongside `verify`. The suites pass locally via `npm run test:e2e*`.
+# request alongside `verify`. The suites pass locally via `pnpm run test:e2e*`.
 # If hosted-runner docker/CLI plumbing proves flaky, scope it back with
 # `if: github.event_name == 'workflow_dispatch'` on the e2e job.
+#
+# Package manager: pnpm. The repository keeps exactly one lockfile,
+# pnpm-lock.yaml; package-lock.json was removed so a host that auto-detects the
+# manager from a lockfile cannot pick a different one than CI does. The version
+# is pinned in this file rather than through `packageManager` in package.json,
+# because pnpm 12 records that field as a dependency it manages itself and
+# rewrites the lockfile to include @pnpm/exe platform binaries. Both jobs install
+# pnpm before setup-node, because `cache: pnpm` resolves the store through pnpm
+# itself, so pnpm has to be on PATH first.
 name: CI
 
 on:
@@ -35,28 +44,32 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.8.1
+
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-          cache: npm
+          cache: pnpm
 
       - name: Install dependencies
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: Typecheck
-        run: npm run typecheck
+        run: pnpm run typecheck
 
       # eslint exits non-zero only on errors; the current warnings are
       # tracked separately and must not block the pipeline.
       - name: Lint
-        run: npm run lint
+        run: pnpm run lint
 
-      # Runs env-free (npm test does not load .env.local) — pure logic only.
+      # Runs env-free (pnpm test does not load .env.local) — pure logic only.
       - name: Unit tests
-        run: npm test
+        run: pnpm test
 
       - name: Build
-        run: npm run build
+        run: pnpm run build
         env:
           NEXT_PUBLIC_SUPABASE_URL: https://ci-placeholder.supabase.co
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-placeholder-anon-key
@@ -70,15 +83,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.8.1
+
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-          cache: npm
+          cache: pnpm
 
       - name: Install dependencies
         # Also installs the pinned supabase CLI (devDependency), so the CLI
         # version matches what applied these migrations locally.
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: Start local Supabase
         # Docker Hub / public.ecr.aws throttle anonymous pulls ("toomanyrequests:
@@ -87,11 +104,11 @@ jobs:
         # throttle are cached, so a bounded retry clears it.
         run: |
           for attempt in 1 2 3; do
-            if npx supabase start; then
+            if pnpm exec supabase start; then
               exit 0
             fi
             echo "::warning::supabase start failed (attempt $attempt) — retrying"
-            npx supabase stop --no-backup >/dev/null 2>&1 || true
+            pnpm exec supabase stop --no-backup >/dev/null 2>&1 || true
             sleep $((attempt * 15))
           done
           echo "::error::supabase start failed after 3 attempts"
@@ -99,15 +116,15 @@ jobs:
 
       - name: Apply migrations to the local stack
         # Fails the job if any migration is not idempotent or breaks.
-        run: npx supabase db reset
+        run: pnpm exec supabase db reset
 
       - name: Read stack settings into .env.local
         id: sb
         run: |
-          npx supabase status -o json > /tmp/supabase-status.json
-          api_url=$(jq -r '.api_url // .API.URL // .Api.URL // empty' /tmp/supabase-status.json)
-          anon_key=$(jq -r '.anon_key // .ANON_KEY // empty' /tmp/supabase-status.json)
-          service_role_key=$(jq -r '.service_role_key // .SERVICE_ROLE_KEY // empty' /tmp/supabase-status.json)
+          pnpm exec supabase status -o json > /tmp/supabase-status.json
+          api_url=$(jq -r '.API_URL // .api_url // .API.URL // .Api.URL // empty' /tmp/supabase-status.json)
+          anon_key=$(jq -r '.ANON_KEY // .anon_key // .API.ANON_KEY // .Api.anonKey // empty' /tmp/supabase-status.json)
+          service_role_key=$(jq -r '.SERVICE_ROLE_KEY // .service_role_key // .API.SERVICE_ROLE_KEY // .Api.serviceRoleKey // empty' /tmp/supabase-status.json)
           if [ -z "$api_url" ] || [ -z "$anon_key" ] || [ -z "$service_role_key" ]; then
             echo "::error::Unrecognized 'supabase status' shape — update the jq keys:"
             cat /tmp/supabase-status.json
@@ -120,16 +137,39 @@ jobs:
           } > .env.local
           echo "api_url=$api_url" >> "$GITHUB_OUTPUT"
 
+      - name: Wait for the local stack to serve
+        # `supabase start` can exit 0 while a container is still binding its
+        # port; the suites then fail much later with a confusing connection
+        # error. Probe the endpoints the app actually uses and retry briefly so
+        # a half-ready stack fails here, with the status codes that explain it.
+        env:
+          API_URL: ${{ steps.sb.outputs.api_url }}
+        run: |
+          for attempt in $(seq 1 15); do
+            rest_code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 5 "$API_URL/rest/v1/" 2>/dev/null || true)
+            auth_code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 5 "$API_URL/auth/v1/health" 2>/dev/null || true)
+            # Serving means the gateway answered (not 000), auth reports healthy,
+            # and the REST gateway is not returning a 5xx upstream error.
+            if [ -n "$rest_code" ] && [ "$rest_code" != "000" ] && [ "${rest_code#5}" = "$rest_code" ] && [ "$auth_code" = "200" ]; then
+              echo "Local Supabase is serving at $API_URL (rest=$rest_code auth=$auth_code)"
+              exit 0
+            fi
+            echo "::warning::local stack not ready (attempt $attempt): rest=$rest_code auth=$auth_code"
+            sleep 2
+          done
+          echo "::error::Local Supabase API never became ready at $API_URL"
+          exit 1
+
       # The e2e scripts spawn `next start` themselves and read .env.local,
-      # exactly as they do when run locally (npm run test:e2e*).
+      # exactly as they do when run locally (pnpm run test:e2e*).
       - name: Build
-        run: npm run build
+        run: pnpm run build
 
       - name: E2E — enrollment & identity verification
-        run: npm run test:e2e
+        run: pnpm run test:e2e
 
       - name: E2E — exam integrity
-        run: npm run test:e2e:exam
+        run: pnpm run test:e2e:exam
 
       - name: E2E — scheduled maintenance sweep
-        run: npm run test:e2e:sweep
+        run: pnpm run test:e2e:sweep

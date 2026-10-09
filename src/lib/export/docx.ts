@@ -47,6 +47,12 @@ export function paragraph(text: string, options?: { bold?: boolean; spacing?: { 
   });
 }
 
+// Re-exported so callers can reach the enum through a single lazy import of
+// this module instead of a static `import ... from 'docx'`, which would pull
+// the whole library into the caller's client bundle. `docx` is ~370 KB
+// minified, so client components load this module on demand instead.
+export { HeadingLevel };
+
 function cell(text: string | number, options?: { bold?: boolean; fill?: string; alignRight?: boolean }): TableCell {
   return new TableCell({
     shading: options?.fill ? { fill: options.fill } : undefined,

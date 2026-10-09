@@ -3,8 +3,9 @@
 import { useState, type JSX } from 'react';
 import Button from '@/components/ui/Button';
 import { notifyError, notifySuccess } from '@/components/ui/alerts';
-import { downloadDocx, safeDocxFilename } from '@/lib/export/docx';
-import { buildTosDocument } from '@/lib/export/tos-doc';
+// The DOCX builders (and the `docx` library behind them, ~370 KB minified) are
+// imported on demand inside the click handler so they never enter the initial
+// client bundle of every page that renders this button.
 import { getAssessmentTosExport } from '@/app/(dashboard)/faculty/subjects/[offeringId]/assessments/actions/export-tos';
 
 interface DownloadTosButtonProps {
@@ -33,9 +34,13 @@ export default function DownloadTosButton({
         notifyError('TOS is empty', 'Add questions to this assessment before downloading a TOS.');
         return;
       }
-      await downloadDocx(
+      const [docx, { buildTosDocument }] = await Promise.all([
+        import('@/lib/export/docx'),
+        import('@/lib/export/tos-doc'),
+      ]);
+      await docx.downloadDocx(
         buildTosDocument(result.data),
-        safeDocxFilename(assessmentTitle, 'tos')
+        docx.safeDocxFilename(assessmentTitle, 'tos')
       );
       notifySuccess('TOS downloaded', `${result.data.totalItems} items exported.`);
     } catch (error) {

@@ -1,9 +1,14 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse, after } from 'next/server';
+import { toInternalError } from '@/lib/api-error';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { extractAndStoreSource } from '@/lib/ai';
 import { SUPPORTED_SOURCE_FILE_TYPES } from '@/lib/constants';
 import { getSettings } from '@/lib/settings';
 import { logger } from '@/lib/logger';
+
+// Extraction, chunking and embedding run after the response (see `after` below),
+// so this budget covers that background work, not just the upload itself.
+export const maxDuration = 60;
 
 export async function POST(request: NextRequest) {
   // Service-role client is created per-request (never at module scope) so
@@ -151,9 +156,17 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to create source record' }, { status: 500 });
     }
 
-    // Process file asynchronously (extract text, chunk, embed)
-    extractAndStoreSource(sourceMaterial.id, buffer, mimeType).catch((error) => {
-      logger.error('Background processing error:', error);
+    // Extraction, chunking and embedding outlive this response. Registering the
+    // work with `after` keeps the invocation alive until it settles; a bare
+    // floating promise can be frozen the moment the 201 is written on a
+    // serverless host, which left materials stuck at `processing_status:
+    // 'pending'` until something swept them.
+    after(async () => {
+      try {
+        await extractAndStoreSource(sourceMaterial.id, buffer, mimeType);
+      } catch (error) {
+        logger.error('Background processing error:', error);
+      }
     });
 
     return NextResponse.json({
@@ -167,10 +180,6 @@ export async function POST(request: NextRequest) {
       },
     }, { status: 201 });
   } catch (error) {
-    logger.error('Source upload error:', error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Internal server error' },
-      { status: 500 }
-    );
+    return NextResponse.json(toInternalError(error, 'Source upload'), { status: 500 });
   }
 }
