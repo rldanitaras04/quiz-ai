@@ -860,51 +860,76 @@ async function testScopeSecurity() {
 
 async function testRealtime() {
   const { ids } = created;
-  const outcome = await new Promise((resolve) => {
-    let settle;
-    const timeout = setTimeout(() => settle({ reason: 'timeout' }), 15_000);
-    settle = (value) => {
-      clearTimeout(timeout);
-      resolve(value);
-    };
 
-    const channel = admin.channel(`e2e-exam-${TAG}`);
-    channel
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'exam_events',
-          filter: `deployment_id=eq.${ids.deployment}`,
-        },
-        (payload) => settle({ delivered: payload })
-      )
-      .subscribe((status, err) => {
-        if (status === 'SUBSCRIBED') {
-          admin
-            .from('exam_events')
-            .insert({
-              attempt_id: ids.attemptA,
-              student_id: created.studentA.id,
-              deployment_id: ids.deployment,
-              event_type: 'page_reloaded',
-              severity: 'warning',
-            })
-            .then(({ error }) => {
-              if (error) settle({ insertError: error.message });
-            });
-          return;
-        }
-        if (status === 'TIMED_OUT' || status === 'CLOSED') {
-          settle({ status });
-          return;
-        }
-        if (status === 'CHANNEL_ERROR') {
-          settle({ status, err });
-        }
-      });
-  });
+  /**
+   * One subscribe → insert → deliver window.
+   *
+   * `SUBSCRIBED` only means the socket joined the channel; Realtime still has
+   * to register the postgres_changes listener and warm its schema cache for the
+   * table, and inserting straight from that callback races both. So keep
+   * poking the table on an interval until the listener is actually live — a
+   * cold stack simply delivers a later row. Only a publication that never
+   * delivers fails this check.
+   */
+  const attempt = (n) =>
+    new Promise((resolve) => {
+      let done = false;
+      let poke = null;
+
+      const channel = admin.channel(`e2e-exam-${TAG}-${n}`);
+      const finish = (value) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timeout);
+        clearInterval(poke);
+        admin.removeChannel(channel).catch(() => {});
+        resolve(value);
+      };
+      const timeout = setTimeout(() => finish({ reason: 'timeout' }), 25_000);
+
+      const insertRow = () =>
+        admin
+          .from('exam_events')
+          .insert({
+            attempt_id: ids.attemptA,
+            student_id: created.studentA.id,
+            deployment_id: ids.deployment,
+            event_type: 'page_reloaded',
+            severity: 'warning',
+          })
+          .then(({ error }) => {
+            if (error) finish({ insertError: error.message });
+          });
+
+      channel
+        .on(
+          'postgres_changes',
+          {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'exam_events',
+            filter: `deployment_id=eq.${ids.deployment}`,
+          },
+          (payload) => finish({ delivered: payload })
+        )
+        .subscribe((status, err) => {
+          if (status === 'SUBSCRIBED') {
+            insertRow();
+            poke = setInterval(() => {
+              if (!done) insertRow();
+            }, 5000);
+            return;
+          }
+          if (status === 'TIMED_OUT' || status === 'CLOSED' || status === 'CHANNEL_ERROR') {
+            finish({ status, err });
+          }
+        });
+    });
+
+  let outcome = await attempt(1);
+  // A cold stack can miss the first window entirely — retry once with a fresh
+  // channel before calling it a failure.
+  if (!outcome.delivered && !outcome.insertError) outcome = await attempt(2);
 
   const detail = outcome.delivered
     ? `event=${outcome.delivered.new?.event_type}`
@@ -912,7 +937,7 @@ async function testRealtime() {
       ? `insert error: ${outcome.insertError}`
       : outcome.status
         ? `channel ${outcome.status}${outcome.err ? `: ${outcome.err}` : ''}`
-        : 'no event within 15s';
+        : 'no event within 2 × 25s attempts';
   check(
     'exam_events realtime (publication) delivers inserts',
     Boolean(outcome.delivered),

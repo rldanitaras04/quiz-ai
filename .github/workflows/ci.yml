@@ -172,11 +172,32 @@ jobs:
       - name: Build
         run: pnpm run build
 
+      # Each suite's output is tee'd to /tmp so the annotation step below can
+      # name the checks that failed: the raw job logs are auth-gated, and a red
+      # run should say what broke on the run itself. `set -o pipefail` preserves
+      # the suite's exit code — the default shell does not set it, so a bare
+      # `pnpm … | tee` would report success whenever tee succeeds.
       - name: E2E — enrollment & identity verification
-        run: pnpm run test:e2e
+        run: |
+          set -o pipefail
+          pnpm run test:e2e 2>&1 | tee /tmp/e2e-enrollment.log
 
       - name: E2E — exam integrity
-        run: pnpm run test:e2e:exam
+        run: |
+          set -o pipefail
+          pnpm run test:e2e:exam 2>&1 | tee /tmp/e2e-exam.log
 
       - name: E2E — scheduled maintenance sweep
-        run: pnpm run test:e2e:sweep
+        run: |
+          set -o pipefail
+          pnpm run test:e2e:sweep 2>&1 | tee /tmp/e2e-sweep.log
+
+      - name: Annotate failing e2e checks
+        if: failure()
+        run: |
+          for log in /tmp/e2e-*.log; do
+            [ -f "$log" ] || continue
+            while IFS= read -r line; do
+              echo "::error::${line//%/%25}"
+            done < <(grep -E '^(FAIL|RUN ERROR)' "$log" || true)
+          done
