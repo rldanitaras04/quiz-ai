@@ -42,6 +42,23 @@ function check(name, ok, detail = '') {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? ` — ${detail}` : ''}`);
 }
 
+// T31-T33 call a REAL AI provider. Without a key the server refuses the call
+// ("No AI provider configured") and the assertions that depend on its output
+// cannot hold — that is an environment gap, not a regression, so those checks
+// SKIP instead of failing. CI supplies the key through secrets.GROQ_API_KEY to
+// get the real coverage; a run without one still reports the other checks.
+const aiConfigured = Boolean(process.env.GROQ_API_KEY || process.env.OPENAI_API_KEY);
+const AI_SKIPPED = 'no GROQ_API_KEY/OPENAI_API_KEY in this environment';
+
+function skip(name, detail = AI_SKIPPED) {
+  results.push({ name, ok: true, skipped: true, detail });
+  console.log(`SKIP  ${name}${detail ? ` — ${detail}` : ''}`);
+}
+
+function checkAI(name, ok, detail = '') {
+  return aiConfigured ? check(name, ok, detail) : skip(name);
+}
+
 // ---------------------------------------------------------------------------
 // Server-action manifest
 // ---------------------------------------------------------------------------
@@ -1767,7 +1784,7 @@ async function run() {
       args: [resp.wrong],
     });
     const recError = actionError(rec.text);
-    check('T31 faculty gets an AI recommendation (real provider call)',
+    checkAI('T31 faculty gets an AI recommendation (real provider call)',
       /"success"\s*:\s*true/.test(rec.text),
       recError ?? `status=${rec.status} text=${rec.text.slice(0, 200)}`);
 
@@ -1778,7 +1795,7 @@ async function run() {
       .single();
     if (recRow.error) throw new Error(`T31 read: ${recRow.error.message}`);
     const ai = recRow.data.scoring_metadata?.ai ?? null;
-    check('T31 recommendation stored as advisory metadata — score untouched',
+    checkAI('T31 recommendation stored as advisory metadata — score untouched',
       recRow.data.earned_points === 0 &&
         recRow.data.scoring_status === 'auto_scored' &&
         ai !== null &&
@@ -1803,7 +1820,7 @@ async function run() {
     const suggestedInText = rec.text.match(/"suggestedPoints"\s*:\s*(null|\d+)/)?.[1] ?? null;
     const expectedSuggested =
       ai?.verdict === 'correct' ? '1' : ai?.verdict === 'incorrect' ? '0' : 'null';
-    check('T31 response verdict matches the stored note and suggested points',
+    checkAI('T31 response verdict matches the stored note and suggested points',
       verdictInText !== null && verdictInText === ai?.verdict && suggestedInText === expectedSuggested,
       `text=${verdictInText} db=${ai?.verdict} suggested=${suggestedInText} expected=${expectedSuggested}`);
 
@@ -1813,7 +1830,7 @@ async function run() {
       .select('id, status, provider, model')
       .eq('user_id', fx.facultyId)
       .eq('operation', 'score_recommendation');
-    check('T31 recommendation is logged once in ai_usage_logs as success',
+    checkAI('T31 recommendation is logged once in ai_usage_logs as success',
       (usageRows ?? []).length === 1 && usageRows[0].status === 'success',
       `count=${usageRows?.length ?? 0} status=${usageRows?.[0]?.status} provider=${usageRows?.[0]?.provider}`);
 
@@ -1860,7 +1877,7 @@ async function run() {
       args: [tosArgs],
       label: 'T32 faculty generateAssessmentTOS',
     });
-    check('T32 faculty gets a TOS proposal (real provider call)',
+    checkAI('T32 faculty gets a TOS proposal (real provider call)',
       actionSucceeded(tosGen.text),
       actionError(tosGen.text) ?? `status=${tosGen.status} text=${tosGen.text.slice(0, 200)}`);
 
@@ -1883,7 +1900,7 @@ async function run() {
           Number.isInteger(r.count) &&
           r.count > 0
       );
-    check('T32 proposal rows are usable (allowed topics, enums, positive counts)',
+    checkAI('T32 proposal rows are usable (allowed topics, enums, positive counts)',
       rowsUsable && typeof tosValidation === 'object' && tosValidation !== null,
       `rows=${JSON.stringify(tosRows)?.slice(0, 300)} validation=${JSON.stringify(tosValidation)}`);
 
@@ -1892,7 +1909,7 @@ async function run() {
       .select('id, status, provider')
       .eq('user_id', fx.facultyId)
       .eq('operation', 'generate_tos');
-    check('T32 TOS generation is logged once in ai_usage_logs as success',
+    checkAI('T32 TOS generation is logged once in ai_usage_logs as success',
       (tosUsage.data ?? []).length === 1 && tosUsage.data[0].status === 'success',
       `count=${tosUsage.data?.length ?? 0} status=${tosUsage.data?.[0]?.status} provider=${tosUsage.data?.[0]?.provider}`);
 
@@ -2092,7 +2109,7 @@ async function run() {
           p.fields !== null &&
           typeof p.rationale === 'string'
       );
-    check('T33 faculty gets structured proposals (real provider call)',
+    checkAI('T33 faculty gets structured proposals (real provider call)',
       actionSucceeded(proposeRes.text) && proposalsUsable && Array.isArray(droppedProposals),
       `err=${actionError(proposeRes.text) ?? '-'} proposals=${JSON.stringify(proposals)?.slice(0, 400)} dropped=${JSON.stringify(droppedProposals)?.slice(0, 200)}`);
 
@@ -2101,7 +2118,7 @@ async function run() {
       .select('id, status, provider')
       .eq('user_id', fx.facultyId)
       .eq('operation', 'propose_modification');
-    check('T33 proposal is logged once in ai_usage_logs as success',
+    checkAI('T33 proposal is logged once in ai_usage_logs as success',
       (proposeUsage.data ?? []).length === 1 && proposeUsage.data[0].status === 'success',
       `count=${proposeUsage.data?.length ?? 0} status=${proposeUsage.data?.[0]?.status} provider=${proposeUsage.data?.[0]?.provider}`);
 
@@ -2761,7 +2778,13 @@ try {
   }
 }
 
-console.log(`\n${results.filter((r) => r.ok).length}/${results.length} checks passed.`);
+const skipped = results.filter((r) => r.skipped).length;
+const passed = results.filter((r) => r.ok && !r.skipped).length;
+console.log(
+  `\n${passed}/${results.length - skipped} checks passed` +
+    (skipped ? ` · ${skipped} skipped (${AI_SKIPPED})` : '') +
+    '.'
+);
 if (failures > 0) {
   console.error(`${failures} FAILED`);
   exitCode = 1;
